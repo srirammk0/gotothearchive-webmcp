@@ -295,11 +295,9 @@ export function Workbench() {
           </div>
         </details>
 
-        {/* Anchored review controls — never optimistic. Primary decision leads,
-            reject sits at the trailing edge with equal button weight so it
-            reads as a fourth option, not an alarm next to a form. */}
-        <div className="sticky bottom-4 flex flex-col gap-2 rounded-[var(--radius-md)] border border-line bg-surface/90 px-3 py-2.5 backdrop-blur-xl">
-          <div className="flex flex-wrap items-center gap-2">
+        {/* A compact decision strip keeps the artifact—not review chrome—primary. */}
+        <div className="sticky bottom-4 z-10 flex w-fit max-w-full self-center rounded-[var(--radius-md)] border border-line bg-surface/90 p-1.5 shadow-lg shadow-black/5 backdrop-blur-xl">
+          <div className="flex flex-wrap items-center justify-center gap-1.5">
             {REVIEW_DECISIONS.map((d) => {
               const decided = STATE_DECISION[version.state] === d;
               return (
@@ -308,7 +306,6 @@ export function Workbench() {
                   variant={decided ? "primary" : d === "reject" ? "danger" : "secondary"}
                   disabled={decisionPending}
                   onClick={() => void handleDecide(d)}
-                  className={d === "reject" ? "ml-auto" : undefined}
                 >
                   {decided ? <Icon name="check" size={13} /> : null}
                   {DECISION_LABEL[d]}
@@ -318,12 +315,8 @@ export function Workbench() {
             {decisionPending ? <Spinner label="Recording…" /> : null}
           </div>
           {decisionError ? (
-            <span role="alert" className="text-[length:var(--text-meta)] text-bad">
+            <span role="alert" className="sr-only text-[length:var(--text-meta)] text-bad">
               {decisionError}
-            </span>
-          ) : STATE_DECISION[version.state] ? (
-            <span className="text-[length:var(--text-meta)] text-good">
-              {version.state.replace(/_/g, " ")} — v{version.version_no}
             </span>
           ) : null}
         </div>
