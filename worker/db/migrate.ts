@@ -16,10 +16,20 @@ function addColumn(sql: SqlStorage, table: string, column: string, decl: string)
 }
 
 export function migrate(sql: SqlStorage): void {
-  // taste_signals.supersedes — bitemporal correction pointer (added 2026-08-31).
-  addColumn(sql, "taste_signals", "supersedes", "TEXT");
-
-  backfillUsage(sql);
+  // A migration failure must NEVER stop the DO from booting — a half-applied
+  // schema is recoverable, a DO that throws in blockConcurrencyWhile looks
+  // exactly like total data loss. Each step is isolated and best-effort.
+  try {
+    // taste_signals.supersedes — bitemporal correction pointer (2026-08-31).
+    addColumn(sql, "taste_signals", "supersedes", "TEXT");
+  } catch (e) {
+    console.error("migrate: addColumn supersedes failed", e);
+  }
+  try {
+    backfillUsage(sql);
+  } catch (e) {
+    console.error("migrate: backfillUsage failed", e);
+  }
 }
 
 /**
@@ -35,7 +45,7 @@ export function migrate(sql: SqlStorage): void {
  *                   many accesses, all at the same ms) plus agent artifact
  *                   versions. An undercount (taste/scope reads write nothing),
  *                   but far better than 0.
- * ai_ops isn't reconstructable — nothing logged it, and nothing uses it.
+ * (uploads and artifacts are exact; agent_calls is an estimate.)
  *
  * Reconciled with `used = MAX(existing, reconstructed)` rather than left alone:
  * uploads/artifacts counts ARE the true totals, so if a member's live counter is

@@ -31,8 +31,6 @@ export const QUOTA = {
   uploads: 60,
   /** record_artifact tool — a new artifact version row. */
   artifacts: 60,
-  /** Reserved for any future Workers AI use. Nothing consumes it — retrieval is pure SQLite. */
-  ai_ops: 40,
 } as const;
 
 export type QuotaMetric = keyof typeof QUOTA;

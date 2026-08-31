@@ -49,27 +49,41 @@ function Heatmap({
 
   const fmt = new Intl.DateTimeFormat(undefined, { weekday: "short", month: "short", day: "numeric" });
   const tip = (cell: { key: string; n: number; future: boolean }) => {
-    if (cell.future) return "";
     const label = fmt.format(new Date(`${cell.key}T00:00:00`));
     return `${label} — ${cell.n} ${unit}${cell.n === 1 ? "" : "s"}`;
   };
 
+  const [hover, setHover] = useState<{ text: string; x: number; y: number } | null>(null);
+
   return (
-    <div className="overflow-x-auto pb-1">
-      <div className="flex gap-[3px]">
+    <div className="relative overflow-x-auto pb-1">
+      <div className="flex gap-[3px]" onMouseLeave={() => setHover(null)}>
         {cols.map((col, w) => (
           <div key={w} className="flex flex-col gap-[3px]">
             {col.map((cell) => (
               <div
                 key={cell.key}
-                title={tip(cell)}
                 className="h-3 w-3 rounded-[2px]"
                 style={{ background: shade(cell.n, cell.future) }}
+                onMouseEnter={(e) =>
+                  !cell.future && setHover({ text: tip(cell), x: e.clientX, y: e.clientY })
+                }
+                onMouseMove={(e) =>
+                  !cell.future && setHover({ text: tip(cell), x: e.clientX, y: e.clientY })
+                }
               />
             ))}
           </div>
         ))}
       </div>
+      {hover ? (
+        <span
+          className="pointer-events-none fixed z-50 -translate-x-1/2 -translate-y-full whitespace-nowrap rounded-[var(--radius-sm)] bg-text px-2 py-1 text-[length:var(--text-micro)] text-canvas shadow-sm"
+          style={{ left: hover.x, top: hover.y - 8 }}
+        >
+          {hover.text}
+        </span>
+      ) : null}
     </div>
   );
 }
@@ -141,7 +155,6 @@ const QUOTA_LABEL: Record<string, string> = {
   agent_calls: "Agent tool calls",
   uploads: "File uploads",
   artifacts: "Artifacts generated",
-  ai_ops: "AI operations",
 };
 
 const OUTCOME_TONE: Record<string, string> = {

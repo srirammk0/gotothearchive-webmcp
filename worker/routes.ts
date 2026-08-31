@@ -166,9 +166,10 @@ async function handleBootstrap(request: Request, env: Env, q: Queries, humanId: 
       await attachSeedAssets(env, q, existing.id, seedIds);
     }
 
-    if (q.listArtifacts(existing.id).length > 0 && q.recentTasteEvents(existing.id, 1).length === 0) {
-      seedActivity(q, existing.id, Date.now());
-    }
+    // Both self-guard (moodboard fingerprint / per-client key), so they are safe
+    // to call every bootstrap and will backfill a space seeded by an earlier build.
+    seedActivity(q, existing.id, Date.now());
+    topUpSeedAgents(q, existing.id, Date.now());
 
     return json({ ok: true, space: existing, regions: q.listRegions(existing.id) });
   }
@@ -446,9 +447,13 @@ const DAY = 86_400_000;
  * applied, and accepted over time. Idempotent — guarded by its own emptiness
  * check at the call sites — so it can backfill spaces from earlier builds.
  */
+const MOODBOARD_TITLE = "Atlas rebrand — moodboard";
+
 function seedActivity(q: Queries, spaceId: string, now: number): void {
   const artifacts = q.listArtifacts(spaceId);
-  if (artifacts.length === 0) return;
+  // Self-guard: the seeded moodboard is this function's fingerprint. If it's
+  // there, the activity trail already ran — do not double up.
+  if (artifacts.length === 0 || artifacts.some((a) => a.title === MOODBOARD_TITLE)) return;
   const primary = artifacts[0];
   const taskId = primary.task_id;
   const owner = primary.space_id;
@@ -456,21 +461,19 @@ function seedActivity(q: Queries, spaceId: string, now: number): void {
   const chatgptSession = v1?.agent_session_id ?? null;
   const signals = q.listTasteSignals(spaceId);
 
-  // Three more clients have worked this task. Real sessions with declared
-  // identities (attribution only) so the Stats page can break contributions
-  // down by product — and so all four brand logos have data to render.
+  // One more client (Claude) has worked this task. A real session with a
+  // declared identity (attribution only) so the Stats page can break
+  // contributions down by product.
   const mkSession = (client: string, provider: string, model: string, ago: number) => {
     const id = crypto.randomUUID();
     q.insertAgentSession({ id, human_id: owner, task_id: taskId, declared: { provider, client, model }, created_at: now - ago * DAY });
     return id;
   };
   const claudeSession = mkSession("Claude", "anthropic", "claude-sonnet-4", 15);
-  const cursorSession = mkSession("Cursor", "anthropic", "claude-sonnet-4", 8);
-  const copilotSession = mkSession("GitHub Copilot", "openai", "gpt-4o", 6);
-  const sessions = [chatgptSession, claudeSession, cursorSession, copilotSession] as const;
+  const sessions = [chatgptSession, claudeSession] as const;
 
   // 1) Agent activity trail over the last three weeks. Column 4 picks the client.
-  const trail: [number, string, string | null, 0 | 1 | 2 | 3][] = [
+  const trail: [number, string, string | null, 0 | 1][] = [
     [21, "started task", null, 0],
     [21, "registered tools", "webmcp", 0],
     [20, "retrieved context for task", "get_context_for_task", 0],
@@ -479,19 +482,19 @@ function seedActivity(q: Queries, spaceId: string, now: number): void {
     [18, "read reference", "get_context_for_task", 0],
     [18, "applied taste signal", "get_taste_for_task", 0],
     [17, "generated draft v1", "record_artifact", 0],
-    [16, "inspected relationships", "inspect_relationships", 3],
+    [16, "inspected relationships", "inspect_relationships", 1],
     [15, "retrieved context for task", "get_context_for_task", 1],
     [14, "read review notes", "record_feedback", 1],
     [13, "applied taste signal", "get_taste_for_task", 1],
     [12, "generated draft v2", "record_artifact", 1],
-    [11, "searched archive", "get_context_for_task", 3],
-    [10, "applied taste signal", "get_taste_for_task", 3],
+    [11, "searched archive", "get_context_for_task", 0],
+    [10, "applied taste signal", "get_taste_for_task", 1],
     [9, "searched archive", "get_context_for_task", 1],
-    [7, "read reference", "get_context_for_task", 2],
-    [5, "proposed a connection", "propose_context_change", 3],
-    [4, "generated moodboard", "record_artifact", 2],
-    [2, "applied taste signal", "get_taste_for_task", 2],
-    [1, "read review notes", "record_feedback", 2],
+    [7, "read reference", "get_context_for_task", 0],
+    [5, "proposed a connection", "propose_context_change", 1],
+    [4, "generated moodboard", "record_artifact", 1],
+    [2, "applied taste signal", "get_taste_for_task", 1],
+    [1, "read review notes", "record_feedback", 1],
   ];
   for (const [ago, operation, tool, who] of trail) {
     q.insertAuditEvent({
@@ -515,7 +518,7 @@ function seedActivity(q: Queries, spaceId: string, now: number): void {
     space_id: spaceId,
     task_id: taskId,
     kind: "visual_brief",
-    title: "Atlas rebrand — moodboard",
+    title: MOODBOARD_TITLE,
     created_at: now - 5 * DAY,
   });
   const moodV1 = crypto.randomUUID();
@@ -555,7 +558,7 @@ function seedActivity(q: Queries, spaceId: string, now: number): void {
 <p style="font-size:12px;letter-spacing:.16em;text-transform:uppercase;color:#8a8071;margin:0 0 18px">Moodboard · v2</p>
 <div style="aspect-ratio:16/10;background:#c96f4a;border-radius:10px"></div>
 <p style="margin:18px 0 0;font-size:14px">One image carries it. Everything else is type and space.</p></div>`,
-    agent_session_id: cursorSession,
+    agent_session_id: claudeSession,
     state: "ready_for_review",
     created_at: now - 2 * DAY,
   });
@@ -591,8 +594,7 @@ function seedActivity(q: Queries, spaceId: string, now: number): void {
     ev(primarySignal.id, "proposed", "system", primarySignal.created_at, { detail: "Derived from a review note" });
     ev(primarySignal.id, "applied", "agent", now - 2 * DAY, {
       detail: "Shaped the moodboard layout",
-      version_id: moodV2,
-      session: cursorSession,
+      version_id: moodV2, session: claudeSession,
     });
   }
 
@@ -616,8 +618,8 @@ function seedActivity(q: Queries, spaceId: string, now: number): void {
   if (v1) ev(s2, "applied", "agent", now - 17 * DAY, { detail: "Set the headline face in v1", version_id: v1.id, session: chatgptSession });
   ev(s2, "applied", "agent", now - 13 * DAY, { detail: "Kept the type system in v2", version_id: null, session: claudeSession });
   ev(s2, "accepted", "human", now - 16 * DAY);
-  ev(s2, "applied", "agent", now - 1 * DAY, { detail: "Reused on the moodboard", version_id: moodV2, session: cursorSession });
-  ev(s2, "applied", "agent", now - 10 * DAY, { detail: "Checked headline type before editing", version_id: null, session: copilotSession });
+  ev(s2, "applied", "agent", now - 1 * DAY, { detail: "Reused on the moodboard", version_id: moodV2, session: claudeSession });
+  ev(s2, "applied", "agent", now - 10 * DAY, { detail: "Checked headline type before editing", version_id: null, session: chatgptSession });
 
   // A human-created link + an agent-proposed one, so the graph and its review
   // queue aren't empty on a fresh space.
@@ -642,14 +644,14 @@ function seedActivity(q: Queries, spaceId: string, now: number): void {
     }
   };
   link("terracotta", "serif", "approved", owner);
-  link("serif", "onboarding", "proposed", `agent:${copilotSession}`);
+  link("serif", "onboarding", "proposed", `agent:${claudeSession}`);
 }
 
 /**
- * Adds any of the four demo clients (ChatGPT / Claude / Cursor / Copilot) that
- * are missing from a space seeded before multi-agent support, each with a small
- * activity trail and one taste application. Idempotent — keyed on the declared
- * client name, so it does nothing once every client is present.
+ * Adds either demo client (ChatGPT / Claude) that is missing from a space
+ * seeded before multi-agent support, each with a small activity trail and one
+ * taste application. Idempotent — keyed on the declared client name, so it does
+ * nothing once both are present.
  */
 function topUpSeedAgents(q: Queries, spaceId: string, now: number): void {
   const artifacts = q.listArtifacts(spaceId);
@@ -664,8 +666,6 @@ function topUpSeedAgents(q: Queries, spaceId: string, now: number): void {
   const wanted: { client: string; provider: string; model: string; ago: number }[] = [
     { client: "chatgpt-desktop", provider: "openai", model: "gpt-5", ago: 21 },
     { client: "Claude", provider: "anthropic", model: "claude-sonnet-4", ago: 15 },
-    { client: "Cursor", provider: "anthropic", model: "claude-sonnet-4", ago: 8 },
-    { client: "GitHub Copilot", provider: "openai", model: "gpt-4o", ago: 6 },
   ];
 
   for (const w of wanted) {
@@ -1455,7 +1455,7 @@ const sortedRows = (m: Record<string, number>) =>
 /** "chatgpt-desktop" → "ChatGPT", "claude-code" → "Claude", etc. */
 function prettyClient(name: string): string {
   const base = name.replace(/[-_](desktop|cli|code|web|app)$/i, "").replace(/[-_]/g, " ").trim();
-  const known: Record<string, string> = { chatgpt: "ChatGPT", claude: "Claude", cursor: "Cursor", copilot: "Copilot" };
+  const known: Record<string, string> = { chatgpt: "ChatGPT", claude: "Claude" };
   return known[base.toLowerCase()] ?? base.replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
