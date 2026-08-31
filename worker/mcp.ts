@@ -276,6 +276,44 @@ export async function handleToolCall(
         created_at: now,
       });
 
+      // The agent declares which items shaped the work. Every claim is re-checked
+      // against the regions it may actually reach.
+      //
+      // An unchecked claim would be a leak: citing a Personal item would write an
+      // influence row, and the Workbench would then render that item's title and
+      // thumbnail in "Used these references" — disclosing private material the
+      // agent was never allowed to see. Claims that do not survive the check are
+      // dropped and recorded as denials rather than silently ignored.
+      const claimed = Array.isArray(input.used_item_ids)
+        ? input.used_item_ids.filter((v): v is string => typeof v === "string")
+        : [];
+      const reachable = authorizedRegionIds(q, task.id, now);
+      for (const itemId of claimed) {
+        const item = q.getItem(itemId);
+        if (!item || !reachable.has(item.region_id)) {
+          writeDenial(
+            q,
+            {
+              taskId: task.id,
+              agentSessionId: session.id,
+              toolName: body.tool,
+              requested: { claimed_influence: itemId },
+              reason: DENIAL_REASONS.NO_GRANT,
+            },
+            now,
+          );
+          continue;
+        }
+        q.insertInfluence({
+          id: crypto.randomUUID(),
+          version_id: versionId,
+          item_id: itemId,
+          role: "reference",
+          strength: 1,
+          note: null,
+        });
+      }
+
       return { ok: true, result: { artifact_id: artifactId, version_id: versionId } };
     }
 

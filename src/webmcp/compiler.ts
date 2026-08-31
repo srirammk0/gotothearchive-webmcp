@@ -141,8 +141,24 @@ export function compile(input: CapabilityInput): ToolSpec[] {
   push("propose", (slugs) => ({
     name: "record_artifact",
     description:
-      "Submit a new artifact version for human review in an accessible region. It does not become canonical until a person approves it.",
-    inputSchema: regionSchema(slugs),
+      "Submit a new artifact version for human review in an accessible region. It does not become canonical until a person approves it. List the items that shaped the work in used_item_ids so the person reviewing can see what informed it.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        region: { type: "string", enum: slugs },
+        title: { type: "string" },
+        content_html: { type: "string" },
+        used_item_ids: {
+          type: "array",
+          items: { type: "string" },
+          description:
+            "Ids of the context items that actually shaped this artifact. Each is verified against your current access; unreachable items are dropped.",
+        },
+        artifact_id: { type: "string" },
+        parent_version_id: { type: "string" },
+      },
+      required: ["region", "title", "content_html"],
+    },
     why: `You can suggest changes on: ${slugs.join(", ")}.`,
   }));
 
