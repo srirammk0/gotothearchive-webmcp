@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
-import { GRANT_GLYPH, GRANT_LABEL, GRANT_LEVELS, type GrantLevel, type Region } from "@shared/contract";
+import { GRANT_LABEL, GRANT_LEVELS, type GrantLevel, type Region } from "@shared/contract";
 import { getCapabilities, getLens, setGrant } from "../api/client";
 import { useCapabilities } from "../webmcp/useCapabilities";
 import { isWebMcpAvailable } from "../webmcp/registrar";
 import { Disclosure } from "./primitives/Disclosure";
 import { HairlineRule } from "./primitives/HairlineRule";
 import { Spinner } from "./primitives/Spinner";
+import { GrantIcon } from "./primitives/GrantIcon";
 
 function nextLevel(level: GrantLevel): GrantLevel {
   const i = GRANT_LEVELS.indexOf(level);
@@ -101,43 +102,48 @@ function LiveAgentAccess({ taskId, regions }: { taskId: string; regions: Region[
   const expiryNote = "For this task · expires when the task ends";
 
   return (
-    <aside className="flex flex-col gap-4 font-sans" aria-label="Agent access">
-      <p className="text-[length:var(--text-micro)] uppercase tracking-[0.14em] text-stone">Agent Access</p>
+    <aside className="flex flex-col gap-5 font-sans" aria-label="Agent access">
+      <p className="font-serif text-[length:var(--text-section)] text-ink">Agent Access</p>
 
       {rows === null ? (
         <Spinner label="Loading access…" />
       ) : (
         <>
-          <p className="text-[length:var(--text-body)] text-ink">This agent can currently use</p>
-          <ul className="flex flex-col gap-2">
-            {rows.map((row) => (
-              <li key={row.regionId} className="flex flex-col gap-1">
-                <div className="flex items-center justify-between gap-3">
-                  <span className="text-[length:var(--text-body)] text-ink">
-                    {row.level === "none" ? "–" : "✓"} {row.label}
-                    <span className="text-stone"> — {GRANT_LABEL[row.level].toLowerCase()}</span>
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => void cycleLevel(row)}
-                    disabled={pending === row.regionId}
-                    aria-label={`${row.label}: ${GRANT_LABEL[row.level]}. Activate to change.`}
-                    className="shrink-0 rounded-[var(--radius-sm)] border border-hairline px-2 py-1 text-[length:var(--text-item)] hover:border-ink disabled:opacity-40"
-                    title={GRANT_LABEL[row.level]}
-                  >
-                    {GRANT_GLYPH[row.level]}
-                  </button>
-                </div>
-                {rowError?.regionId === row.regionId ? (
-                  <p role="alert" className="text-[length:var(--text-micro)] text-bad">
-                    {rowError.message}
-                  </p>
-                ) : null}
-              </li>
-            ))}
+          <p className="text-[length:var(--text-meta)] text-stone">This agent can currently use</p>
+          <ul className="flex flex-col">
+            {rows.map((row) => {
+              const isWrite = row.level === "write";
+              const isNone = row.level === "none";
+              return (
+                <li key={row.regionId} className="flex flex-col gap-1.5 border-t border-hairline py-3 first:border-t-0 first:pt-0">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-[length:var(--text-body)] text-ink">{row.label}</span>
+                    <button
+                      type="button"
+                      onClick={() => void cycleLevel(row)}
+                      disabled={pending === row.regionId}
+                      aria-label={`${row.label}: ${GRANT_LABEL[row.level]}. Activate to change.`}
+                      className={`inline-flex shrink-0 items-center gap-1.5 rounded-[var(--radius-sm)] px-2 py-1 text-[length:var(--text-meta)] transition-colors duration-[var(--duration-fast)] disabled:opacity-40 ${
+                        isWrite
+                          ? "text-accent hover:text-ink"
+                          : isNone
+                            ? "text-stone hover:text-ink"
+                            : "text-ink-soft hover:text-ink"
+                      }`}
+                    >
+                      <GrantIcon level={row.level} />
+                      {GRANT_LABEL[row.level]}
+                    </button>
+                  </div>
+                  {rowError?.regionId === row.regionId ? (
+                    <p role="alert" className="text-[length:var(--text-micro)] text-bad">
+                      {rowError.message}
+                    </p>
+                  ) : null}
+                </li>
+              );
+            })}
           </ul>
-
-          <HairlineRule />
 
           <p className="text-[length:var(--text-meta)] text-stone">{expiryNote}</p>
         </>

@@ -13,6 +13,16 @@ import { Disclosure } from "../ui/primitives/Disclosure";
 import { EmptyState } from "../ui/primitives/EmptyState";
 import { Spinner } from "../ui/primitives/Spinner";
 
+/**
+ * Dimensions are stored as snake_case enum values. Ordinary UI copy must never
+ * show an internal term, so they are humanized for display only — the stored
+ * values are unchanged, since retrieval and evidence depend on them.
+ */
+function dimensionLabel(dimension: string): string {
+  const words = dimension.replace(/_/g, " ");
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
 function confidenceWord(confidence: number): string {
   if (confidence >= 0.8) return "Strong";
   if (confidence >= 0.55) return "Moderate";
@@ -69,7 +79,9 @@ function SignalCard({
         <p className="font-serif text-[length:var(--text-item)] text-ink">{signal.statement}</p>
       )}
       <p className="font-sans text-[length:var(--text-meta)] text-stone">
-        {signal.dimensions.join(" · ")} · {signal.scope} · {confidenceWord(signal.confidence)} confidence
+        {signal.dimensions.map(dimensionLabel).join(" · ")}
+        <span className="px-2 text-hairline" aria-hidden="true">|</span>
+        {signal.scope === "personal" ? "Personal" : "Project"} · {confidenceWord(signal.confidence)} confidence
       </p>
 
       <Disclosure summary="Evidence" onOpen={loadEvidence}>

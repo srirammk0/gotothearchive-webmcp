@@ -30,12 +30,54 @@ function hasImage(item: ContextItem): boolean {
   return (item.type === "image" || item.type === "screenshot") && !!item.content_ref;
 }
 
-function RegionSection({ view, index }: { view: ArchiveRegionView; index: number }) {
-  const dominant = index === 0 ? view.items[0] : undefined;
-  const rest = dominant ? view.items.slice(1) : view.items;
+function itemDate(item: ContextItem): string {
+  return new Date(item.created_at).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+}
+
+/** Square thumbnail — a navigation aid, not a substitute for focused viewing. */
+function Thumb({ item }: { item: ContextItem }) {
+  if (hasImage(item)) {
+    return (
+      <img
+        src={blobUrl(item.content_ref as string)}
+        alt=""
+        className="h-[104px] w-[104px] shrink-0 rounded-[var(--radius-sm)] object-cover"
+      />
+    );
+  }
+  // Quiet rule instead of a repeated grey box — four text items in a row
+  // shouldn't all show the same "NOTE" mat.
+  return <span aria-hidden="true" className="h-[104px] w-[3px] shrink-0 rounded-full bg-hairline" />;
+}
+
+function IndexRow({ item }: { item: ContextItem }) {
+  return (
+    <li className="flex gap-5">
+      <Thumb item={item} />
+      <div className="flex min-w-0 flex-col gap-1.5 pt-0.5">
+        <p className="font-serif text-[length:var(--text-item)] leading-snug text-ink">{item.title}</p>
+        {item.semantic_text ? (
+          <p className="line-clamp-2 font-serif text-[length:var(--text-body)] italic text-ink-soft">
+            {item.semantic_text}
+          </p>
+        ) : null}
+        <p className="font-sans text-[length:var(--text-micro)] uppercase tracking-[0.1em] text-stone">
+          {typeMeta(item.type)}
+          {item.source_url ? ` · ${new URL(item.source_url).hostname}` : ""}
+        </p>
+      </div>
+    </li>
+  );
+}
+
+function RegionSection({ view }: { view: ArchiveRegionView }) {
+  // One item dominates every region — an image if the region has one (the
+  // reference's image-led feature), otherwise the first item as a pull quote.
+  const dominant = view.items.find(hasImage) ?? view.items[0];
+  const rest = dominant ? view.items.filter((i) => i.id !== dominant.id) : view.items;
 
   return (
-    <section className="flex flex-col gap-6">
+    <section className="flex flex-col gap-8">
       <div className="flex items-baseline justify-between">
         <h2 className="font-serif text-[length:var(--text-headline)] text-ink">{view.region.name}</h2>
         <span className="font-sans text-[length:var(--text-meta)] text-stone">
@@ -49,38 +91,36 @@ function RegionSection({ view, index }: { view: ArchiveRegionView; index: number
           body="Capture a note, link, image, or PDF and it will appear as part of this region's index."
         />
       ) : (
-        <div className="flex flex-col gap-8">
+        <div className="flex flex-col gap-10">
           {dominant ? (
-            <article className="flex flex-col gap-3">
+            <article className="flex flex-col gap-4">
               {hasImage(dominant) ? (
                 <img
                   src={blobUrl(dominant.content_ref as string)}
                   alt=""
-                  className="h-auto w-full max-w-2xl object-contain"
+                  className="h-auto max-h-[560px] w-full rounded-[var(--radius-sm)] bg-paper-raised object-contain"
                 />
-              ) : null}
-              <h3 className="font-serif text-[length:var(--text-section)] text-ink">{dominant.title}</h3>
-              <p className="font-sans text-[length:var(--text-meta)] text-stone">
-                {typeMeta(dominant.type)}
-                {dominant.source_url ? ` · ${new URL(dominant.source_url).hostname}` : ""}
-              </p>
+              ) : (
+                <div className="max-w-2xl border-l-2 border-hairline pl-5">
+                  <p className="font-serif text-[length:var(--text-section)] leading-snug text-ink">
+                    {dominant.semantic_text ?? dominant.title}
+                  </p>
+                </div>
+              )}
+              <div>
+                <h3 className="font-serif text-[length:var(--text-section)] text-ink">{dominant.title}</h3>
+                <p className="mt-1 font-sans text-[length:var(--text-meta)] text-stone">
+                  {typeMeta(dominant.type)} · {itemDate(dominant)}
+                  {dominant.source_url ? ` · ${new URL(dominant.source_url).hostname}` : ""}
+                </p>
+              </div>
             </article>
           ) : null}
 
           {rest.length > 0 ? (
-            <ul className="grid grid-cols-1 gap-x-8 gap-y-5 sm:grid-cols-2">
+            <ul className="grid grid-cols-1 gap-x-14 gap-y-8 lg:grid-cols-2">
               {rest.map((item) => (
-                <li key={item.id} className="flex flex-col gap-2 border-t border-hairline pt-3">
-                  {hasImage(item) ? (
-                    <img
-                      src={blobUrl(item.content_ref as string)}
-                      alt=""
-                      className="h-auto max-h-64 w-full object-contain"
-                    />
-                  ) : null}
-                  <p className="font-serif text-[length:var(--text-item)] text-ink">{item.title}</p>
-                  <p className="font-sans text-[length:var(--text-meta)] text-stone">{typeMeta(item.type)}</p>
-                </li>
+                <IndexRow key={item.id} item={item} />
               ))}
             </ul>
           ) : null}
@@ -201,7 +241,7 @@ export function Archive() {
         ) : (
           filteredRegions.map((view, i) => (
             <div key={view.region.id} className="flex flex-col gap-14">
-              <RegionSection view={view} index={i} />
+              <RegionSection view={view} />
               {i < filteredRegions.length - 1 ? <HairlineRule /> : null}
             </div>
           ))

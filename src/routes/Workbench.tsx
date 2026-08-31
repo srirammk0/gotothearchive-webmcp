@@ -164,7 +164,9 @@ export function Workbench() {
 
         <HairlineRule />
 
-        {/* Anchored review controls — never optimistic. */}
+        {/* Anchored review controls — never optimistic. Primary decision leads,
+            reject sits at the trailing edge with equal button weight so it
+            reads as a fourth option, not an alarm next to a form. */}
         <div className="flex flex-wrap items-center gap-3">
           {REVIEW_DECISIONS.map((d) => (
             <Button
@@ -172,37 +174,35 @@ export function Workbench() {
               variant={d === "approve" ? "primary" : d === "reject" ? "danger" : "secondary"}
               disabled={decisionPending}
               onClick={() => void handleDecide(d)}
+              className={d === "reject" ? "ml-auto" : undefined}
             >
               {DECISION_LABEL[d]}
             </Button>
           ))}
           {decisionPending ? <Spinner label="Recording…" /> : null}
           {decisionError ? (
-            <span role="alert" className="font-sans text-[length:var(--text-meta)] text-bad">
+            <span role="alert" className="w-full font-sans text-[length:var(--text-meta)] text-bad">
               {decisionError}
             </span>
           ) : null}
         </div>
       </div>
 
-      {/* Right rail: annotations + collapsible Agent Access */}
-      <div className="flex flex-col gap-10">
-        <AnnotationRail annotations={annotations} onAdd={(input) => void addAnnotation(input)} />
+      {/* Right rail: Agent Access first (it is the control this task most
+          needs close at hand), then annotations — separated by generous
+          space rather than another hairline, since AgentAccess already
+          opens with its own heading. */}
+      <div className="flex flex-col gap-14">
+        {/*
+          The live panel, not a mock. Archive and Workbench must never show
+          different permission state — two surfaces disagreeing about what
+          the agent may do is exactly the theater this product disproves.
+        */}
+        {task ? <AgentAccess taskId={task.id} regions={regions} /> : null}
 
         <HairlineRule />
 
-        {/* Agent Access is owned by another track — this slot passes through
-            the shared demo view models it already renders elsewhere. */}
-        <Disclosure summary="Agent Access" defaultOpen>
-          <div className="pt-2">
-            {/*
-              The live panel, not a mock. Archive and Workbench must never show
-              different permission state — two surfaces disagreeing about what
-              the agent may do is exactly the theater this product disproves.
-            */}
-            {task ? <AgentAccess taskId={task.id} regions={regions} /> : null}
-          </div>
-        </Disclosure>
+        <AnnotationRail annotations={annotations} onAdd={(input) => void addAnnotation(input)} />
       </div>
     </div>
   );
