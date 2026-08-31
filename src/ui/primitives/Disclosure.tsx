@@ -1,4 +1,5 @@
 import { useId, useState, type ReactNode } from "react";
+import { Icon } from "./Icon";
 
 export interface DisclosureProps {
   summary: ReactNode;
@@ -26,23 +27,22 @@ export function Disclosure({ summary, children, defaultOpen = false, className =
             return !o;
           });
         }}
-        className="flex w-full items-center justify-between gap-3 py-2 text-left font-sans text-[length:var(--text-meta)] text-ink-soft hover:text-ink"
+        className="flex w-full items-center justify-between gap-3 rounded-[var(--radius-sm)] py-2 text-left text-[length:var(--text-meta)] text-muted transition-colors duration-[var(--duration-fast)] hover:text-text"
       >
         <span>{summary}</span>
-        <span
-          aria-hidden="true"
-          className="text-stone transition-transform duration-[var(--duration-fast)]"
+        <Icon
+          name="chevronRight"
+          size={14}
+          className="shrink-0 text-faint transition-transform duration-[var(--duration-base)]"
           style={{ transform: open ? "rotate(90deg)" : "rotate(0deg)" }}
-        >
-          &rsaquo;
-        </span>
+        />
       </button>
       <div
         id={panelId}
-        className="grid overflow-hidden transition-[grid-template-rows] duration-[var(--duration-base)]"
-        style={{ gridTemplateRows: open ? "1fr" : "0fr" }}
+        className="grid transition-[grid-template-rows,opacity] duration-[var(--duration-base)]"
+        style={{ gridTemplateRows: open ? "1fr" : "0fr", opacity: open ? 1 : 0 }}
       >
-        <div className="min-h-0">{children}</div>
+        <div className="overflow-hidden">{children}</div>
       </div>
     </div>
   );

@@ -11,7 +11,9 @@ export default {
     }
 
     if (url.pathname.startsWith("/api/")) {
-      const id = env.SPACE.idFromName("guest");
+      // Named for the identity era, not the product: the guest-era instance
+      // held spaces owned by cookie ids that no longer resolve to anyone.
+      const id = env.SPACE.idFromName("clerk");
       return env.SPACE.get(id).fetch(request);
     }
 

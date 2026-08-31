@@ -59,6 +59,17 @@ CREATE TABLE IF NOT EXISTS edges (
 CREATE INDEX IF NOT EXISTS idx_edges_from ON edges(from_id);
 CREATE INDEX IF NOT EXISTS idx_edges_to ON edges(to_id);
 
+-- Free-text notes a human attaches to a single archived item ("block").
+CREATE TABLE IF NOT EXISTS item_notes (
+  id         TEXT PRIMARY KEY,
+  item_id    TEXT NOT NULL REFERENCES items(id),
+  space_id   TEXT NOT NULL REFERENCES spaces(id),
+  author_id  TEXT NOT NULL,
+  body       TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_item_notes_item ON item_notes(item_id);
+
 CREATE TABLE IF NOT EXISTS tasks (
   id           TEXT PRIMARY KEY,
   space_id     TEXT NOT NULL REFERENCES spaces(id),
@@ -196,6 +207,24 @@ CREATE TABLE IF NOT EXISTS taste_evidence (
   item_id       TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_evidence_signal ON taste_evidence(signal_id);
+
+-- The lifecycle and usage history of a taste signal: proposed / edited /
+-- accepted / rescoped / rejected / superseded, plus 'applied' rows recorded
+-- every time an agent draws on the signal while producing work.
+CREATE TABLE IF NOT EXISTS taste_events (
+  id               TEXT PRIMARY KEY,
+  signal_id        TEXT NOT NULL REFERENCES taste_signals(id),
+  kind             TEXT NOT NULL CHECK (kind IN
+                     ('proposed','edited','accepted','rescoped','rejected','superseded','applied')),
+  actor_type       TEXT NOT NULL CHECK (actor_type IN ('agent','human','system')),
+  actor_label      TEXT NOT NULL DEFAULT '',
+  agent_session_id TEXT,
+  detail           TEXT NOT NULL DEFAULT '',
+  version_id       TEXT,
+  at               INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_taste_events_signal ON taste_events(signal_id);
+CREATE INDEX IF NOT EXISTS idx_taste_events_at ON taste_events(at);
 
 CREATE TABLE IF NOT EXISTS audit_events (
   id               TEXT PRIMARY KEY,

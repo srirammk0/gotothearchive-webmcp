@@ -4,7 +4,6 @@ import { getCapabilities, getLens, setGrant } from "../api/client";
 import { useCapabilities } from "../webmcp/useCapabilities";
 import { isWebMcpAvailable } from "../webmcp/registrar";
 import { Disclosure } from "./primitives/Disclosure";
-import { HairlineRule } from "./primitives/HairlineRule";
 import { Spinner } from "./primitives/Spinner";
 import { GrantIcon } from "./primitives/GrantIcon";
 
@@ -102,33 +101,32 @@ function LiveAgentAccess({ taskId, regions }: { taskId: string; regions: Region[
   const expiryNote = "For this task · expires when the task ends";
 
   return (
-    <aside className="flex flex-col gap-5 font-sans" aria-label="Agent access">
-      <p className="font-serif text-[length:var(--text-section)] text-ink">Agent Access</p>
+    <aside
+      aria-label="Agent access"
+      className="flex h-fit flex-col gap-4 border-t border-line pt-4 lg:sticky lg:top-20"
+    >
+      <p className="text-[length:var(--text-section)] text-text">Agent Access</p>
 
       {rows === null ? (
         <Spinner label="Loading access…" />
       ) : (
         <>
-          <p className="text-[length:var(--text-meta)] text-stone">This agent can currently use</p>
+          <p className="text-[length:var(--text-micro)] text-faint">This agent can currently use</p>
           <ul className="flex flex-col">
             {rows.map((row) => {
               const isWrite = row.level === "write";
               const isNone = row.level === "none";
               return (
-                <li key={row.regionId} className="flex flex-col gap-1.5 border-t border-hairline py-3 first:border-t-0 first:pt-0">
-                  <div className="flex items-center justify-between gap-3">
-                    <span className="text-[length:var(--text-body)] text-ink">{row.label}</span>
+                <li key={row.regionId} className="flex flex-col gap-1.5">
+                  <div className="flex items-center justify-between gap-3 border-b border-line-soft py-2.5 last:border-b-0">
+                    <span className="text-[length:var(--text-body)] text-text">{row.label}</span>
                     <button
                       type="button"
                       onClick={() => void cycleLevel(row)}
                       disabled={pending === row.regionId}
                       aria-label={`${row.label}: ${GRANT_LABEL[row.level]}. Activate to change.`}
-                      className={`inline-flex shrink-0 items-center gap-1.5 rounded-[var(--radius-sm)] px-2 py-1 text-[length:var(--text-meta)] transition-colors duration-[var(--duration-fast)] disabled:opacity-40 ${
-                        isWrite
-                          ? "text-accent hover:text-ink"
-                          : isNone
-                            ? "text-stone hover:text-ink"
-                            : "text-ink-soft hover:text-ink"
+                      className={`inline-flex shrink-0 items-center gap-1.5 rounded-[var(--radius-sm)] px-2 py-1 text-[length:var(--text-meta)] transition-colors duration-[var(--duration-fast)] hover:bg-raised disabled:opacity-40 ${
+                        isWrite ? "text-accent" : isNone ? "text-faint hover:text-text" : "text-muted hover:text-text"
                       }`}
                     >
                       <GrantIcon level={row.level} />
@@ -136,7 +134,7 @@ function LiveAgentAccess({ taskId, regions }: { taskId: string; regions: Region[
                     </button>
                   </div>
                   {rowError?.regionId === row.regionId ? (
-                    <p role="alert" className="text-[length:var(--text-micro)] text-bad">
+                    <p role="alert" className="pb-2 text-[length:var(--text-micro)] text-bad">
                       {rowError.message}
                     </p>
                   ) : null}
@@ -145,59 +143,58 @@ function LiveAgentAccess({ taskId, regions }: { taskId: string; regions: Region[
             })}
           </ul>
 
-          <p className="text-[length:var(--text-meta)] text-stone">{expiryNote}</p>
+          <p className="text-[length:var(--text-micro)] text-faint">{expiryNote}</p>
         </>
       )}
 
-      <HairlineRule />
-      <Disclosure summary="Agent Lens">
-        <div className="flex flex-col gap-3 py-2 font-mono text-[length:var(--text-micro)] text-ink-soft">
-          <div>
-            {/*
-              Show the compiled tool surface, not just what the browser managed to
-              register. On a browser without WebMCP the registrar correctly no-ops,
-              and listing only registered tools would read as "this is broken"
-              rather than "your browser cannot see these yet".
-            */}
-            <p className="text-stone">
-              {webMcpAvailable ? "registered tools" : "tools this agent would see"}
-            </p>
-            <ul className="mt-1 flex flex-col gap-1">
-              {specs.map((t) => {
-                const scopedRegions = toolRegions(t.inputSchema);
-                return (
-                  <li key={t.name}>
-                    {t.name}
-                    {scopedRegions.length ? ` [${scopedRegions.join(", ")}]` : ""} — {t.why}
-                  </li>
-                );
-              })}
-              {specs.length === 0 ? <li>no tools — nothing is currently shared</li> : null}
-            </ul>
-            {!webMcpAvailable ? (
-              <p className="mt-2 not-italic text-stone">
-                This browser does not expose WebMCP, so nothing is registered here. Open in the
-                ChatGPT desktop browser, or enable chrome://flags/#enable-webmcp-testing, to let an
-                agent call these. Permission state is live either way.
-              </p>
-            ) : (
-              <p className="mt-2 text-stone">{registered.length} registered with the browser</p>
-            )}
-          </div>
+      <div className="border-t border-line-soft">
+        <Disclosure summary="Agent Lens">
+          <div className="flex flex-col gap-4 py-2 font-mono text-[length:var(--text-micro)] leading-relaxed text-muted">
+            <div>
+              {/*
+                Show the compiled tool surface, not just what the browser managed to
+                register. On a browser without WebMCP the registrar correctly no-ops,
+                and listing only registered tools would read as "this is broken"
+                rather than "your browser cannot see these yet".
+              */}
+              <p className="text-faint">{webMcpAvailable ? "registered tools" : "tools this agent would see"}</p>
+              <ul className="mt-1.5 flex flex-col gap-1">
+                {specs.map((t) => {
+                  const scopedRegions = toolRegions(t.inputSchema);
+                  return (
+                    <li key={t.name}>
+                      {t.name}
+                      {scopedRegions.length ? ` [${scopedRegions.join(", ")}]` : ""} — {t.why}
+                    </li>
+                  );
+                })}
+                {specs.length === 0 ? <li>no tools — nothing is currently shared</li> : null}
+              </ul>
+              {!webMcpAvailable ? (
+                <p className="mt-2 text-faint">
+                  This browser does not expose WebMCP, so nothing is registered here. Open in the
+                  ChatGPT desktop browser, or enable chrome://flags/#enable-webmcp-testing, to let an
+                  agent call these. Permission state is live either way.
+                </p>
+              ) : (
+                <p className="mt-2 text-faint">{registered.length} registered with the browser</p>
+              )}
+            </div>
 
-          <div>
-            <p className="text-stone">denied or stale calls</p>
-            <ul className="mt-1 flex flex-col gap-1">
-              {denials.map((d) => (
-                <li key={d.id} className="text-bad">
-                  {d.tool_name} — {d.reason}
-                </li>
-              ))}
-              {denials.length === 0 ? <li>none</li> : null}
-            </ul>
+            <div>
+              <p className="text-faint">denied or stale calls</p>
+              <ul className="mt-1.5 flex flex-col gap-1">
+                {denials.map((d) => (
+                  <li key={d.id} className="text-bad">
+                    {d.tool_name} — {d.reason}
+                  </li>
+                ))}
+                {denials.length === 0 ? <li>none</li> : null}
+              </ul>
+            </div>
           </div>
-        </div>
-      </Disclosure>
+        </Disclosure>
+      </div>
     </aside>
   );
 }

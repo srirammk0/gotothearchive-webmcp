@@ -21,6 +21,8 @@ import type {
   DecisionRecord,
   TasteSignal,
   TasteEvidence,
+  TasteEvent,
+  ItemNote,
   AuditEvent,
   GrantLevel,
   AuthorityClass,
@@ -201,6 +203,27 @@ interface TasteEvidenceRow {
   version_id: string | null;
   item_id: string | null;
 }
+interface TasteEventRow {
+  [key: string]: SqlStorageValue;
+  id: string;
+  signal_id: string;
+  kind: string;
+  actor_type: string;
+  actor_label: string;
+  agent_session_id: string | null;
+  detail: string;
+  version_id: string | null;
+  at: number;
+}
+interface ItemNoteRow {
+  [key: string]: SqlStorageValue;
+  id: string;
+  item_id: string;
+  space_id: string;
+  author_id: string;
+  body: string;
+  created_at: number;
+}
 interface AuditEventRow {
   [key: string]: SqlStorageValue;
   id: string;
@@ -295,6 +318,13 @@ function toTasteSignal(r: TasteSignalRow): TasteSignal {
 function toTasteEvidence(r: TasteEvidenceRow): TasteEvidence {
   return { ...r, kind: r.kind as TasteEvidence["kind"] };
 }
+function toTasteEvent(r: TasteEventRow): TasteEvent {
+  return {
+    ...r,
+    kind: r.kind as TasteEvent["kind"],
+    actor_type: r.actor_type as TasteEvent["actor_type"],
+  };
+}
 function toAuditEvent(r: AuditEventRow): AuditEvent {
   return {
     ...r,
@@ -372,6 +402,24 @@ export class Queries {
     return row ? toRegion(row) : null;
   }
 
+  updateRegion(id: string, name: string, slug: string): void {
+    this.sql.exec(`UPDATE regions SET name = ?, slug = ? WHERE id = ?`, name, slug, id);
+  }
+
+  deleteRegion(id: string): void {
+    // grants.region_id has a FK to regions; clear them before the row goes.
+    this.sql.exec(`DELETE FROM grants WHERE region_id = ?`, id);
+    this.sql.exec(`DELETE FROM regions WHERE id = ?`, id);
+  }
+
+  countItemsByRegion(regionId: string): number {
+    return (
+      this.sql
+        .exec<{ n: number }>(`SELECT COUNT(*) AS n FROM items WHERE region_id = ?`, regionId)
+        .toArray()[0]?.n ?? 0
+    );
+  }
+
   /* ---------------- items (+ FTS sync) ---------------- */
 
   insertItem(item: ContextItem): void {
@@ -401,7 +449,32 @@ export class Queries {
     );
   }
 
+  /**
+   * items_fts is contentless (content=''), so individual rows can't be UPDATEd
+   * or plain-DELETEd — the only removal is the special 'delete' command, which
+   * needs the row's *previous* column values. So: capture the old text, mutate
+   * items, then delete-then-reinsert the FTS row.
+   */
+  private ftsPrev(id: string): { title: string; semantic_text: string | null } | undefined {
+    return this.sql
+      .exec<{ title: string; semantic_text: string | null }>(
+        `SELECT title, semantic_text FROM items WHERE id = ?`,
+        id,
+      )
+      .toArray()[0];
+  }
+
+  private ftsDelete(id: string, prev: { title: string; semantic_text: string | null }): void {
+    this.sql.exec(
+      `INSERT INTO items_fts (items_fts, rowid, title, semantic_text) VALUES ('delete', ?, ?, ?)`,
+      rowidFor(id),
+      prev.title,
+      prev.semantic_text ?? "",
+    );
+  }
+
   updateItem(item: ContextItem): void {
+    const prev = this.ftsPrev(item.id);
     this.sql.exec(
       `UPDATE items SET region_id = ?, title = ?, source_url = ?, content_ref = ?, semantic_text = ?, metadata = ?, authority_class = ?, updated_at = ?
        WHERE id = ?`,
@@ -415,17 +488,26 @@ export class Queries {
       item.updated_at,
       item.id,
     );
+    if (prev) this.ftsDelete(item.id, prev);
     this.sql.exec(
-      `UPDATE items_fts SET title = ?, semantic_text = ? WHERE rowid = ?`,
+      `INSERT INTO items_fts (rowid, title, semantic_text) VALUES (?, ?, ?)`,
+      rowidFor(item.id),
       item.title,
       item.semantic_text ?? "",
-      rowidFor(item.id),
     );
   }
 
   deleteItem(id: string): void {
+    const prev = this.ftsPrev(id);
+    // influences.item_id and accesses.item_id have FKs to items; edges and
+    // taste_evidence reference items by id without one. Clear all of them.
+    this.sql.exec(`DELETE FROM influences WHERE item_id = ?`, id);
+    this.sql.exec(`DELETE FROM accesses WHERE item_id = ?`, id);
+    this.sql.exec(`DELETE FROM edges WHERE from_id = ? OR to_id = ?`, id, id);
+    this.sql.exec(`DELETE FROM item_notes WHERE item_id = ?`, id);
+    this.sql.exec(`UPDATE taste_evidence SET item_id = NULL WHERE item_id = ?`, id);
     this.sql.exec(`DELETE FROM items WHERE id = ?`, id);
-    this.sql.exec(`DELETE FROM items_fts WHERE rowid = ?`, rowidFor(id));
+    if (prev) this.ftsDelete(id, prev);
   }
 
   getItem(id: string): ContextItem | null {
@@ -528,6 +610,61 @@ export class Queries {
       .map(toEdge);
   }
 
+  /** Every edge touching an item, any approval state — for the item's Connections panel. */
+  allEdgesForItem(itemId: string): ContextEdge[] {
+    return this.sql
+      .exec<EdgeRow>(
+        `SELECT * FROM edges WHERE from_id = ? OR to_id = ? ORDER BY created_at DESC`,
+        itemId,
+        itemId,
+      )
+      .toArray()
+      .map(toEdge);
+  }
+
+  getEdge(id: string): ContextEdge | null {
+    const row = this.sql.exec<EdgeRow>(`SELECT * FROM edges WHERE id = ?`, id).toArray()[0];
+    return row ? toEdge(row) : null;
+  }
+
+  setEdgeApproval(id: string, state: ContextEdge["approval_state"]): void {
+    this.sql.exec(`UPDATE edges SET approval_state = ? WHERE id = ?`, state, id);
+  }
+
+  deleteEdge(id: string): void {
+    this.sql.exec(`DELETE FROM edges WHERE id = ?`, id);
+  }
+
+  /* ---------------- item notes ---------------- */
+
+  insertItemNote(n: ItemNote): void {
+    this.sql.exec(
+      `INSERT INTO item_notes (id, item_id, space_id, author_id, body, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
+      n.id,
+      n.item_id,
+      n.space_id,
+      n.author_id,
+      n.body,
+      n.created_at,
+    );
+  }
+
+  listItemNotes(itemId: string): ItemNote[] {
+    return this.sql
+      .exec<ItemNoteRow>(`SELECT * FROM item_notes WHERE item_id = ? ORDER BY created_at`, itemId)
+      .toArray()
+      .map((r) => ({ ...r }));
+  }
+
+  getItemNote(id: string): ItemNote | null {
+    const row = this.sql.exec<ItemNoteRow>(`SELECT * FROM item_notes WHERE id = ?`, id).toArray()[0];
+    return row ? { ...row } : null;
+  }
+
+  deleteItemNote(id: string): void {
+    this.sql.exec(`DELETE FROM item_notes WHERE id = ?`, id);
+  }
+
   /* ---------------- tasks ---------------- */
 
   insertTask(t: Task): void {
@@ -624,6 +761,21 @@ export class Queries {
       .exec<AgentSessionRow>(`SELECT * FROM agent_sessions WHERE id = ?`, id)
       .toArray()[0];
     return row ? toAgentSession(row) : null;
+  }
+
+  /** Self-declared client identity. Attribution only — never an auth input. */
+  setAgentSessionDeclared(id: string, declared: NonNullable<AgentSession["declared"]>): void {
+    this.sql.exec(`UPDATE agent_sessions SET declared = ? WHERE id = ?`, JSON.stringify(declared), id);
+  }
+
+  listAgentSessions(spaceId: string): AgentSession[] {
+    return this.sql
+      .exec<AgentSessionRow>(
+        `SELECT s.* FROM agent_sessions s JOIN tasks t ON t.id = s.task_id WHERE t.space_id = ?`,
+        spaceId,
+      )
+      .toArray()
+      .map(toAgentSession);
   }
 
   /* ---------------- artifacts ---------------- */
@@ -741,6 +893,42 @@ export class Queries {
       )
       .toArray()
       .map(toAccess);
+  }
+
+  /** Every access across the space (joined through tasks), newest first. */
+  spaceAccesses(spaceId: string, limit = 500): AccessRecord[] {
+    return this.sql
+      .exec<AccessRow>(
+        `SELECT a.* FROM accesses a JOIN tasks t ON t.id = a.task_id WHERE t.space_id = ? ORDER BY a.at DESC LIMIT ?`,
+        spaceId,
+        limit,
+      )
+      .toArray()
+      .map(toAccess);
+  }
+
+  /** Every audit event across the space (joined through tasks), newest first. */
+  spaceAuditEvents(spaceId: string, limit = 500): AuditEvent[] {
+    return this.sql
+      .exec<AuditEventRow>(
+        `SELECT a.* FROM audit_events a JOIN tasks t ON t.id = a.task_id WHERE t.space_id = ? ORDER BY a.at DESC LIMIT ?`,
+        spaceId,
+        limit,
+      )
+      .toArray()
+      .map(toAuditEvent);
+  }
+
+  /** All taste "applied" events across the space, for per-agent attribution. */
+  spaceTasteApplications(spaceId: string): TasteEvent[] {
+    return this.sql
+      .exec<TasteEventRow>(
+        `SELECT e.* FROM taste_events e JOIN taste_signals s ON s.id = e.signal_id
+         WHERE s.space_id = ? AND e.kind = 'applied' ORDER BY e.at DESC`,
+        spaceId,
+      )
+      .toArray()
+      .map(toTasteEvent);
   }
 
   insertDenial(d: DenialRecord): void {
@@ -897,6 +1085,43 @@ export class Queries {
       .exec<TasteEvidenceRow>(`SELECT * FROM taste_evidence WHERE signal_id = ?`, signalId)
       .toArray()
       .map(toTasteEvidence);
+  }
+
+  insertTasteEvent(e: TasteEvent): void {
+    this.sql.exec(
+      `INSERT INTO taste_events (id, signal_id, kind, actor_type, actor_label, agent_session_id, detail, version_id, at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      e.id,
+      e.signal_id,
+      e.kind,
+      e.actor_type,
+      e.actor_label,
+      e.agent_session_id,
+      e.detail,
+      e.version_id,
+      e.at,
+    );
+  }
+
+  listTasteEvents(signalId: string): TasteEvent[] {
+    return this.sql
+      .exec<TasteEventRow>(`SELECT * FROM taste_events WHERE signal_id = ? ORDER BY at`, signalId)
+      .toArray()
+      .map(toTasteEvent);
+  }
+
+  /** Space-wide taste activity feed, newest first. */
+  recentTasteEvents(spaceId: string, limit: number): (TasteEvent & { statement: string })[] {
+    return this.sql
+      .exec<TasteEventRow & { statement: string }>(
+        `SELECT e.*, s.statement AS statement
+         FROM taste_events e JOIN taste_signals s ON s.id = e.signal_id
+         WHERE s.space_id = ? ORDER BY e.at DESC LIMIT ?`,
+        spaceId,
+        limit,
+      )
+      .toArray()
+      .map((r) => ({ ...toTasteEvent(r), statement: r.statement }));
   }
 
   /* ---------------- audit ---------------- */

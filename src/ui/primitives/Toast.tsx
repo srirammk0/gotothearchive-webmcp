@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { Icon } from "./Icon";
 
 export interface ToastProps {
   tone?: "neutral" | "success" | "error";
@@ -7,9 +8,9 @@ export interface ToastProps {
 }
 
 const toneClass: Record<NonNullable<ToastProps["tone"]>, string> = {
-  neutral: "border-hairline text-ink",
-  success: "border-good text-good",
-  error: "border-bad text-bad",
+  neutral: "text-text",
+  success: "text-good",
+  error: "text-bad",
 };
 
 /** A single transient message. Caller owns mount/unmount + timing. */
@@ -18,7 +19,7 @@ export function Toast({ tone = "neutral", children, onDismiss }: ToastProps) {
     <div
       role="status"
       aria-live="polite"
-      className={`flex items-center justify-between gap-4 rounded-[var(--radius-sm)] border bg-paper px-4 py-3 font-sans text-[length:var(--text-meta)] shadow-sm ${toneClass[tone]}`}
+      className={`flex items-center justify-between gap-4 rounded-[var(--radius-md)] border border-line bg-raised px-4 py-3 text-[length:var(--text-meta)] shadow-lg shadow-black/40 ${toneClass[tone]}`}
     >
       <span>{children}</span>
       {onDismiss ? (
@@ -26,9 +27,9 @@ export function Toast({ tone = "neutral", children, onDismiss }: ToastProps) {
           type="button"
           onClick={onDismiss}
           aria-label="Dismiss"
-          className="text-stone hover:text-ink"
+          className="rounded-full p-1 text-faint transition-colors duration-[var(--duration-fast)] hover:bg-hover hover:text-text"
         >
-          &times;
+          <Icon name="close" size={14} />
         </button>
       ) : null}
     </div>

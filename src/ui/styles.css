@@ -1,48 +1,73 @@
 @import "tailwindcss";
-@import url("https://fonts.googleapis.com/css2?family=Spectral:ital,wght@0,400;0,500;0,600;1,400&family=Inter:wght@400;500;600&display=swap");
 
 @theme {
-  /* Warm editorial light palette */
-  --color-paper: #f4f1ea;
-  --color-paper-raised: #ece7db;
-  --color-ink: #211d17;
-  --color-ink-soft: #57503f;
-  --color-stone: #8a8071;
-  --color-stone-soft: #a9a08f;
-  --color-hairline: #d9d1bf;
-  --color-accent: #b8481f;
-  --color-accent-soft: #e9c9ba;
-  --color-good: #4a6b4d;
-  --color-bad: #a8402a;
+  /* Soft dark workspace — warm greys, one hot accent. */
+  --color-canvas: #0f0f0e;
+  --color-surface: #1a1a19;
+  --color-raised: #232322;
+  --color-hover: #2b2b29;
+  --color-line: #2e2e2c;
+  --color-line-soft: #242423;
 
-  --font-serif: "Spectral", "Iowan Old Style", Georgia, serif;
-  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
-  --font-mono: "SF Mono", ui-monospace, monospace;
+  --color-text: #f2f0ec;
+  --color-muted: #a39e95;
+  --color-faint: #6f6a62;
 
-  /* Modular type scale (major third-ish, editorial) */
-  --text-display: 3.375rem;
-  --text-headline: 2.25rem;
-  --text-section: 1.5rem;
-  --text-item: 1.125rem;
-  --text-body: 1rem;
+  --color-accent: #e34927;
+  --color-good: #7ea87c;
+  --color-bad: #e0664a;
+
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", monospace;
+
+  /* Small, even type — the material is the loud thing, not the interface. */
+  --text-display: 1.75rem;
+  --text-headline: 1.0625rem;
+  --text-section: 0.9375rem;
+  --text-body: 0.875rem;
   --text-meta: 0.8125rem;
-  --text-micro: 0.6875rem;
+  --text-micro: 0.75rem;
 
-  --radius-sm: 3px;
+  --radius-sm: 4px;
   --radius-md: 6px;
+  --radius-lg: 10px;
 
-  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
-  --duration-fast: 120ms;
-  --duration-base: 220ms;
-  --duration-slow: 360ms;
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --duration-fast: 140ms;
+  --duration-base: 260ms;
+  --duration-slow: 420ms;
 }
 
 html, body, #root { height: 100%; }
-body { background: var(--color-paper); color: var(--color-ink); }
 
-* {
-  transition-timing-function: var(--ease-out);
+body {
+  background: var(--color-canvas);
+  color: var(--color-text);
+  font-family: var(--font-sans);
+  font-size: var(--text-body);
+  -webkit-font-smoothing: antialiased;
+  letter-spacing: -0.01em;
 }
+
+/* Sans everywhere, tightened at display sizes the way the reference does. */
+h1, h2, h3 { letter-spacing: -0.02em; font-weight: 500; }
+
+* { transition-timing-function: var(--ease-out); }
+
+::selection { background: var(--color-accent); color: #fff; }
+
+/* Quiet scrollbars — the chrome should never out-shout the material. */
+* { scrollbar-width: thin; scrollbar-color: var(--color-line) transparent; }
+::-webkit-scrollbar { width: 9px; height: 9px; }
+::-webkit-scrollbar-thumb { background: var(--color-line); border-radius: 99px; }
+::-webkit-scrollbar-thumb:hover { background: var(--color-hover); }
+::-webkit-scrollbar-track { background: transparent; }
+
+select option { background: var(--color-raised); color: var(--color-text); }
+
+/* Scrollable but without the bar — used for embeds inside fixed-size frames. */
+.no-scrollbar { scrollbar-width: none; -ms-overflow-style: none; }
+.no-scrollbar::-webkit-scrollbar { display: none; }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
@@ -52,8 +77,11 @@ body { background: var(--color-paper); color: var(--color-ink); }
   }
 }
 
-:focus-visible {
-  outline: 2px solid var(--color-accent);
-  outline-offset: 2px;
-  border-radius: var(--radius-sm);
+/* No focus rings anywhere — hover/active colour shifts carry state instead. */
+*,
+*:focus,
+*:focus-visible,
+*:focus-within {
+  outline: none !important;
+  -webkit-tap-highlight-color: transparent;
 }

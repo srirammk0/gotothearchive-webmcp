@@ -35,3 +35,6 @@ dist-ssr
 
 .vite
 .dev.vars
+
+# graphify knowledge graph (regenerate with `graphify update .`)
+graphify-out/

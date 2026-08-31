@@ -1,8 +1,7 @@
 /**
  * View-model types for src/ui + src/routes. Every shape here is derived from
  * @shared/contract entities — no invented entity shapes. These exist so
- * components can stay pure functions of props while the real fetch layer
- * (another track) swaps in for src/ui/mockData.ts with no component rewrites.
+ * components can stay pure functions of props, fed by the API client.
  */
 import type {
   AccessRecord,

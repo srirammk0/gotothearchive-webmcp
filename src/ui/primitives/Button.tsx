@@ -3,25 +3,20 @@ import type { ButtonHTMLAttributes } from "react";
 type Variant = "primary" | "secondary" | "ghost" | "danger";
 
 const base =
-  "inline-flex items-center gap-2 rounded-[var(--radius-sm)] font-sans text-[length:var(--text-meta)] font-medium tracking-wide transition-colors duration-[var(--duration-fast)] disabled:cursor-not-allowed disabled:opacity-40";
+  "inline-flex items-center gap-1.5 rounded-[var(--radius-md)] text-[length:var(--text-meta)] " +
+  "transition-colors duration-[var(--duration-fast)] disabled:cursor-not-allowed disabled:opacity-40";
 
 const variants: Record<Variant, string> = {
-  primary:
-    "bg-ink text-paper px-4 py-2 hover:bg-accent",
-  secondary:
-    "border border-hairline text-ink px-4 py-2 hover:border-ink",
-  ghost:
-    "text-ink-soft px-2 py-1 hover:text-ink underline decoration-hairline underline-offset-4 hover:decoration-ink",
-  danger:
-    "border border-hairline text-bad px-4 py-2 hover:border-bad",
+  primary: "bg-text text-canvas px-3 py-1.5 hover:bg-white",
+  secondary: "border border-line text-text px-3 py-1.5 hover:border-hover hover:bg-surface",
+  ghost: "text-muted px-2 py-1 hover:text-text",
+  danger: "border border-line text-muted px-3 py-1.5 hover:border-bad hover:text-bad",
 };
 
-export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
-  variant?: Variant;
-}
-
-export function Button({ variant = "secondary", className = "", ...props }: ButtonProps) {
-  return (
-    <button className={`${base} ${variants[variant]} ${className}`} {...props} />
-  );
+export function Button({
+  variant = "secondary",
+  className = "",
+  ...props
+}: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: Variant }) {
+  return <button className={`${base} ${variants[variant]} ${className}`} {...props} />;
 }

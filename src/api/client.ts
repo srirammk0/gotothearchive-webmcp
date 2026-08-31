@@ -5,13 +5,16 @@
  * through it — no component should call `fetch` directly, so that auth, error
  * shape, and credential handling stay in one place.
  */
+import { getToken } from "@clerk/react";
 import {
   API,
   type Annotation,
   type Artifact,
   type ArtifactVersion,
   type CapabilityInput,
+  type ContextEdge,
   type ContextItem,
+  type ItemNote,
   type DenialRecord,
   type GrantLevel,
   type Grant,
@@ -21,6 +24,7 @@ import {
   type ReviewDecision,
   type Space,
   type TasteDimension,
+  type TasteEvent,
   type TasteSignal,
   type Task,
 } from "@shared/contract";
@@ -35,12 +39,24 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * The signed-in visitor's Clerk session token. Read globally rather than
+ * threaded through hooks, so every call site carries identity without knowing
+ * about Clerk. The UI only renders signed in, so a missing token here is an
+ * expired session — the request 401s and Clerk moves the visitor to sign-in.
+ */
+export async function authHeader(): Promise<Record<string, string>> {
+  const token = await getToken().catch(() => null);
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, {
     ...init,
     credentials: "same-origin",
     headers: {
       ...(init?.body ? { "content-type": "application/json" } : {}),
+      ...(await authHeader()),
       ...init?.headers,
     },
   });
@@ -72,6 +88,15 @@ export const bootstrap = () =>
 
 export const listRegions = () => req<{ regions: Region[] }>(API.regions);
 
+export const createRegion = (name: string) =>
+  req<{ region: Region }>(API.regions, { method: "POST", body: JSON.stringify({ name }) });
+
+export const renameRegion = (id: string, name: string) =>
+  req<{ region: Region }>(API.regions, { method: "PATCH", body: JSON.stringify({ id, name }) });
+
+export const deleteRegion = (id: string) =>
+  req<{ deleted: string }>(`${API.regions}${qs({ id })}`, { method: "DELETE" });
+
 /* ---------------- items ---------------- */
 
 export const listItems = (regionSlug?: string) =>
@@ -86,12 +111,53 @@ export const createItem = (input: {
   semantic_text?: string | null;
 }) => req<{ item: ContextItem }>(API.items, { method: "POST", body: JSON.stringify(input) });
 
+/* ---------------- item links + notes ---------------- */
+
+export interface ItemLink extends ContextEdge {
+  direction: "in" | "out";
+  other: ContextItem | null;
+  proposed_by_agent: boolean;
+}
+
+export const listItemLinks = (itemId: string) =>
+  req<{ links: ItemLink[] }>(`${API.edges}${qs({ item_id: itemId })}`);
+
+export const createItemLink = (fromItemId: string, toItemId: string, relationship?: string) =>
+  req<{ edge: ContextEdge }>(API.edges, {
+    method: "POST",
+    body: JSON.stringify({ from_item_id: fromItemId, to_item_id: toItemId, relationship }),
+  });
+
+export const reviewItemLink = (id: string, approval_state: "approved" | "rejected") =>
+  req<{ edge: ContextEdge }>(API.edges, { method: "PATCH", body: JSON.stringify({ id, approval_state }) });
+
+export const deleteItemLink = (id: string) =>
+  req<{ deleted: string }>(`${API.edges}${qs({ id })}`, { method: "DELETE" });
+
+export const listItemNotes = (itemId: string) =>
+  req<{ notes: ItemNote[] }>(`${API.itemNotes}${qs({ item_id: itemId })}`);
+
+export const addItemNote = (itemId: string, body: string) =>
+  req<{ note: ItemNote }>(API.itemNotes, { method: "POST", body: JSON.stringify({ item_id: itemId, body }) });
+
+export const deleteItemNote = (id: string) =>
+  req<{ deleted: string }>(`${API.itemNotes}${qs({ id })}`, { method: "DELETE" });
+
+/** Move one or more items to another folder, and/or rename a single item. */
+export const updateItems = (
+  ids: string[],
+  changes: { region_slug?: string; title?: string; semantic_text?: string; pinned?: boolean },
+) => req<{ items: ContextItem[] }>(API.items, { method: "PATCH", body: JSON.stringify({ ids, ...changes }) });
+
+export const deleteItems = (ids: string[]) =>
+  req<{ deleted: string[] }>(API.items, { method: "DELETE", body: JSON.stringify({ ids }) });
+
 /** Uploads raw bytes to R2 and returns the key to store as an item's content_ref. */
 export async function uploadBlob(file: File): Promise<string> {
   const res = await fetch(API.upload, {
     method: "POST",
     credentials: "same-origin",
-    headers: { "content-type": file.type || "application/octet-stream" },
+    headers: { "content-type": file.type || "application/octet-stream", ...(await authHeader()) },
     body: file,
   });
   if (!res.ok) throw new ApiError("Upload failed", res.status);
@@ -133,7 +199,17 @@ export const getCapabilities = (taskId: string) =>
 
 /* ---------------- artifacts and review ---------------- */
 
-export const listArtifacts = () => req<{ artifacts: Artifact[] }>(API.artifacts);
+export interface WorkbenchArtifact extends Artifact {
+  version_count: number;
+  state: ArtifactVersion["state"];
+  updated_at: number;
+  preview_html: string;
+  influence_count: number;
+  /** Slugs of the archive folders whose material shaped the latest version. */
+  regions: string[];
+}
+
+export const listArtifacts = () => req<{ artifacts: WorkbenchArtifact[] }>(API.artifacts);
 
 export const getArtifact = (id: string) =>
   req<{ artifact: Artifact; versions: ArtifactVersion[] }>(`${API.artifacts}${qs({ id })}`);
@@ -171,7 +247,10 @@ export const recordDecision = (versionId: string, decision: ReviewDecision, note
 
 /* ---------------- taste ---------------- */
 
-export const listTasteSignals = () => req<{ signals: TasteSignal[] }>(API.taste);
+export type TasteFeedEvent = TasteEvent & { statement: string };
+
+export const listTasteSignals = () =>
+  req<{ signals: TasteSignal[]; recent_events: TasteFeedEvent[] }>(API.taste);
 
 export const createTasteSignal = (input: {
   statement: string;
@@ -201,9 +280,30 @@ export interface EvidenceRecord {
   item: ContextItem | null;
 }
 
-/** The feedback and artifacts a signal cites. A proposal without these is just an assertion. */
+export interface TasteHistoryEvent extends TasteEvent {
+  artifact: { id: string; title: string; version_no: number } | null;
+}
+
+/** The feedback/artifacts a signal cites, plus its full lifecycle + usage history. */
 export const getTasteEvidence = (signalId: string) =>
-  req<{ evidence: EvidenceRecord[] }>(`${API.tasteEvidence}${qs({ signal_id: signalId })}`);
+  req<{ evidence: EvidenceRecord[]; events: TasteHistoryEvent[] }>(
+    `${API.tasteEvidence}${qs({ signal_id: signalId })}`,
+  );
+
+/* ---------------- stats ---------------- */
+
+export interface SpaceStats {
+  totals: { items: number; artifacts: number; actions: number };
+  activity_by_day: Record<string, number>;
+  tools: { label: string; value: number }[];
+  agents: { label: string; provider: string; actions: number; artifacts: number; taste: number }[];
+  folders: { label: string; value: number }[];
+  sources: { label: string; value: number }[];
+  outcomes: { label: string; value: number }[];
+  latest: { id: string; title: string; preview_html: string; updated_at: number }[];
+}
+
+export const getStats = () => req<{ stats: SpaceStats }>(API.stats);
 
 /* ---------------- agent lens ---------------- */
 

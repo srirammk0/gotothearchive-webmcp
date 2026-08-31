@@ -75,13 +75,19 @@ export function useWorkbench(artifactId: string | undefined) {
 
   /** Annotations render optimistically; comment creation is low-risk per product spec. */
   const addAnnotation = useCallback(
-    async (input: { sentiment: Annotation["sentiment"]; comment: string; dimension: string | null }) => {
+    async (input: {
+      sentiment: Annotation["sentiment"];
+      comment: string;
+      dimension: string | null;
+      target?: Annotation["target"];
+    }) => {
       if (!data) return;
+      const target = input.target ?? null;
       const optimistic: Annotation = {
         id: `optimistic_${crypto.randomUUID()}`,
         version_id: data.version.id,
         author_id: "me",
-        target: null,
+        target,
         sentiment: input.sentiment,
         dimension: input.dimension,
         comment: input.comment,
@@ -95,7 +101,7 @@ export function useWorkbench(artifactId: string | undefined) {
           sentiment: input.sentiment,
           comment: input.comment,
           dimension: input.dimension,
-          target: null,
+          target,
         });
         const { annotations } = await listAnnotations(data.version.id);
         setData((prev) => (prev ? { ...prev, annotations } : prev));

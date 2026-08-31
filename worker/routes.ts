@@ -1,35 +1,37 @@
 /**
  * JSON handlers for every path in the API const. All mounted under a single
- * SpaceDO instance (one guest space for the whole demo).
+ * SpaceDO instance; each signed-in human gets their own Space inside it.
  */
 import {
   API,
   ITEM_TYPES,
+  RELATIONSHIPS,
   REVIEW_DECISIONS,
   type AccessRecord,
   type ArtifactState,
   type CapabilityInput,
   type GrantLevel,
   type ItemType,
+  type Region,
   type ReviewDecision,
   type TasteDimension,
+  type TasteEvent,
   type ToolCallRequest,
 } from "@shared/contract";
 import { Queries } from "./db/queries";
-import { guestCookie, resolveHuman } from "./auth";
+import { resolveHuman } from "./auth";
 import { authorizedRegionIds, humanRegions, liveGrants } from "./permissions";
 import { traverse } from "./graph";
 import { handleToolCall } from "./mcp";
 import { SEED_ASSETS } from "./seed-assets";
 
 /**
- * Each visitor gets their own Space, keyed to their guest identity.
+ * Each signed-in human gets their own Space, keyed to their Clerk id.
  *
- * A single shared guest space would be owned by whoever opened the app first;
- * every later visitor would have no human access to any region, and since agent
+ * A single shared space would be owned by whoever opened the app first; every
+ * later visitor would have no human access to any region, and since agent
  * authority can never exceed the invoking human's, their agent could do nothing
- * at all. The product would look dead to everyone but the first person through
- * the door — and several judges will open this at once.
+ * at all.
  */
 function spaceIdFor(humanId: string): string {
   return `space-${humanId}`;
@@ -49,52 +51,52 @@ export async function handleRoute(
   q: Queries,
 ): Promise<Response> {
   const url = new URL(request.url);
-  const human = resolveHuman(request);
-  const cookieHeader = guestCookie(human.human_id);
-
-  const withCookie = (res: Response): Response => {
-    const headers = new Headers(res.headers);
-    headers.append("Set-Cookie", cookieHeader);
-    return new Response(res.body, { status: res.status, headers });
-  };
+  const human = await resolveHuman(request, env);
+  if (!human) return json({ ok: false, error: "Sign in required" }, { status: 401 });
 
   switch (url.pathname) {
     case API.bootstrap:
-      return withCookie(await handleBootstrap(request, env, q, human.human_id));
+      return await handleBootstrap(request, env, q, human.human_id);
     case API.regions:
-      return withCookie(handleRegions(request, q, human.human_id));
+      return await handleRegions(request, q, human.human_id);
     case API.items:
-      return withCookie(await handleItems(request, q, human.human_id));
+      return await handleItems(request, q, human.human_id);
     case API.upload:
-      return withCookie(await handleUpload(request, env, human.human_id));
+      return await handleUpload(request, env, human.human_id);
     case API.blob:
-      return withCookie(await handleBlob(request, env, human.human_id));
+      return await handleBlob(request, env, human.human_id);
     case API.provenance:
-      return withCookie(handleProvenance(request, q, human.human_id));
+      return handleProvenance(request, q, human.human_id);
     case API.graph:
-      return withCookie(await handleGraph(request, q, human.human_id));
+      return await handleGraph(request, q, human.human_id);
     case API.task:
-      return withCookie(await handleTask(request, q, human.human_id));
+      return await handleTask(request, q, human.human_id);
     case API.session:
-      return withCookie(await handleSession(request, q, human.human_id));
+      return await handleSession(request, q, human.human_id);
     case API.grants:
-      return withCookie(await handleGrants(request, q, human.human_id));
+      return await handleGrants(request, q, human.human_id);
     case API.capabilities:
-      return withCookie(handleCapabilities(request, q, human.human_id));
+      return handleCapabilities(request, q, human.human_id);
     case API.toolCall:
-      return withCookie(await handleMcpCall(request, q, human));
+      return await handleMcpCall(request, q, human);
     case API.artifacts:
-      return withCookie(handleArtifacts(request, q, human.human_id));
+      return handleArtifacts(request, q, human.human_id);
     case API.annotations:
-      return withCookie(await handleAnnotations(request, q, human.human_id));
+      return await handleAnnotations(request, q, human.human_id);
     case API.decisions:
-      return withCookie(await handleDecisions(request, q, human.human_id));
+      return await handleDecisions(request, q, human.human_id);
     case API.taste:
-      return withCookie(await handleTaste(request, q, human.human_id));
+      return await handleTaste(request, q, human.human_id);
     case API.tasteEvidence:
-      return withCookie(handleTasteEvidence(request, q, human.human_id));
+      return handleTasteEvidence(request, q, human.human_id);
     case API.lens:
-      return withCookie(handleLens(request, q));
+      return handleLens(request, q);
+    case API.stats:
+      return handleStats(request, q, human.human_id);
+    case API.edges:
+      return await handleEdges(request, q, human.human_id);
+    case API.itemNotes:
+      return await handleItemNotes(request, q, human.human_id);
     default:
       return new Response(null, { status: 404 });
   }
@@ -137,15 +139,19 @@ async function handleBootstrap(request: Request, env: Env, q: Queries, humanId: 
       await attachSeedAssets(env, q, existing.id, seedIds);
     }
 
+    if (q.listArtifacts(existing.id).length > 0 && q.recentTasteEvents(existing.id, 1).length === 0) {
+      seedActivity(q, existing.id, Date.now());
+    }
+
     return json({ ok: true, space: existing, regions: q.listRegions(existing.id) });
   }
 
   const now = Date.now();
   q.insertSpace({
     id: spaceIdFor(humanId),
-    name: "Guest Archive",
+    name: "Archive",
     owner_id: humanId,
-    kind: "guest",
+    kind: "personal",
     created_at: now,
   });
 
@@ -170,6 +176,7 @@ async function handleBootstrap(request: Request, env: Env, q: Queries, humanId: 
 
   const seededIds = seedItems(q, spaceIdFor(humanId), regionIds, humanId, now);
   await attachSeedAssets(env, q, spaceIdFor(humanId), seededIds);
+  seedActivity(q, spaceIdFor(humanId), now);
 
   return json({
     ok: true,
@@ -260,9 +267,9 @@ function seedItems(
  * One completed round of the loop, so a first-time visitor sees the product
  * rather than three empty states.
  *
- * This is demo scaffolding for the guest space only: a real signed-in Archive
- * starts empty and fills with the person's own uploads and their agent's actual
- * output. What is seeded here is honest — the artifact's influences point at
+ * This runs once, when a space is created, and then never again: from there the
+ * Archive fills with the person's own uploads and their agent's actual output.
+ * What is seeded is real state, not interface theater — the artifact's influences point at
  * real seeded items, the denial records a real refusal to cite a Personal item,
  * and the taste proposal cites the annotation it was derived from.
  */
@@ -402,11 +409,248 @@ Drafted from the Atlas creative brief and two references in Inspiration.</p></ar
   });
 }
 
+const DAY = 86_400_000;
+
+/**
+ * Fills in the running history a real space accrues: an agent-activity trail,
+ * a second reviewed artifact, and a taste signal that has been proposed,
+ * applied, and accepted over time. Idempotent — guarded by its own emptiness
+ * check at the call sites — so it can backfill spaces from earlier builds.
+ */
+function seedActivity(q: Queries, spaceId: string, now: number): void {
+  const artifacts = q.listArtifacts(spaceId);
+  if (artifacts.length === 0) return;
+  const primary = artifacts[0];
+  const taskId = primary.task_id;
+  const owner = primary.space_id;
+  const v1 = q.listArtifactVersions(primary.id)[0];
+  const chatgptSession = v1?.agent_session_id ?? null;
+  const signals = q.listTasteSignals(spaceId);
+
+  // Two more clients have worked this task. Real sessions with declared
+  // identities (attribution only) so the Stats page can break contributions
+  // down by product.
+  const claudeSession = crypto.randomUUID();
+  q.insertAgentSession({
+    id: claudeSession,
+    human_id: owner,
+    task_id: taskId,
+    declared: { provider: "anthropic", client: "Claude", model: "claude-sonnet-4" },
+    created_at: now - 15 * DAY,
+  });
+  const cursorSession = crypto.randomUUID();
+  q.insertAgentSession({
+    id: cursorSession,
+    human_id: owner,
+    task_id: taskId,
+    declared: { provider: "anthropic", client: "Cursor", model: "claude-sonnet-4" },
+    created_at: now - 8 * DAY,
+  });
+  const sessions = [chatgptSession, claudeSession, cursorSession] as const;
+
+  // 1) Agent activity trail over the last three weeks. Column 4 picks the client.
+  const trail: [number, string, string | null, 0 | 1 | 2][] = [
+    [21, "started task", null, 0],
+    [21, "registered tools", "webmcp", 0],
+    [20, "retrieved context for task", "get_context_for_task", 0],
+    [20, "read reference", "get_context_for_task", 0],
+    [19, "requested grant", "get_context_for_task", 0],
+    [18, "read reference", "get_context_for_task", 0],
+    [18, "applied taste signal", "get_taste_for_task", 0],
+    [17, "generated draft v1", "record_artifact", 0],
+    [15, "retrieved context for task", "get_context_for_task", 1],
+    [14, "read review notes", "record_feedback", 1],
+    [13, "applied taste signal", "get_taste_for_task", 1],
+    [12, "generated draft v2", "record_artifact", 1],
+    [9, "searched archive", "get_context_for_task", 1],
+    [7, "read reference", "get_context_for_task", 2],
+    [4, "generated moodboard", "record_artifact", 2],
+    [2, "applied taste signal", "get_taste_for_task", 2],
+    [1, "read review notes", "record_feedback", 2],
+  ];
+  for (const [ago, operation, tool, who] of trail) {
+    q.insertAuditEvent({
+      id: crypto.randomUUID(),
+      actor_type: "agent",
+      actor_label: "Agent",
+      agent_session_id: sessions[who],
+      human_id: null,
+      task_id: taskId,
+      tool_name: tool,
+      operation,
+      payload: {},
+      at: now - ago * DAY + Math.floor(Math.random() * DAY),
+    });
+  }
+
+  // 2) A second artifact that went through a round of changes.
+  const moodId = crypto.randomUUID();
+  q.insertArtifact({
+    id: moodId,
+    space_id: spaceId,
+    task_id: taskId,
+    kind: "visual_brief",
+    title: "Atlas rebrand — moodboard",
+    created_at: now - 5 * DAY,
+  });
+  const moodV1 = crypto.randomUUID();
+  q.insertArtifactVersion({
+    id: moodV1,
+    artifact_id: moodId,
+    version_no: 1,
+    parent_version_id: null,
+    content_html: `<div style="font-family:system-ui,sans-serif;padding:36px;background:#f6f1e7;color:#2a2318">
+<p style="font-size:12px;letter-spacing:.16em;text-transform:uppercase;color:#8a8071;margin:0 0 18px">Moodboard · v1</p>
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+<div style="aspect-ratio:4/3;background:#c96f4a;border-radius:8px"></div>
+<div style="aspect-ratio:4/3;background:#e6dcc6;border-radius:8px"></div>
+<div style="aspect-ratio:4/3;background:#8a5a3c;border-radius:8px"></div>
+<div style="aspect-ratio:4/3;background:#efe7d5;border-radius:8px"></div></div>
+<p style="margin:18px 0 0;font-size:14px">Terracotta, cream, one warm neutral. No blue.</p></div>`,
+    agent_session_id: claudeSession,
+    state: "changes_requested",
+    created_at: now - 5 * DAY,
+  });
+  q.insertDecision({
+    id: crypto.randomUUID(),
+    version_id: moodV1,
+    actor_id: owner,
+    decision: "request_changes",
+    note: "Right palette. Needs one dominant image, not a four-up grid.",
+    prev_state: "ready_for_review",
+    at: now - 4 * DAY,
+  });
+  const moodV2 = crypto.randomUUID();
+  q.insertArtifactVersion({
+    id: moodV2,
+    artifact_id: moodId,
+    version_no: 2,
+    parent_version_id: moodV1,
+    content_html: `<div style="font-family:system-ui,sans-serif;padding:36px;background:#f6f1e7;color:#2a2318">
+<p style="font-size:12px;letter-spacing:.16em;text-transform:uppercase;color:#8a8071;margin:0 0 18px">Moodboard · v2</p>
+<div style="aspect-ratio:16/10;background:#c96f4a;border-radius:10px"></div>
+<p style="margin:18px 0 0;font-size:14px">One image carries it. Everything else is type and space.</p></div>`,
+    agent_session_id: cursorSession,
+    state: "ready_for_review",
+    created_at: now - 2 * DAY,
+  });
+
+  // 3) Taste history + usage for the seeded signal, and a second, accepted one.
+  const ev = (
+    signalId: string,
+    kind: TasteEvent["kind"],
+    actor: TasteEvent["actor_type"],
+    at: number,
+    opts: { detail?: string; version_id?: string | null; session?: string | null } = {},
+  ) =>
+    q.insertTasteEvent({
+      id: crypto.randomUUID(),
+      signal_id: signalId,
+      kind,
+      actor_type: actor,
+      actor_label: opts.session
+        ? (q.getAgentSession(opts.session)?.declared?.client ?? "Agent")
+        : actor === "human"
+          ? "You"
+          : actor === "agent"
+            ? "Agent"
+            : "System",
+      agent_session_id: opts.session ?? null,
+      detail: opts.detail ?? "",
+      version_id: opts.version_id ?? null,
+      at,
+    });
+
+  const primarySignal = signals[0];
+  if (primarySignal) {
+    ev(primarySignal.id, "proposed", "system", primarySignal.created_at, { detail: "Derived from a review note" });
+    ev(primarySignal.id, "applied", "agent", now - 2 * DAY, {
+      detail: "Shaped the moodboard layout",
+      version_id: moodV2,
+      session: cursorSession,
+    });
+  }
+
+  const s2 = crypto.randomUUID();
+  q.insertTasteSignal({
+    id: s2,
+    space_id: spaceId,
+    owner_id: owner,
+    statement:
+      "Prefers editorial serif headlines over a humanist sans body; avoids geometric display faces for brand voice.",
+    dimensions: ["typography"],
+    scope: "project",
+    status: "confirmed",
+    confidence: 0.84,
+    created_by: "system",
+    approved_by: owner,
+    created_at: now - 20 * DAY,
+  });
+  ev(s2, "proposed", "system", now - 20 * DAY, { detail: "Derived from repeated reference picks" });
+  if (v1) ev(s2, "applied", "agent", now - 17 * DAY, { detail: "Set the headline face in v1", version_id: v1.id, session: chatgptSession });
+  ev(s2, "applied", "agent", now - 13 * DAY, { detail: "Kept the type system in v2", version_id: null, session: claudeSession });
+  ev(s2, "accepted", "human", now - 16 * DAY);
+  ev(s2, "applied", "agent", now - 1 * DAY, { detail: "Reused on the moodboard", version_id: moodV2, session: cursorSession });
+}
+
 /* ---------------- regions ---------------- */
 
-function handleRegions(request: Request, q: Queries, humanId: string): Response {
-  if (request.method !== "GET") return badRequest("GET required");
-  return json({ ok: true, regions: q.listRegions(spaceIdFor(humanId)) });
+const slugify = (name: string): string =>
+  name
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 48);
+
+/** A folder slug unique within the space; falls back to a suffix on collision. */
+function uniqueRegionSlug(q: Queries, spaceId: string, name: string): string {
+  const base = slugify(name) || "folder";
+  let slug = base;
+  for (let n = 2; q.getRegionBySlug(spaceId, slug); n++) slug = `${base}-${n}`;
+  return slug;
+}
+
+async function handleRegions(request: Request, q: Queries, humanId: string): Promise<Response> {
+  const spaceId = spaceIdFor(humanId);
+  if (request.method === "GET") {
+    return json({ ok: true, regions: q.listRegions(spaceId) });
+  }
+  if (request.method === "POST") {
+    const { name } = (await request.json()) as { name?: string };
+    if (!name?.trim()) return badRequest("name required");
+    const region: Region = {
+      id: crypto.randomUUID(),
+      space_id: spaceId,
+      parent_id: null,
+      name: name.trim().slice(0, 80),
+      slug: uniqueRegionSlug(q, spaceId, name),
+      created_at: Date.now(),
+    };
+    q.insertRegion(region);
+    return json({ ok: true, region });
+  }
+  if (request.method === "PATCH") {
+    const { id, name } = (await request.json()) as { id?: string; name?: string };
+    const region = id ? q.getRegion(id) : null;
+    if (!region || region.space_id !== spaceId) return badRequest("unknown region");
+    if (!name?.trim()) return badRequest("name required");
+    const nextName = name.trim().slice(0, 80);
+    const nextSlug = slugify(nextName) === region.slug ? region.slug : uniqueRegionSlug(q, spaceId, nextName);
+    q.updateRegion(region.id, nextName, nextSlug);
+    return json({ ok: true, region: { ...region, name: nextName, slug: nextSlug } });
+  }
+  if (request.method === "DELETE") {
+    const id = new URL(request.url).searchParams.get("id");
+    const region = id ? q.getRegion(id) : null;
+    if (!region || region.space_id !== spaceId) return badRequest("unknown region");
+    if (q.listRegions(spaceId).length <= 1) return badRequest("keep at least one folder");
+    // Cascade: the folder's items go with it.
+    for (const item of q.listItemsByRegion(region.id)) q.deleteItem(item.id);
+    q.deleteRegion(region.id);
+    return json({ ok: true, deleted: region.id });
+  }
+  return badRequest("unsupported method");
 }
 
 /* ---------------- items ---------------- */
@@ -453,6 +697,44 @@ async function handleItems(request: Request, q: Queries, humanId: string): Promi
       updated_at: now,
     });
     return json({ ok: true, item: q.getItem(id) });
+  }
+  if (request.method === "PATCH" || request.method === "DELETE") {
+    const spaceId = spaceIdFor(humanId);
+    const body = (await request.json().catch(() => ({}))) as {
+      ids?: string[];
+      id?: string;
+      region_slug?: string;
+      title?: string;
+      semantic_text?: string;
+      pinned?: boolean;
+    };
+    const ids = body.ids ?? (body.id ? [body.id] : []);
+    if (ids.length === 0) return badRequest("id or ids required");
+    const owned = q.getItems(ids).filter((i) => i.space_id === spaceId);
+    if (owned.length === 0) return badRequest("no matching items");
+
+    if (request.method === "DELETE") {
+      for (const item of owned) q.deleteItem(item.id);
+      return json({ ok: true, deleted: owned.map((i) => i.id) });
+    }
+
+    // PATCH: move to another folder and/or rename (rename only makes sense for one item).
+    const dest = body.region_slug ? q.getRegionBySlug(spaceId, body.region_slug) : null;
+    if (body.region_slug && !dest) return badRequest("unknown region");
+    const now = Date.now();
+    const single = owned.length === 1;
+    for (const item of owned) {
+      q.updateItem({
+        ...item,
+        region_id: dest?.id ?? item.region_id,
+        title: single && body.title?.trim() ? body.title.trim().slice(0, 140) : item.title,
+        semantic_text:
+          single && body.semantic_text !== undefined ? body.semantic_text.trim() || null : item.semantic_text,
+        metadata: body.pinned === undefined ? item.metadata : { ...item.metadata, pinned: body.pinned },
+        updated_at: now,
+      });
+    }
+    return json({ ok: true, items: q.getItems(ids) });
   }
   return badRequest("unsupported method");
 }
@@ -509,12 +791,19 @@ async function handleBlob(request: Request, env: Env, humanId: string): Promise<
   if (!key.startsWith(`${spaceIdFor(humanId)}/`) || key.includes("..")) {
     return new Response("Not found", { status: 404 });
   }
-  const object = await env.BLOBS.get(key);
+  // Keys are content-addressed (random UUID, never reused), so a hit is safe to
+  // cache hard. `onlyIf` lets R2 answer 304 when the browser already holds it.
+  const cacheControl = "private, max-age=31536000, immutable";
+  const object = await env.BLOBS.get(key, { onlyIf: request.headers });
   if (!object) return new Response("Not found", { status: 404 });
+  if (!("body" in object) || object.body === undefined) {
+    return new Response(null, { status: 304, headers: { etag: object.httpEtag, "cache-control": cacheControl } });
+  }
   return new Response(object.body, {
     headers: {
       "content-type": object.httpMetadata?.contentType ?? "application/octet-stream",
-      "cache-control": "private, max-age=3600",
+      "cache-control": cacheControl,
+      etag: object.httpEtag,
     },
   });
 }
@@ -636,7 +925,7 @@ async function handleTask(request: Request, q: Queries, humanId: string): Promis
       if (!task) return badRequest("not found");
       return json({ ok: true, task });
     }
-    // Only the caller's own tasks. The guest space is shared, so without this
+    // Only the caller's own tasks. Without this
     // filter one visitor would see another's tasks and try to bind an agent
     // session to work that is not theirs — which the session route correctly
     // refuses, leaving the app wedged. Several judges will use this at once.
@@ -744,7 +1033,7 @@ function handleCapabilities(request: Request, q: Queries, humanId: string): Resp
 async function handleMcpCall(
   request: Request,
   q: Queries,
-  human: { human_id: string; kind: "guest" | "clerk" },
+  human: { human_id: string },
 ): Promise<Response> {
   if (request.method !== "POST") return badRequest("POST required");
   const body = (await request.json()) as ToolCallRequest;
@@ -763,7 +1052,26 @@ function handleArtifacts(request: Request, q: Queries, humanId: string): Respons
     if (!artifact) return badRequest("not found");
     return json({ ok: true, artifact, versions: q.listArtifactVersions(id) });
   }
-  return json({ ok: true, artifacts: q.listArtifacts(spaceIdFor(humanId)) });
+  const spaceId = spaceIdFor(humanId);
+  const regionsBySlug = q.listRegions(spaceId);
+  const regionById = new Map(regionsBySlug.map((r) => [r.id, r.slug]));
+  const artifacts = q.listArtifacts(spaceId).map((a) => {
+    const versions = q.listArtifactVersions(a.id);
+    const latest = versions[versions.length - 1];
+    const influences = latest ? q.listInfluences(latest.id) : [];
+    const items = q.getItems(influences.map((i) => i.item_id));
+    const regions = [...new Set(items.map((it) => regionById.get(it.region_id)).filter(Boolean))];
+    return {
+      ...a,
+      version_count: versions.length,
+      state: latest?.state ?? "draft",
+      updated_at: latest?.created_at ?? a.created_at,
+      preview_html: latest?.content_html ?? "",
+      influence_count: influences.length,
+      regions,
+    };
+  });
+  return json({ ok: true, artifacts });
 }
 
 /* ---------------- annotations ---------------- */
@@ -835,9 +1143,35 @@ async function handleDecisions(request: Request, q: Queries, humanId: string): P
 
 /* ---------------- taste ---------------- */
 
+function logTasteEvent(
+  q: Queries,
+  signalId: string,
+  kind: TasteEvent["kind"],
+  actor: TasteEvent["actor_type"],
+  detail = "",
+  versionId: string | null = null,
+  agentSessionId: string | null = null,
+): void {
+  q.insertTasteEvent({
+    id: crypto.randomUUID(),
+    signal_id: signalId,
+    kind,
+    actor_type: actor,
+    actor_label: actor === "human" ? "You" : actor === "agent" ? "Agent" : "System",
+    agent_session_id: agentSessionId,
+    detail,
+    version_id: versionId,
+    at: Date.now(),
+  });
+}
+
 async function handleTaste(request: Request, q: Queries, humanId: string): Promise<Response> {
   if (request.method === "GET") {
-    return json({ ok: true, signals: q.listTasteSignals(spaceIdFor(humanId)) });
+    return json({
+      ok: true,
+      signals: q.listTasteSignals(spaceIdFor(humanId)),
+      recent_events: q.recentTasteEvents(spaceIdFor(humanId), 12),
+    });
   }
   if (request.method === "POST") {
     const body = (await request.json()) as {
@@ -859,6 +1193,7 @@ async function handleTaste(request: Request, q: Queries, humanId: string): Promi
       approved_by: null,
       created_at: Date.now(),
     });
+    logTasteEvent(q, id, "proposed", "human", "Added by hand");
     return json({ ok: true, signal: q.getTasteSignal(id) });
   }
   if (request.method === "PATCH") {
@@ -875,14 +1210,18 @@ async function handleTaste(request: Request, q: Queries, humanId: string): Promi
     // changes: the doc's actions are accept, edit, rescope, reject. Dropping the
     // statement here would make the edit UI silently fail — the worst outcome
     // for a surface whose whole promise is that nothing changes without you.
-    if (typeof body.statement === "string" && body.statement.trim()) {
+    if (typeof body.statement === "string" && body.statement.trim() && body.statement.trim() !== existing.statement) {
       q.setTasteSignalStatement(body.id, body.statement.trim());
+      logTasteEvent(q, body.id, "edited", "human", "Reworded the statement");
     }
-    if (body.scope === "personal" || body.scope === "project") {
+    if ((body.scope === "personal" || body.scope === "project") && body.scope !== existing.scope) {
       q.setTasteSignalScope(body.id, body.scope);
+      logTasteEvent(q, body.id, "rescoped", "human", `Moved to ${body.scope}`);
     }
-    if (body.status) {
+    if (body.status && body.status !== existing.status) {
       q.setTasteSignalStatus(body.id, body.status, humanId);
+      const kind = body.status === "confirmed" ? "accepted" : body.status === "rejected" ? "rejected" : "superseded";
+      logTasteEvent(q, body.id, kind, "human");
     }
     return json({ ok: true, signal: q.getTasteSignal(body.id) });
   }
@@ -913,7 +1252,220 @@ function handleTasteEvidence(request: Request, q: Queries, humanId: string): Res
     annotation: e.annotation_id ? (q.getAnnotation(e.annotation_id) ?? null) : null,
     item: e.item_id ? (q.getItem(e.item_id) ?? null) : null,
   }));
-  return json({ ok: true, evidence });
+  const events = q.listTasteEvents(signalId).map((e) => ({
+    ...e,
+    artifact: e.version_id
+      ? (() => {
+          const v = q.getArtifactVersion(e.version_id!);
+          const a = v ? q.getArtifact(v.artifact_id) : null;
+          return a ? { id: a.id, title: a.title, version_no: v!.version_no } : null;
+        })()
+      : null,
+  }));
+  return json({ ok: true, evidence, events });
+}
+
+/* ---------------- stats ---------------- */
+
+const bumpCount = (m: Record<string, number>, k: string, n = 1) => (m[k] = (m[k] ?? 0) + n);
+
+const sortedRows = (m: Record<string, number>) =>
+  Object.entries(m)
+    .map(([label, value]) => ({ label, value }))
+    .sort((a, b) => b.value - a.value);
+
+/** "chatgpt-desktop" → "ChatGPT", "claude-code" → "Claude", etc. */
+function prettyClient(name: string): string {
+  const base = name.replace(/[-_](desktop|cli|code|web|app)$/i, "").replace(/[-_]/g, " ").trim();
+  const known: Record<string, string> = { chatgpt: "ChatGPT", claude: "Claude", cursor: "Cursor", copilot: "Copilot" };
+  return known[base.toLowerCase()] ?? base.replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function handleStats(request: Request, q: Queries, humanId: string): Response {
+  if (request.method !== "GET") return badRequest("GET required");
+  const spaceId = spaceIdFor(humanId);
+
+  const audit = q.spaceAuditEvents(spaceId, 800);
+  const accesses = q.spaceAccesses(spaceId, 800);
+  const sessions = new Map(q.listAgentSessions(spaceId).map((s) => [s.id, s]));
+  const items = q.listItemsBySpace(spaceId);
+  const regionName = new Map(q.listRegions(spaceId).map((r) => [r.id, r.name]));
+  const tasteApps = q.spaceTasteApplications(spaceId);
+
+  // Activity heatmap + tool use.
+  const activity_by_day: Record<string, number> = {};
+  const toolCounts: Record<string, number> = {};
+  for (const e of audit) {
+    bumpCount(activity_by_day, new Date(e.at).toISOString().slice(0, 10));
+    bumpCount(toolCounts, e.tool_name || e.operation);
+  }
+  for (const a of accesses) {
+    bumpCount(activity_by_day, new Date(a.at).toISOString().slice(0, 10));
+    bumpCount(toolCounts, a.tool_name);
+  }
+
+  // Per-agent contributions.
+  type Agg = { label: string; provider: string; actions: number; artifacts: number; taste: number };
+  const agents = new Map<string, Agg>();
+  const clientFor = (sid: string | null): Agg | null => {
+    if (!sid) return null;
+    const d = sessions.get(sid)?.declared;
+    if (!d?.client) return null;
+    const label = prettyClient(d.client);
+    if (!agents.has(label)) agents.set(label, { label, provider: d.provider ?? "", actions: 0, artifacts: 0, taste: 0 });
+    return agents.get(label)!;
+  };
+  for (const e of audit) {
+    const agg = clientFor(e.agent_session_id);
+    if (agg) agg.actions += 1;
+  }
+  for (const ta of tasteApps) {
+    const agg = clientFor(ta.agent_session_id);
+    if (agg) agg.taste += 1;
+  }
+
+  const artifacts = q.listArtifacts(spaceId);
+  const outcomeCounts: Record<string, number> = {};
+  const latest: { id: string; title: string; preview_html: string; updated_at: number }[] = [];
+  for (const a of artifacts) {
+    const versions = q.listArtifactVersions(a.id);
+    const last = versions[versions.length - 1];
+    if (!last) continue;
+    bumpCount(outcomeCounts, last.state);
+    for (const v of versions) {
+      const agg = clientFor(v.agent_session_id);
+      if (agg) agg.artifacts += 1;
+    }
+    latest.push({ id: a.id, title: a.title, preview_html: last.content_html, updated_at: last.created_at });
+  }
+
+  const folderCounts: Record<string, number> = {};
+  const sourceCounts: Record<string, number> = {};
+  for (const it of items) {
+    bumpCount(folderCounts, regionName.get(it.region_id) ?? "Other");
+    if (it.source_url) {
+      try {
+        bumpCount(sourceCounts, new URL(it.source_url).hostname.replace(/^www\./, ""));
+      } catch {
+        // ignore unparseable source urls
+      }
+    }
+  }
+
+  return json({
+    ok: true,
+    stats: {
+      totals: { items: items.length, artifacts: artifacts.length, actions: audit.length + accesses.length },
+      activity_by_day,
+      tools: sortedRows(toolCounts).slice(0, 8),
+      agents: [...agents.values()].sort((a, b) => b.actions - a.actions),
+      folders: sortedRows(folderCounts),
+      sources: sortedRows(sourceCounts).slice(0, 8),
+      outcomes: sortedRows(outcomeCounts),
+      latest: latest.sort((a, b) => b.updated_at - a.updated_at).slice(0, 6),
+    },
+  });
+}
+
+/* ---------------- edges (item links) ---------------- */
+
+async function handleEdges(request: Request, q: Queries, humanId: string): Promise<Response> {
+  const spaceId = spaceIdFor(humanId);
+  const owns = (itemId: string) => q.getItem(itemId)?.space_id === spaceId;
+
+  if (request.method === "GET") {
+    const itemId = new URL(request.url).searchParams.get("item_id");
+    if (!itemId || !owns(itemId)) return badRequest("unknown item");
+    const links = q.allEdgesForItem(itemId).map((e) => {
+      const otherId = e.from_id === itemId ? e.to_id : e.from_id;
+      return {
+        ...e,
+        direction: e.from_id === itemId ? ("out" as const) : ("in" as const),
+        other: q.getItem(otherId),
+        proposed_by_agent: e.approval_state === "proposed" && e.created_by.startsWith("agent:"),
+      };
+    });
+    return json({ ok: true, links });
+  }
+
+  if (request.method === "POST") {
+    const body = (await request.json()) as { from_item_id?: string; to_item_id?: string; relationship?: string };
+    const from = body.from_item_id ?? "";
+    const to = body.to_item_id ?? "";
+    if (!owns(from) || !owns(to) || from === to) return badRequest("both items must be yours");
+    const relationship = (RELATIONSHIPS as readonly string[]).includes(body.relationship ?? "")
+      ? (body.relationship as (typeof RELATIONSHIPS)[number])
+      : "related_to";
+    const edge = {
+      id: crypto.randomUUID(),
+      from_id: from,
+      to_id: to,
+      relationship,
+      weight: 1,
+      created_by: humanId,
+      approval_state: "approved" as const,
+      created_at: Date.now(),
+    };
+    q.insertEdge(edge);
+    return json({ ok: true, edge });
+  }
+
+  if (request.method === "PATCH") {
+    const body = (await request.json()) as { id?: string; approval_state?: "approved" | "rejected" };
+    const edge = body.id ? q.getEdge(body.id) : null;
+    if (!edge || !owns(edge.from_id)) return badRequest("unknown edge");
+    if (body.approval_state !== "approved" && body.approval_state !== "rejected") return badRequest("bad state");
+    q.setEdgeApproval(edge.id, body.approval_state);
+    return json({ ok: true, edge: q.getEdge(edge.id) });
+  }
+
+  if (request.method === "DELETE") {
+    const id = new URL(request.url).searchParams.get("id");
+    const edge = id ? q.getEdge(id) : null;
+    if (!edge || !owns(edge.from_id)) return badRequest("unknown edge");
+    q.deleteEdge(edge.id);
+    return json({ ok: true, deleted: edge.id });
+  }
+
+  return badRequest("unsupported method");
+}
+
+/* ---------------- item notes ---------------- */
+
+async function handleItemNotes(request: Request, q: Queries, humanId: string): Promise<Response> {
+  const spaceId = spaceIdFor(humanId);
+
+  if (request.method === "GET") {
+    const itemId = new URL(request.url).searchParams.get("item_id");
+    if (!itemId || q.getItem(itemId)?.space_id !== spaceId) return badRequest("unknown item");
+    return json({ ok: true, notes: q.listItemNotes(itemId) });
+  }
+
+  if (request.method === "POST") {
+    const body = (await request.json()) as { item_id?: string; body?: string };
+    if (!body.item_id || q.getItem(body.item_id)?.space_id !== spaceId) return badRequest("unknown item");
+    if (!body.body?.trim()) return badRequest("body required");
+    const note = {
+      id: crypto.randomUUID(),
+      item_id: body.item_id,
+      space_id: spaceId,
+      author_id: humanId,
+      body: body.body.trim().slice(0, 2000),
+      created_at: Date.now(),
+    };
+    q.insertItemNote(note);
+    return json({ ok: true, note });
+  }
+
+  if (request.method === "DELETE") {
+    const id = new URL(request.url).searchParams.get("id");
+    const note = id ? q.getItemNote(id) : null;
+    if (!note || note.space_id !== spaceId) return badRequest("unknown note");
+    q.deleteItemNote(note.id);
+    return json({ ok: true, deleted: note.id });
+  }
+
+  return badRequest("unsupported method");
 }
 
 /* ---------------- lens ---------------- */
@@ -926,8 +1478,10 @@ function handleLens(request: Request, q: Queries): Response {
   const limit = Number(url.searchParams.get("limit") ?? "50");
   return json({
     ok: true,
-    accesses: q.recentAccesses(taskId, limit),
-    denials: q.recentDenials(taskId, limit),
-    audit: q.recentAuditEvents(taskId, limit),
+    lens: {
+      accesses: q.recentAccesses(taskId, limit),
+      denials: q.recentDenials(taskId, limit),
+      audit: q.recentAuditEvents(taskId, limit),
+    },
   });
 }

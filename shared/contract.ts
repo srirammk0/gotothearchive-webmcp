@@ -136,6 +136,16 @@ export interface ContextEdge {
   created_at: number;
 }
 
+/** A human-written note pinned to a single archived item. */
+export interface ItemNote {
+  id: Id;
+  item_id: Id;
+  space_id: Id;
+  author_id: Id;
+  body: string;
+  created_at: number;
+}
+
 export interface Task {
   id: Id;
   space_id: Id;
@@ -310,6 +320,30 @@ export interface TasteEvidence {
   item_id: Id | null;
 }
 
+/** One entry in a signal's lifecycle + usage history. */
+export type TasteEventKind =
+  | "proposed"
+  | "edited"
+  | "accepted"
+  | "rescoped"
+  | "rejected"
+  | "superseded"
+  | "applied";
+
+export interface TasteEvent {
+  id: Id;
+  signal_id: Id;
+  kind: TasteEventKind;
+  actor_type: "agent" | "human" | "system";
+  actor_label: string;
+  /** For agent events: the session, so the acting client can be attributed. */
+  agent_session_id: Id | null;
+  detail: string;
+  /** For kind === "applied": the artifact version the signal shaped. */
+  version_id: Id | null;
+  at: number;
+}
+
 /* ------------------------------------------------------------------ *
  * Audit
  * ------------------------------------------------------------------ */
@@ -360,6 +394,7 @@ export interface RetrievedItem {
  * ------------------------------------------------------------------ */
 
 export const TOOL_NAMES = [
+  "identify_agent",
   "get_current_context_scope",
   "get_context_for_task",
   "inspect_context_item",
@@ -457,4 +492,10 @@ export const API = {
   /** GET ?signal_id=… — the evidence cited by one taste signal. */
   tasteEvidence: "/api/taste/evidence",
   lens: "/api/lens",
+  /** GET — assembled agent-usage stats for the whole space. */
+  stats: "/api/stats",
+  /** Links between items. GET ?item_id=… · POST create · PATCH review · DELETE ?id=… */
+  edges: "/api/edges",
+  /** Notes on one item. GET ?item_id=… · POST create · DELETE ?id=… */
+  itemNotes: "/api/items/notes",
 } as const;

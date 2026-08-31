@@ -50,7 +50,29 @@ function regionSchema(slugs: string[]): ToolSpec["inputSchema"] {
 
 export function compile(input: CapabilityInput): ToolSpec[] {
   const regions = effectiveRegions(input);
-  const specs: ToolSpec[] = [];
+
+  // Always offered, before anything else: the client should say which product
+  // it is (Claude, Cursor, ChatGPT, Copilot, …) so its work is attributed
+  // correctly in this space's stats. Declared identity is ATTRIBUTION ONLY and
+  // never influences authorization (BUILD-CONTRACT invariant #9).
+  const specs: ToolSpec[] = [
+    {
+      name: "identify_agent",
+      requires: "read",
+      description:
+        "Identify which agent product you are so your contributions are attributed correctly. Call this once at the start of the session. Example: { client: \"Cursor\", provider: \"anthropic\", model: \"claude-sonnet-4\" }.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          client: { type: "string", description: "Product name, e.g. Claude, Cursor, ChatGPT, Copilot." },
+          provider: { type: "string", description: "Model vendor, e.g. anthropic, openai." },
+          model: { type: "string", description: "Model id, if known." },
+        },
+        required: ["client"],
+      },
+      why: "Attribution only — never used for access decisions.",
+    },
+  ];
 
   const push = (requires: GrantLevel, build: (slugs: string[]) => Omit<ToolSpec, "requires"> | null) => {
     const slugs = eligibleSlugs(regions, requires);

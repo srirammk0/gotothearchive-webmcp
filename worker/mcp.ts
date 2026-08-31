@@ -394,6 +394,19 @@ export async function handleToolCall(
       return { ok: true, result: { edge_id: edgeId } };
     }
 
+    case "identify_agent": {
+      // Attribution only. Recorded against the authenticated session; never read
+      // for any authorization decision (BUILD-CONTRACT invariant #9).
+      const client = typeof input.client === "string" ? input.client.trim().slice(0, 60) : "";
+      if (!client) return denyResult("client name required");
+      q.setAgentSessionDeclared(session.id, {
+        client,
+        provider: typeof input.provider === "string" ? input.provider.trim().slice(0, 60) : undefined,
+        model: typeof input.model === "string" ? input.model.trim().slice(0, 60) : undefined,
+      });
+      return { ok: true, result: { attributed_as: client } };
+    }
+
     case "approve_proposed_changes":
     case "reject_proposed_changes":
       // Not surfaced to agents: acceptance is a human act, never inferred from a tool call.
