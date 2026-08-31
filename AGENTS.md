@@ -10,14 +10,24 @@ Do not assume a framework, package manager, deployment configuration, or code ar
 
 ## Current phase
 
-The product and design are documented. Application construction has not been authorized yet unless a later user request explicitly asks for it.
+**Implementation is underway**, targeting the OpenAI WebMCP Challenge deadline of
+September 3, 2026, 1:00pm PDT.
 
-When implementation begins:
+Before changing code, read [`docs/technical/BUILD-CONTRACT.md`](docs/technical/BUILD-CONTRACT.md).
+It is the frozen contract, alongside `shared/contract.ts` and `worker/db/schema.sql`.
+No agent may edit those three files unilaterally — report drift instead of working
+around it.
+
+Current pass ships **Archive, Workbench, and Taste**, plus the Agent Access panel and
+Agent Lens. Sharing and Inbox are deferred to v2; the human-access half of the
+permission model is still built, because agent authority is bounded by it.
+
+Standing rules:
 
 - Read the relevant focused documents before changing code.
-- Preserve the platform scope rather than collapsing it into a narrow demo MVP.
+- Do not relitigate the locked scope. It was decided deliberately, not by attrition.
 - Keep the ordinary product human-first and the hackathon story WebMCP-forward.
-- Treat permission, provenance, sharing, annotation, and taste behavior as real product state—not mock interface theater.
+- Treat permission, provenance, annotation, and taste behavior as real product state—not mock interface theater.
 
 ## Documentation map
 

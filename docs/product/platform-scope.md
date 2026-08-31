@@ -10,12 +10,15 @@ The platform has five primary destinations and one persistent contextual control
 |---|---|
 | Archive | Capture, browse, search, organize, relate, and revisit context |
 | Workbench | View agent-created work, inspect versions and influences, annotate, and decide |
-| Shared | Work with regions, projects, artifacts, and reviews involving other people |
 | Taste | Review confirmed preferences, evidence, scope, and proposed learnings |
-| Inbox | Process pending work, comments, approvals, revision requests, and taste proposals |
 | Agent Access | Contextual panel showing what the current agent may use and do |
 
-Agent Access is not a sixth destination. It follows the current project, task, artifact, or region.
+Agent Access is not a fourth destination. It follows the current project, task, artifact, or region.
+
+Shared and Inbox are deferred to v2. Their behavior remains specified in
+`sharing-and-permissions.md` and `information-architecture.md`, and the permission
+model they depend on is built in the current pass, but neither ships as a
+destination. See `../roadmap/deferred-and-future.md`.
 
 ## Included capabilities
 

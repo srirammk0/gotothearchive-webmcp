@@ -1,5 +1,17 @@
 # Deferred and future work
 
+## Deferred to v2
+
+- **Shared** as a destination. Collaborative spaces, regions, projects, review
+  links, and the Viewer/Commenter/Editor/Owner role surface.
+- **Inbox** as a destination. Pending approvals, mentions, revision requests, and
+  grouped triage.
+
+Both remain fully specified in `../product/sharing-and-permissions.md` and
+`../product/information-architecture.md`. The human-access half of the permission
+model is built in the current pass because agent authority is bounded by it, so
+neither surface requires rework to add later — only its own UI.
+
 ## Intentionally deferred from the current pass
 
 - Voice-note ingestion, transcription, and voice annotations.
@@ -17,7 +29,7 @@
 - Dark mode.
 - Advanced cross-version visual diffing for every artifact type.
 
-These cuts reduce incidental breadth without weakening Archive, Agent Access, Workbench, sharing, provenance, or continual taste learning.
+These cuts reduce incidental breadth without weakening Archive, Agent Access, Workbench, provenance, or continual taste learning.
 
 ## Foundation that must remain extensible
 
