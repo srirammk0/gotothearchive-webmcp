@@ -14,6 +14,7 @@ function nextLevel(level: GrantLevel): GrantLevel {
 
 interface Row {
   regionId: string;
+  parentId: string | null;
   slug: string;
   label: string;
   level: GrantLevel;
@@ -23,6 +24,28 @@ interface DenialView {
   id: string;
   tool_name: string;
   reason: string;
+}
+
+function AccessRow({ row, pending, onCycle }: { row: Row; pending: string | null; onCycle: (row: Row) => void }) {
+  const isWrite = row.level === "write";
+  const isNone = row.level === "none";
+  return (
+    <div className="flex items-center justify-between gap-3 border-b border-line-soft py-2.5">
+      <span className="text-[length:var(--text-body)] text-text">{row.label}</span>
+      <button
+        type="button"
+        onClick={() => onCycle(row)}
+        disabled={pending === row.regionId}
+        aria-label={`${row.label}: ${GRANT_LABEL[row.level]}. Activate to change.`}
+        className={`inline-flex shrink-0 items-center gap-1.5 rounded-[var(--radius-sm)] px-2 py-1 text-[length:var(--text-meta)] transition-colors duration-[var(--duration-fast)] hover:bg-raised disabled:opacity-40 ${
+          isWrite ? "text-accent" : isNone ? "text-faint hover:text-text" : "text-muted hover:text-text"
+        }`}
+      >
+        <GrantIcon level={row.level} />
+        {GRANT_LABEL[row.level]}
+      </button>
+    </div>
+  );
 }
 
 /** Region enum a tool's schema is currently scoped to, if it has one. */
@@ -60,6 +83,7 @@ function LiveAgentAccess({ taskId, regions }: { taskId: string; regions: Region[
     setRows(
       regions.map((region) => ({
         regionId: region.id,
+        parentId: region.parent_id,
         slug: region.slug,
         label: region.name,
         level: bySlug.get(region.slug) ?? "none",
@@ -99,6 +123,7 @@ function LiveAgentAccess({ taskId, regions }: { taskId: string; regions: Region[
   }
 
   const expiryNote = "For this task · expires when the task ends";
+  const childRows = (parentId: string) => rows?.filter((row) => row.parentId === parentId) ?? [];
 
   return (
     <aside
@@ -113,30 +138,17 @@ function LiveAgentAccess({ taskId, regions }: { taskId: string; regions: Region[
         <>
           <p className="text-[length:var(--text-micro)] text-faint">This agent can currently use</p>
           <ul className="flex flex-col">
-            {rows.map((row) => {
-              const isWrite = row.level === "write";
-              const isNone = row.level === "none";
+            {rows.filter((row) => row.parentId === null).map((row) => {
+              const children = childRows(row.regionId);
               return (
-                <li key={row.regionId} className="flex flex-col gap-1.5">
-                  <div className="flex items-center justify-between gap-3 border-b border-line-soft py-2.5 last:border-b-0">
-                    <span className="text-[length:var(--text-body)] text-text">{row.label}</span>
-                    <button
-                      type="button"
-                      onClick={() => void cycleLevel(row)}
-                      disabled={pending === row.regionId}
-                      aria-label={`${row.label}: ${GRANT_LABEL[row.level]}. Activate to change.`}
-                      className={`inline-flex shrink-0 items-center gap-1.5 rounded-[var(--radius-sm)] px-2 py-1 text-[length:var(--text-meta)] transition-colors duration-[var(--duration-fast)] hover:bg-raised disabled:opacity-40 ${
-                        isWrite ? "text-accent" : isNone ? "text-faint hover:text-text" : "text-muted hover:text-text"
-                      }`}
-                    >
-                      <GrantIcon level={row.level} />
-                      {GRANT_LABEL[row.level]}
-                    </button>
-                  </div>
-                  {rowError?.regionId === row.regionId ? (
-                    <p role="alert" className="pb-2 text-[length:var(--text-micro)] text-bad">
-                      {rowError.message}
-                    </p>
+                <li key={row.regionId}>
+                  <AccessRow row={row} pending={pending} onCycle={(next) => void cycleLevel(next)} />
+                  {rowError?.regionId === row.regionId ? <p role="alert" className="pb-2 text-[length:var(--text-micro)] text-bad">{rowError.message}</p> : null}
+                  {children.length > 0 ? (
+                    <details className="ml-3 border-l border-line-soft pl-3">
+                      <summary className="cursor-pointer py-2 text-[length:var(--text-micro)] text-faint hover:text-text">Folders · {children.length}</summary>
+                      {children.map((child) => <AccessRow key={child.regionId} row={child} pending={pending} onCycle={(next) => void cycleLevel(next)} />)}
+                    </details>
                   ) : null}
                 </li>
               );

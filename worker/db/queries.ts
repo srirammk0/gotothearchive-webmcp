@@ -903,6 +903,20 @@ export class Queries {
     this.sql.exec(`UPDATE artifact_versions SET state = ? WHERE id = ?`, state, id);
   }
 
+  /** Remove an artifact and its dependent review/provenance rows as one owned unit. */
+  deleteArtifact(id: string): void {
+    // Versions reference their parent versions, so clear internal links before
+    // removing the immutable history itself.
+    this.sql.exec(`UPDATE artifact_versions SET parent_version_id = NULL WHERE artifact_id = ?`, id);
+    this.sql.exec(`DELETE FROM taste_evidence WHERE version_id IN (SELECT id FROM artifact_versions WHERE artifact_id = ?)`, id);
+    this.sql.exec(`DELETE FROM taste_events WHERE version_id IN (SELECT id FROM artifact_versions WHERE artifact_id = ?)`, id);
+    this.sql.exec(`DELETE FROM annotations WHERE version_id IN (SELECT id FROM artifact_versions WHERE artifact_id = ?)`, id);
+    this.sql.exec(`DELETE FROM decisions WHERE version_id IN (SELECT id FROM artifact_versions WHERE artifact_id = ?)`, id);
+    this.sql.exec(`DELETE FROM influences WHERE version_id IN (SELECT id FROM artifact_versions WHERE artifact_id = ?)`, id);
+    this.sql.exec(`DELETE FROM artifact_versions WHERE artifact_id = ?`, id);
+    this.sql.exec(`DELETE FROM artifacts WHERE id = ?`, id);
+  }
+
   /* ---------------- influences / accesses / denials ---------------- */
 
   insertInfluence(i: InfluenceRecord): void {

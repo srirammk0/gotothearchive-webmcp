@@ -243,7 +243,6 @@ function RegionSection({
   onTogglePin,
   onRename,
   onDelete,
-  onAdd,
   onOpenFolder,
   showOpen,
 }: {
@@ -257,7 +256,6 @@ function RegionSection({
   onTogglePin: (item: ContextItem) => void;
   onRename: (region: Region, name: string) => void;
   onDelete: (region: Region) => void;
-  onAdd: (region: Region) => void;
   onOpenFolder: (region: Region) => void;
   showOpen: boolean;
 }) {
@@ -328,14 +326,6 @@ function RegionSection({
               {view.items.length} {view.items.length === 1 ? "item" : "items"}
             </span>
           ) : null}
-          <button
-            type="button"
-            aria-label={`Add to ${view.region.name}`}
-            onClick={() => onAdd(view.region)}
-            className="rounded-[var(--radius-sm)] p-1 text-muted transition-colors duration-[var(--duration-fast)] hover:bg-hover hover:text-text"
-          >
-            <Icon name="plus" size={14} />
-          </button>
           {showOpen ? (
             <button
               type="button"
@@ -597,10 +587,14 @@ export function Archive() {
                     <Icon name="plus" size={13} />
                     New folder
                   </Button>
-                  <Button variant="primary" className="box-border h-10" onClick={() => setCaptureFor(activeFolder)}>
-                    <Icon name="plus" size={13} />
-                    Add
-                  </Button>
+                  <button
+                    type="button"
+                    aria-label={`Add to ${activeFolder.name}`}
+                    onClick={() => setCaptureFor(activeFolder)}
+                    className="inline-flex h-10 w-10 items-center justify-center rounded-[var(--radius-sm)] bg-text text-canvas transition-colors hover:bg-text/85"
+                  >
+                    <Icon name="plus" size={14} />
+                  </button>
                 </>
               ) : (
                 <Button variant="primary" className="box-border h-10" onClick={() => { setFolderParent(null); setFolderModal(true); }}>
@@ -692,7 +686,6 @@ export function Archive() {
               onTogglePin={togglePin}
               onRename={renameFolder}
               onDelete={setFolderToDelete}
-              onAdd={setCaptureFor}
               onOpenFolder={(r) => setParams({ folder: r.slug })}
               showOpen={!activeFolder}
             />

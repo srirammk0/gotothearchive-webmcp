@@ -51,6 +51,10 @@ optional revised version
 
 Every state transition records actor, time, previous state, and optional note. Low-risk actions such as adding a comment can be optimistic. Decisions and version replacement require confirmed persistence.
 
+The artifact owner may delete an artifact through an explicit confirmation. This
+removes its review history and provenance records as one unit; it is never an
+agent capability.
+
 An agent-authored artifact stays in the Workbench until a human approves it. On
 approval, it is promoted into the explicit Archive region selected when the
 agent submitted it. Real Archive influences remain separate provenance; they

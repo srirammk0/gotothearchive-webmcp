@@ -220,6 +220,9 @@ export const listArtifacts = () => req<{ artifacts: WorkbenchArtifact[] }>(API.a
 export const getArtifact = (id: string) =>
   req<{ artifact: Artifact; versions: ArtifactVersion[] }>(`${API.artifacts}${qs({ id })}`);
 
+export const deleteArtifact = (id: string) =>
+  req<{ deleted: string }>(`${API.artifacts}${qs({ id })}`, { method: "DELETE" });
+
 export interface Provenance {
   influences: (InfluenceRecord & { item: ContextItem | null })[];
   accesses: { id: string; item_id: string; tool_name: string; at: number; item: ContextItem | null }[];

@@ -692,9 +692,16 @@ function submittedRegionId(contentHtml: string): string | null {
 /* ---------------- artifacts ---------------- */
 
 function handleArtifacts(request: Request, q: Queries, humanId: string): Response {
-  if (request.method !== "GET") return badRequest("GET required");
   const url = new URL(request.url);
   const id = url.searchParams.get("id");
+  if (request.method === "DELETE") {
+    if (!id) return badRequest("id required");
+    const artifact = q.getArtifact(id);
+    if (!artifact || artifact.space_id !== spaceIdFor(humanId)) return badRequest("not found");
+    q.deleteArtifact(id);
+    return json({ ok: true, deleted: id });
+  }
+  if (request.method !== "GET") return badRequest("GET required");
   if (id) {
     const artifact = q.getArtifact(id);
     if (!artifact || artifact.space_id !== spaceIdFor(humanId)) return badRequest("not found");

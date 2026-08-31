@@ -2,8 +2,9 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router";
 import { motion } from "motion/react";
 import { REVIEW_DECISIONS, type ArtifactState, type Region, type ReviewDecision } from "@shared/contract";
-import { ApiError, listArtifacts, type WorkbenchArtifact } from "../api/client";
+import { ApiError, deleteArtifact, listArtifacts, type WorkbenchArtifact } from "../api/client";
 import { Button } from "../ui/primitives/Button";
+import { Modal } from "../ui/primitives/Modal";
 import { EmptyState } from "../ui/primitives/EmptyState";
 import { EmptyRow } from "../ui/primitives/EmptyRow";
 import { Spinner } from "../ui/primitives/Spinner";
@@ -198,10 +199,13 @@ function ArtifactList({ regions }: { regions: Region[] }) {
 
 export function Workbench() {
   const { artifactId } = useParams();
+  const navigate = useNavigate();
   const { regions, agentSessionId } = useSpace();
   const { status, error, data, selectVersion, addAnnotation, decide } = useWorkbench(artifactId);
   const [decisionPending, setDecisionPending] = useState(false);
   const [decisionError, setDecisionError] = useState<string | null>(null);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deletePending, setDeletePending] = useState(false);
 
   useTrail(
     artifactId
@@ -240,15 +244,31 @@ export function Workbench() {
     }
   };
 
+  const handleDelete = async () => {
+    setDeletePending(true);
+    try {
+      await deleteArtifact(artifact.id);
+      navigate("/workbench", { replace: true });
+    } catch (e) {
+      setDecisionError(e instanceof ApiError ? e.message : "Couldn't delete that artifact.");
+      setDeletePending(false);
+    }
+  };
+
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-7">
       <ArtifactCapabilitySync taskId={artifact.task_id} artifactId={artifact.id} agentSessionId={agentSessionId} />
         <header className="flex flex-col gap-4">
-          <div className="min-w-0">
+          <div className="flex min-w-0 items-start justify-between gap-4">
+            <div>
             <h1 className="text-[length:var(--text-display)] leading-tight text-text">{artifact.title}</h1>
             <p className="mt-1 text-[length:var(--text-meta)] text-faint">
               Viewing v{version.version_no} of {versions.length} · {stateLabel(version.state)}
             </p>
+            </div>
+            <button type="button" aria-label="Delete artifact" onClick={() => setDeleteOpen(true)} className="mt-1 rounded-[var(--radius-sm)] p-1.5 text-faint hover:bg-hover hover:text-bad">
+              <Icon name="trash" size={15} />
+            </button>
           </div>
 
           {/* Every version is a reviewable variant — pick one, then decide on it. */}
@@ -320,6 +340,15 @@ export function Workbench() {
             </span>
           ) : null}
         </div>
+        <Modal open={deleteOpen} onClose={() => !deletePending && setDeleteOpen(false)} title="Delete artifact">
+          <div className="flex flex-col gap-4">
+            <p className="text-[length:var(--text-body)] leading-relaxed text-muted">Delete “{artifact.title}” and its version history? This cannot be undone.</p>
+            <div className="flex justify-end gap-2">
+              <Button variant="secondary" disabled={deletePending} onClick={() => setDeleteOpen(false)}>Cancel</Button>
+              <Button variant="danger" disabled={deletePending} onClick={() => void handleDelete()}>{deletePending ? "Deleting…" : "Delete artifact"}</Button>
+            </div>
+          </div>
+        </Modal>
     </div>
   );
 }
