@@ -20,6 +20,7 @@ import { guestCookie, resolveHuman } from "./auth";
 import { authorizedRegionIds, humanRegions, liveGrants } from "./permissions";
 import { traverse } from "./graph";
 import { handleToolCall } from "./mcp";
+import { SEED_ASSETS } from "./seed-assets";
 
 /**
  * Each visitor gets their own Space, keyed to their guest identity.
@@ -59,7 +60,7 @@ export async function handleRoute(
 
   switch (url.pathname) {
     case API.bootstrap:
-      return withCookie(await handleBootstrap(request, q, human.human_id));
+      return withCookie(await handleBootstrap(request, env, q, human.human_id));
     case API.regions:
       return withCookie(handleRegions(request, q, human.human_id));
     case API.items:
@@ -101,27 +102,41 @@ export async function handleRoute(
 
 /* ---------------- bootstrap ---------------- */
 
-async function handleBootstrap(request: Request, q: Queries, humanId: string): Promise<Response> {
+async function handleBootstrap(request: Request, env: Env, q: Queries, humanId: string): Promise<Response> {
   if (request.method !== "POST") return badRequest("POST required");
   const existing = q.getSpace(spaceIdFor(humanId));
   if (existing) {
-    // Backfill rather than skip: a space created by an earlier build may predate
-    // the seeded review round, and returning early would leave that visitor
-    // looking at an empty Workbench forever.
-    if (q.listArtifacts(existing.id).length === 0) {
-      const byRegion: Record<string, string> = {};
-      for (const r of q.listRegions(existing.id)) byRegion[r.slug] = r.id;
-      const ids: Record<string, string> = {};
-      for (const item of q.listItemsBySpace(existing.id)) {
-        if (item.title.startsWith("Atlas rebrand")) ids["brief_atlas"] = item.id;
-        if (item.title.startsWith("Atlas logo draft")) ids["draft_atlas_v1"] = item.id;
-        if (item.title.startsWith("Terracotta")) ids["ref_terracotta"] = item.id;
-        if (item.title.startsWith("Editorial serif")) ids["ref_editorial_type"] = item.id;
-      }
-      if (ids["brief_atlas"] && ids["ref_terracotta"] && ids["ref_editorial_type"] && ids["draft_atlas_v1"]) {
-        seedPriorReview(q, existing.id, ids, existing.owner_id, Date.now());
-      }
+    // Backfill rather than skip. A space created by an earlier build may predate
+    // the seeded review round or the seeded reference images, and returning early
+    // would leave that visitor looking at an empty Workbench and a text-only
+    // Archive forever. Each backfill is guarded by its own condition so adding a
+    // later one never silently depends on an earlier one having run.
+    const seedIds: Record<string, string> = {};
+    for (const item of q.listItemsBySpace(existing.id)) {
+      if (item.title.startsWith("Atlas rebrand")) seedIds["brief_atlas"] = item.id;
+      if (item.title.startsWith("Atlas logo draft")) seedIds["draft_atlas_v1"] = item.id;
+      if (item.title.startsWith("Terracotta")) seedIds["ref_terracotta"] = item.id;
+      if (item.title.startsWith("Editorial serif")) seedIds["ref_editorial_type"] = item.id;
+      if (item.title.startsWith("Friendly onboarding")) seedIds["ref_onboarding_flow"] = item.id;
     }
+
+    if (
+      q.listArtifacts(existing.id).length === 0 &&
+      seedIds["brief_atlas"] &&
+      seedIds["ref_terracotta"] &&
+      seedIds["ref_editorial_type"] &&
+      seedIds["draft_atlas_v1"]
+    ) {
+      seedPriorReview(q, existing.id, seedIds, existing.owner_id, Date.now());
+    }
+
+    const missingImages = q
+      .listItemsBySpace(existing.id)
+      .some((i) => i.content_ref === null && Object.values(seedIds).includes(i.id));
+    if (missingImages) {
+      await attachSeedAssets(env, q, existing.id, seedIds);
+    }
+
     return json({ ok: true, space: existing, regions: q.listRegions(existing.id) });
   }
 
@@ -153,7 +168,8 @@ async function handleBootstrap(request: Request, q: Queries, humanId: string): P
     });
   }
 
-  seedItems(q, spaceIdFor(humanId), regionIds, humanId, now);
+  const seededIds = seedItems(q, spaceIdFor(humanId), regionIds, humanId, now);
+  await attachSeedAssets(env, q, spaceIdFor(humanId), seededIds);
 
   return json({
     ok: true,
@@ -168,7 +184,7 @@ function seedItems(
   regionIds: Record<string, string>,
   ownerId: string,
   now: number,
-): void {
+): Record<string, string> {
   const item = (
     key: string,
     region: string,
@@ -237,6 +253,7 @@ function seedItems(
   edge("brief_atlas", "note_therapy", "related_to", 0.4);
 
   seedPriorReview(q, spaceId, ids, ownerId, now);
+  return ids;
 }
 
 /**
@@ -438,6 +455,33 @@ async function handleItems(request: Request, q: Queries, humanId: string): Promi
     return json({ ok: true, item: q.getItem(id) });
   }
   return badRequest("unsupported method");
+}
+
+/**
+ * Writes the seeded SVG references into R2 and points their items at them.
+ *
+ * Without this every "Image" item rendered as a text row, and an archive of a
+ * designer's work with no visible work in it cannot look like anything but a
+ * list. Failures here are non-fatal: canonical item creation must not depend on
+ * derived assets succeeding.
+ */
+async function attachSeedAssets(
+  env: Env,
+  q: Queries,
+  spaceId: string,
+  ids: Record<string, string>,
+): Promise<void> {
+  for (const [seedKey, svg] of Object.entries(SEED_ASSETS)) {
+    const itemId = ids[seedKey];
+    if (!itemId) continue;
+    const key = `${spaceId}/seed-${seedKey}.svg`;
+    try {
+      await env.BLOBS.put(key, svg, { httpMetadata: { contentType: "image/svg+xml" } });
+      q.setItemContentRef(itemId, key);
+    } catch {
+      // Leave the item as text rather than failing the whole bootstrap.
+    }
+  }
 }
 
 /* ---------------- upload ---------------- */

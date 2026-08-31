@@ -792,6 +792,15 @@ export class Queries {
       .map(toAnnotation);
   }
 
+  setItemContentRef(id: string, contentRef: string): void {
+    this.sql.exec(
+      `UPDATE items SET content_ref = ?, updated_at = ? WHERE id = ?`,
+      contentRef,
+      Date.now(),
+      id,
+    );
+  }
+
   getAnnotation(id: string): Annotation | null {
     const row = this.sql
       .exec<AnnotationRow>(`SELECT * FROM annotations WHERE id = ?`, id)
