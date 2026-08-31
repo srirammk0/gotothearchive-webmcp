@@ -418,6 +418,8 @@ export type ToolCallResponse =
 
 /** Server-side denial reasons. Surfaced verbatim in Agent Lens. */
 export const DENIAL_REASONS = {
+  UNKNOWN_SESSION: "No registered agent session — call /api/session first",
+  SESSION_MISMATCH: "This agent session belongs to a different person or task",
   NO_GRANT: "No grant exists for the requested region",
   REVOKED: "The grant for this region was revoked",
   EXPIRED: "The grant for this region has expired",
@@ -439,6 +441,8 @@ export const API = {
   upload: "/api/upload",
   graph: "/api/graph",
   task: "/api/task",
+  /** Registers an agent session bound to the authenticated human + task. */
+  session: "/api/session",
   grants: "/api/grants",
   capabilities: "/api/capabilities",
   toolCall: "/api/mcp/call",

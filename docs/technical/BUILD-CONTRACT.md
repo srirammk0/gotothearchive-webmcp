@@ -46,6 +46,19 @@ These come from `docs/product/sharing-and-permissions.md` and `docs/technical/we
 
 10. **Revocation prevents future access.** It does not claim a model has forgotten what it already received. Never write copy that says otherwise.
 
+11. **Approval is never an agent capability.** `approve_proposed_changes` and
+    `reject_proposed_changes` are never compiled into the tool surface at any grant
+    level, and the server refuses them by name. Both enforcement points agree on
+    purpose.
+
+    Acceptance is the moment a proposal becomes canonical human context. If an agent
+    could call it, `propose` would collapse into `write` with an extra step. We cannot
+    distinguish "the person asked the agent to approve this" from "the agent decided to
+    approve this" across the WebMCP boundary, so we do not offer the capability. Approval
+    happens through the human review controls, which post to `/api/decisions`.
+
+    Do not "fix" this by adding the tools back. It is deliberate, and it is tested.
+
 ## WebMCP API notes (verified against Chrome docs, Aug 2026)
 
 - The object is **`document.modelContext`**. `navigator.modelContext` is deprecated as of Chrome 150; feature-detect and prefer `document`.

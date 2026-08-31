@@ -62,7 +62,9 @@ export function compile(input: CapabilityInput): ToolSpec[] {
 
   push("read", (slugs) => ({
     name: "get_current_context_scope",
-    description: "List the regions currently accessible for this task, with their access level.",
+    description: input.pageState.hasPendingProposals
+      ? "List the regions currently accessible for this task, with their access level. Something you submitted is currently awaiting human review; it is not yet canonical, and there is no tool to approve it yourself."
+      : "List the regions currently accessible for this task, with their access level.",
     inputSchema: { type: "object", properties: {} },
     why: `You can view ${slugs.join(", ")} for this task.`,
   }));
@@ -144,35 +146,23 @@ export function compile(input: CapabilityInput): ToolSpec[] {
     why: `You can suggest changes on: ${slugs.join(", ")}.`,
   }));
 
-  push("write", (slugs) =>
-    input.pageState.hasPendingProposals
-      ? {
-          name: "approve_proposed_changes",
-          description: "Accept one or more pending proposed context changes, making them canonical.",
-          inputSchema: {
-            type: "object",
-            properties: { region: { type: "string", enum: slugs }, proposal_id: { type: "string" } },
-            required: ["proposal_id"],
-          },
-          why: `Pending proposals exist and you can edit directly on: ${slugs.join(", ")}.`,
-        }
-      : null,
-  );
-
-  push("write", (slugs) =>
-    input.pageState.hasPendingProposals
-      ? {
-          name: "reject_proposed_changes",
-          description: "Reject one or more pending proposed context changes.",
-          inputSchema: {
-            type: "object",
-            properties: { region: { type: "string", enum: slugs }, proposal_id: { type: "string" } },
-            required: ["proposal_id"],
-          },
-          why: `Pending proposals exist and you can edit directly on: ${slugs.join(", ")}.`,
-        }
-      : null,
-  );
+  // `approve_proposed_changes` and `reject_proposed_changes` are deliberately
+  // never compiled into the agent's tool surface, at any grant level.
+  //
+  // Acceptance is the moment a proposal becomes canonical human context. If an
+  // agent could call it, "propose" would collapse into "write" with an extra
+  // step, and the product's first principle — humans own canonical context —
+  // would hold only by convention. We cannot distinguish "the person asked the
+  // agent to approve this" from "the agent decided to approve this" across the
+  // WebMCP boundary, so we do not offer the capability at all. Approval happens
+  // through the human review controls, which post to /api/decisions.
+  //
+  // The server refuses these tool names independently (worker/mcp.ts). The two
+  // enforcement points agree on purpose: the tool is absent AND refused.
+  //
+  // `pageState.hasPendingProposals` therefore does not gate a tool. It is
+  // reported to the agent below so it can tell that its own submission is
+  // awaiting a person, rather than retrying or assuming failure.
 
   return specs;
 }

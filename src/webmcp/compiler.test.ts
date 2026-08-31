@@ -89,21 +89,25 @@ test("propose-only tools absent at read", () => {
   assert.equal(findTool(specs, "record_feedback"), undefined);
 });
 
-test("pending-proposal tools appear and disappear with pageState", () => {
-  const base: CapabilityInput = {
+test("approval is never an agent capability, even at write with proposals pending", () => {
+  const withPending: CapabilityInput = {
     humanRegions: [{ slug: "work", level: "write" }],
     grants: [{ slug: "work", level: "write" }],
     task,
-    pageState: noPageState,
-  };
-  assert.equal(findTool(compile(base), "approve_proposed_changes"), undefined);
-
-  const withPending: CapabilityInput = {
-    ...base,
     pageState: { hasPendingProposals: true, activeArtifactId: null },
   };
-  assert.ok(findTool(compile(withPending), "approve_proposed_changes"));
-  assert.ok(findTool(compile(withPending), "reject_proposed_changes"));
+  const specs = compile(withPending);
+  assert.equal(findTool(specs, "approve_proposed_changes"), undefined);
+  assert.equal(findTool(specs, "reject_proposed_changes"), undefined);
+
+  // The agent is still told a proposal is pending, so it does not retry or
+  // assume its submission failed — it just cannot act on it.
+  const scope = findTool(specs, "get_current_context_scope");
+  assert.ok(scope);
+  assert.ok(
+    scope.description.includes("awaiting human review"),
+    "pending state must be reported to the agent even though no tool acts on it",
+  );
 });
 
 test("trace_artifact_influences appears only when an artifact is active", () => {
