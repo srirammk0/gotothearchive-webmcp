@@ -5,6 +5,7 @@ import type { Annotation, ArtifactVersion } from "@shared/contract";
 import { Button } from "../primitives/Button";
 import { Icon } from "../primitives/Icon";
 import { duration, ease } from "../tokens";
+import { isComponentPreview, previewSandbox, previewSrcDoc } from "./componentPreview";
 
 type Rect = { x: number; y: number; w: number; h: number };
 
@@ -38,6 +39,9 @@ export function ArtifactViewer({ version, annotations = [], onAddRegion }: Artif
   const regionAnnotations = annotations.filter(
     (a): a is Annotation & { target: { kind: "region" } & Rect } => a.target?.kind === "region",
   );
+  const componentPreview = isComponentPreview(version.content_html);
+  const srcDoc = previewSrcDoc(version.content_html);
+  const sandbox = previewSandbox(version.content_html);
 
   const pointFromEvent = (e: React.PointerEvent) => {
     const box = layerRef.current!.getBoundingClientRect();
@@ -82,7 +86,11 @@ export function ArtifactViewer({ version, annotations = [], onAddRegion }: Artif
     <div className="flex flex-col gap-2">
       <div className="flex items-center justify-between">
         <p className="text-[length:var(--text-micro)] text-faint">
-          {regionAnnotations.length > 0 ? `${regionAnnotations.length} region comment(s)` : "Preview"}
+          {regionAnnotations.length > 0
+            ? `${regionAnnotations.length} region comment(s)`
+            : componentPreview
+              ? "Interactive component preview · isolated"
+              : "Preview"}
         </p>
         {onAddRegion ? (
           <button
@@ -105,8 +113,8 @@ export function ArtifactViewer({ version, annotations = [], onAddRegion }: Artif
       <div className="group relative">
         <iframe
           title="Artifact content"
-          srcDoc={version.content_html}
-          sandbox=""
+          srcDoc={srcDoc}
+          sandbox={sandbox}
           referrerPolicy="no-referrer"
           className="h-[560px] w-full rounded-[var(--radius-md)] border border-line bg-white"
         />
@@ -216,8 +224,8 @@ export function ArtifactViewer({ version, annotations = [], onAddRegion }: Artif
               </div>
               <iframe
                 title="Artifact content, full screen"
-                srcDoc={version.content_html}
-                sandbox=""
+                srcDoc={srcDoc}
+                sandbox={sandbox}
                 referrerPolicy="no-referrer"
                 className="min-h-0 flex-1 rounded-[var(--radius-md)] border border-line bg-white"
               />

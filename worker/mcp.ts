@@ -265,7 +265,13 @@ export async function handleToolCall(
       if (!budget.ok) return denyResult(budget.message);
 
       const title = typeof input.title === "string" ? input.title : "Untitled artifact";
-      const contentHtml = typeof input.content_html === "string" ? input.content_html : "";
+      const rawContentHtml = typeof input.content_html === "string" ? input.content_html : "";
+      // A component preview remains a review artifact, not a host-executed app.
+      // The marker selects the isolated iframe policy in the Workbench.
+      const contentHtml =
+        input.renderer === "component"
+          ? `<meta name="gotothearchive-renderer" content="component">${rawContentHtml}`
+          : rawContentHtml;
       const parentVersionId =
         typeof input.parent_version_id === "string" ? input.parent_version_id : null;
 

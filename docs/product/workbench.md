@@ -157,6 +157,17 @@ Artifact viewers treat content as untrusted.
 
 The Workbench is a product-level review sandbox, not permission to execute arbitrary agent code on the user's machine.
 
+### Current component-preview path
+
+Agents may submit a self-contained React/Tailwind UI preview as an artifact.
+It runs only when the artifact explicitly requests the component renderer, in
+an opaque iframe that permits scripts but denies same-origin access, host
+communication, navigation, forms, storage, and arbitrary network connections.
+React and Tailwind may load only from the preview's approved library CDNs.
+Static HTML artifacts remain fully inert. This is for reviewing a UI component, not
+for running a project, terminal, server, package installer, or arbitrary code
+environment.
+
 ## Notifications and Inbox
 
 Workbench events create Inbox entries when action is required:

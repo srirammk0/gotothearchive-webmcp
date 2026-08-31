@@ -2,14 +2,16 @@
  * A non-interactive thumbnail of artifact HTML. Same `sandbox=""` isolation as
  * the full viewer; rendered large then scaled down so text stays crisp.
  */
+import { previewSandbox, previewSrcDoc } from "./componentPreview";
+
 export function ArtifactThumb({ html, className = "" }: { html: string; className?: string }) {
   return (
     <div className={`relative overflow-hidden rounded-[var(--radius-sm)] border border-line-soft bg-white ${className}`}>
       {html ? (
         <iframe
           title="Artifact preview"
-          srcDoc={html}
-          sandbox=""
+          srcDoc={previewSrcDoc(html)}
+          sandbox={previewSandbox(html)}
           referrerPolicy="no-referrer"
           tabIndex={-1}
           aria-hidden="true"

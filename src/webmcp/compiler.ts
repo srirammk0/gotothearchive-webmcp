@@ -169,7 +169,17 @@ export function compile(input: CapabilityInput): ToolSpec[] {
       properties: {
         region: { type: "string", enum: slugs },
         title: { type: "string" },
-        content_html: { type: "string" },
+        content_html: {
+          type: "string",
+          description:
+            "A complete preview document. For component, include React/ReactDOM UMD scripts from unpkg.com and the Tailwind Play CDN; JSX may use @babel/standalone. The preview has no access to the host app, storage, forms, navigation, or arbitrary network requests.",
+        },
+        renderer: {
+          type: "string",
+          enum: ["static_html", "component"],
+          description:
+            "Use component for a self-contained React/Tailwind UI preview. It runs only in an isolated iframe with no host, storage, navigation, form, or network access.",
+        },
         used_item_ids: {
           type: "array",
           items: { type: "string" },
