@@ -625,10 +625,13 @@ function handleCapabilities(request: Request, q: Queries, humanId: string): Resp
   if (request.method !== "GET") return badRequest("GET required");
   const url = new URL(request.url);
   const taskId = url.searchParams.get("task_id");
+  const activeArtifactId = url.searchParams.get("artifact_id");
   if (!taskId) return badRequest("task_id required");
   const task = q.getTask(taskId);
   if (!task) return badRequest("unknown task");
   if (task.human_id !== humanId) return badRequest("unknown task");
+  const activeArtifact = activeArtifactId ? q.getArtifact(activeArtifactId) : null;
+  const artifactIsInTask = activeArtifact?.task_id === task.id && activeArtifact.space_id === task.space_id;
 
   const regions = q.listRegions(task.space_id);
   const slugById = new Map(regions.map((r) => [r.id, r.slug]));
@@ -645,7 +648,7 @@ function handleCapabilities(request: Request, q: Queries, humanId: string): Resp
     humanRegions: human,
     grants,
     task: { id: task.id, title: task.title, expires_at: task.expires_at },
-    pageState: { hasPendingProposals: false, activeArtifactId: null },
+    pageState: { hasPendingProposals: false, activeArtifactId: artifactIsInTask ? activeArtifactId : null },
   };
   return json({ ok: true, capabilities: payload });
 }
@@ -662,7 +665,28 @@ async function handleMcpCall(
   if (over) return over;
   const body = (await request.json()) as ToolCallRequest;
   const result = await handleToolCall(body, q, human, Date.now());
+  if (result.ok) {
+    const session = q.getAgentSession(body.agent_session_id);
+    q.insertAuditEvent({
+      id: crypto.randomUUID(),
+      actor_type: "agent",
+      actor_label: session?.declared?.client ?? "Agent",
+      agent_session_id: body.agent_session_id,
+      human_id: human.human_id,
+      task_id: body.task_id,
+      tool_name: body.tool,
+      operation: "tool_call",
+      payload: { input: body.input },
+      at: Date.now(),
+    });
+  }
   return json(result, { status: result.ok ? 200 : 403 });
+}
+
+/** Server-written submission placement. Separate from influence provenance. */
+function submittedRegionId(contentHtml: string): string | null {
+  const match = contentHtml.match(/<meta\s+name=["']gotothearchive-region["']\s+content=["']([^"']+)["']\s*\/?>/i);
+  return match?.[1] ?? null;
 }
 
 /* ---------------- artifacts ---------------- */
@@ -684,7 +708,11 @@ function handleArtifacts(request: Request, q: Queries, humanId: string): Respons
     const latest = versions[versions.length - 1];
     const influences = latest ? q.listInfluences(latest.id) : [];
     const items = q.getItems(influences.map((i) => i.item_id));
-    const regions = [...new Set(items.map((it) => regionById.get(it.region_id)).filter(Boolean))];
+    const influencedRegions = items.map((it) => regionById.get(it.region_id)).filter((slug): slug is string => Boolean(slug));
+    // Placement never masquerades as provenance: use the submitted folder only
+    // when an artifact has no real influences to group by.
+    const submittedRegion = latest ? regionById.get(submittedRegionId(latest.content_html) ?? "") : undefined;
+    const regions = [...new Set(influencedRegions.length > 0 ? influencedRegions : submittedRegion ? [submittedRegion] : [])];
     return {
       ...a,
       version_count: versions.length,
@@ -778,15 +806,16 @@ async function handleDecisions(request: Request, q: Queries, humanId: string): P
   // learning from ungrounded output.
   if ((nextState === "approved" || nextState === "approved_with_notes") && version.agent_session_id) {
     const influences = q.listInfluences(version.id);
-    const destination = influences.length > 0 ? q.getItem(influences[0].item_id) : null;
+    const influencedDestination = influences.length > 0 ? q.getItem(influences[0].item_id) : null;
+    const destinationRegion = influencedDestination?.region_id ?? submittedRegionId(version.content_html);
     const alreadyPromoted = q
       .listItemsBySpace(artifact.space_id)
       .some((item) => item.metadata.artifact_version_id === version.id);
-    if (destination && !alreadyPromoted) {
+    if (destinationRegion && q.getRegion(destinationRegion)?.space_id === artifact.space_id && !alreadyPromoted) {
       q.insertItem({
         id: crypto.randomUUID(),
         space_id: artifact.space_id,
-        region_id: destination.region_id,
+        region_id: destinationRegion,
         owner_id: humanId,
         type: "document",
         title: artifact.title,
@@ -992,7 +1021,6 @@ function handleStats(request: Request, q: Queries, humanId: string): Response {
   const spaceId = spaceIdFor(humanId);
 
   const audit = q.spaceAuditEvents(spaceId, 800);
-  const accesses = q.spaceAccesses(spaceId, 800);
   const sessions = new Map(q.listAgentSessions(spaceId).map((s) => [s.id, s]));
   const items = q.listItemsBySpace(spaceId);
   const regionName = new Map(q.listRegions(spaceId).map((r) => [r.id, r.name]));
@@ -1005,10 +1033,9 @@ function handleStats(request: Request, q: Queries, humanId: string): Response {
     bumpCount(activity_by_day, new Date(e.at).toISOString().slice(0, 10));
     bumpCount(toolCounts, e.tool_name || e.operation);
   }
-  for (const a of accesses) {
-    bumpCount(activity_by_day, new Date(a.at).toISOString().slice(0, 10));
-    bumpCount(toolCounts, a.tool_name);
-  }
+  // Access records remain provenance, but are already represented by their
+  // successful WebMCP tool-call audit event. Counting both would inflate the
+  // human-facing activity totals.
 
   // Per-agent contributions.
   type Agg = { label: string; provider: string; actions: number; artifacts: number; taste: number };
@@ -1073,7 +1100,7 @@ function handleStats(request: Request, q: Queries, humanId: string): Response {
   return json({
     ok: true,
     stats: {
-      totals: { items: items.length, artifacts: artifacts.length, actions: audit.length + accesses.length },
+      totals: { items: items.length, artifacts: artifacts.length, actions: audit.length },
       activity_by_day,
       tools: sortedRows(toolCounts).slice(0, 8),
       agents: [...agents.values()].sort((a, b) => b.actions - a.actions),

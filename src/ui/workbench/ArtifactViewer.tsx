@@ -14,6 +14,8 @@ export interface ArtifactViewerProps {
   annotations?: Annotation[];
   /** Fired when the reviewer draws a region and writes a comment on it. */
   onAddRegion?: (target: { kind: "region" } & Rect, comment: string) => void;
+  /** Fired from the same compact annotation control for a whole-artifact note. */
+  onAddComment?: (comment: string) => void;
 }
 
 /**
@@ -21,9 +23,11 @@ export interface ArtifactViewerProps {
  * same-origin). On top of it, a review layer: toggle "Mark a region", drag a
  * box, write a comment. Existing region comments show as numbered boxes.
  */
-export function ArtifactViewer({ version, annotations = [], onAddRegion }: ArtifactViewerProps) {
+export function ArtifactViewer({ version, annotations = [], onAddRegion, onAddComment }: ArtifactViewerProps) {
   const [full, setFull] = useState(false);
   const [marking, setMarking] = useState(false);
+  const [annotationMenu, setAnnotationMenu] = useState(false);
+  const [commenting, setCommenting] = useState(false);
   const [draft, setDraft] = useState<Rect | null>(null);
   const [comment, setComment] = useState("");
   const startRef = useRef<{ x: number; y: number } | null>(null);
@@ -82,9 +86,16 @@ export function ArtifactViewer({ version, annotations = [], onAddRegion }: Artif
     setMarking(false);
   };
 
+  const submitWholeComment = () => {
+    if (!comment.trim() || !onAddComment) return;
+    onAddComment(comment.trim());
+    setComment("");
+    setCommenting(false);
+  };
+
   return (
     <div className="flex flex-col gap-2">
-      <div className="flex items-center justify-between">
+      <div className="relative flex items-center justify-between gap-3">
         <p className="text-[length:var(--text-micro)] text-faint">
           {regionAnnotations.length > 0
             ? `${regionAnnotations.length} region comment(s)`
@@ -92,23 +103,75 @@ export function ArtifactViewer({ version, annotations = [], onAddRegion }: Artif
               ? "Interactive component preview · isolated"
               : "Preview"}
         </p>
-        {onAddRegion ? (
+        {onAddRegion || onAddComment ? (
           <button
             type="button"
             onClick={() => {
-              setMarking((v) => !v);
+              setAnnotationMenu((v) => !v);
+              setCommenting(false);
               setDraft(null);
             }}
-            aria-pressed={marking}
+            aria-expanded={annotationMenu}
             className={`inline-flex items-center gap-1.5 rounded-[var(--radius-sm)] px-2 py-1 text-[length:var(--text-micro)] transition-colors duration-[var(--duration-fast)] ${
-              marking ? "bg-accent/15 text-accent" : "text-muted hover:text-text"
+              marking || commenting || annotationMenu ? "bg-accent/15 text-accent" : "text-muted hover:text-text"
             }`}
           >
             <Icon name="pencil" size={12} />
-            {marking ? "Marking — drag a box" : "Mark a region"}
+            {marking ? "Draw on preview" : "Annotate"}
           </button>
         ) : null}
+        {annotationMenu ? (
+          <div className="absolute right-0 top-full z-20 mt-2 flex w-48 flex-col rounded-[var(--radius-md)] border border-line bg-surface p-1 shadow-xl">
+            {onAddRegion ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setMarking(true);
+                  setCommenting(false);
+                  setAnnotationMenu(false);
+                }}
+                className="rounded-[var(--radius-sm)] px-2.5 py-2 text-left text-[length:var(--text-meta)] text-text hover:bg-hover"
+              >
+                Draw on preview
+              </button>
+            ) : null}
+            {onAddComment ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setCommenting(true);
+                  setMarking(false);
+                  setAnnotationMenu(false);
+                }}
+                className="rounded-[var(--radius-sm)] px-2.5 py-2 text-left text-[length:var(--text-meta)] text-text hover:bg-hover"
+              >
+                Comment on version
+              </button>
+            ) : null}
+          </div>
+        ) : null}
       </div>
+
+      {commenting ? (
+        <div className="flex flex-col gap-2 border-b border-line-soft pb-3">
+          <textarea
+            autoFocus
+            rows={2}
+            value={comment}
+            onChange={(e) => setComment(e.target.value)}
+            placeholder="What should change?"
+            className="w-full resize-none bg-transparent text-[length:var(--text-body)] text-text placeholder:text-faint"
+          />
+          <div className="flex justify-end gap-2">
+            <Button type="button" variant="ghost" onClick={() => setCommenting(false)}>
+              Cancel
+            </Button>
+            <Button type="button" variant="primary" disabled={!comment.trim()} onClick={submitWholeComment}>
+              Add note
+            </Button>
+          </div>
+        </div>
+      ) : null}
 
       <div className="group relative">
         <iframe

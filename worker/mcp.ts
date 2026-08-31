@@ -7,6 +7,7 @@
  */
 import {
   DENIAL_REASONS,
+  GRANT_LEVELS,
   RELATIONSHIPS,
   type Relationship,
   type ToolCallRequest,
@@ -82,12 +83,16 @@ export async function handleToolCall(
   switch (body.tool) {
     case "get_current_context_scope": {
       const allowedIds = authorizedRegionIds(q, task.id, now);
+      const grants = q.grantsForTask(task.id);
       const regions = q
         .listRegions(task.space_id)
         .filter((r) => allowedIds.has(r.id))
         .map((r) => {
-          const grant = q.grantsForTask(task.id).find((g) => g.region_id === r.id);
-          return { slug: r.slug, name: r.name, level: grant?.level ?? "none" };
+          const grant = grants.find((g) => g.region_id === r.id);
+          const humanLevel = q.getSpace(task.space_id)?.owner_id === human.human_id ? "write" : "none";
+          const grantLevel = grant?.level ?? "none";
+          const level = GRANT_LEVELS.indexOf(humanLevel) <= GRANT_LEVELS.indexOf(grantLevel) ? humanLevel : grantLevel;
+          return { slug: r.slug, name: r.name, level };
         });
       return { ok: true, result: { regions, task: { id: task.id, title: task.title } } };
     }
@@ -228,13 +233,15 @@ export async function handleToolCall(
 
     case "trace_artifact_influences": {
       const versionId = typeof input.version_id === "string" ? input.version_id : "";
-      const version = q.getArtifactVersion(versionId);
+      const artifactId = typeof input.artifact_id === "string" ? input.artifact_id : "";
+      const version = versionId ? q.getArtifactVersion(versionId) : artifactId ? q.latestArtifactVersion(artifactId) : null;
       if (!version) return denyResult(DENIAL_REASONS.UNKNOWN_REGION);
       const artifact = q.getArtifact(version.artifact_id);
       if (!artifact || artifact.task_id !== task.id) {
         return denyResult(DENIAL_REASONS.EXCEEDS_HUMAN);
       }
       const allowedIds = authorizedRegionIds(q, task.id, now);
+      if (allowedIds.size === 0) return denyResult(DENIAL_REASONS.NO_GRANT);
       const influences = q
         .listInfluences(versionId)
         .filter((inf) => {
@@ -242,7 +249,23 @@ export async function handleToolCall(
           return item !== null && allowedIds.has(item.region_id);
         })
         .map((inf) => ({ influence: inf, item: q.getItem(inf.item_id) }));
-      return { ok: true, result: { influences } };
+      // This is the revision handoff: the current artifact's immutable version,
+      // exact human annotations, and real influences travel together. It gives
+      // an agent actionable feedback without exposing unrelated workspace data.
+      return {
+        ok: true,
+        result: {
+          artifact: { id: artifact.id, title: artifact.title },
+          version: {
+            id: version.id,
+            version_no: version.version_no,
+            parent_version_id: version.parent_version_id,
+            state: version.state,
+          },
+          annotations: q.listAnnotations(version.id),
+          influences,
+        },
+      };
     }
 
     case "record_artifact": {
@@ -268,10 +291,11 @@ export async function handleToolCall(
       const rawContentHtml = typeof input.content_html === "string" ? input.content_html : "";
       // A component preview remains a review artifact, not a host-executed app.
       // The marker selects the isolated iframe policy in the Workbench.
+      const placementMarker = `<meta name="gotothearchive-region" content="${authResult.region.id}">`;
       const contentHtml =
         input.renderer === "component"
-          ? `<meta name="gotothearchive-renderer" content="component">${rawContentHtml}`
-          : rawContentHtml;
+          ? `${placementMarker}<meta name="gotothearchive-renderer" content="component">${rawContentHtml}`
+          : `${placementMarker}${rawContentHtml}`;
       const parentVersionId =
         typeof input.parent_version_id === "string" ? input.parent_version_id : null;
 

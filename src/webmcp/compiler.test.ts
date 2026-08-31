@@ -139,7 +139,7 @@ test("registered schemas expose every input their runtime handler needs", () => 
   assert.ok(props("get_context_for_task").query);
   assert.ok(props("get_context_for_task").limit);
   assert.ok(props("trace_artifact_influences").version_id);
-  assert.equal(props("trace_artifact_influences").artifact_id, undefined);
+  assert.ok(props("trace_artifact_influences").artifact_id);
   assert.ok(props("record_feedback").version_id);
   assert.ok(props("record_feedback").comment);
   assert.ok(props("propose_context_change").from_item_id);

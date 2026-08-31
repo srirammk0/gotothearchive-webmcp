@@ -85,7 +85,9 @@ Illustrative tools:
 - `get_taste_for_task`
 - `inspect_context_item`
 - `inspect_relationships`
-- `trace_artifact_influences`
+- `trace_artifact_influences` — on an open artifact, returns the current
+  immutable version, human annotations (including normalized marked regions),
+  and permitted influences so an agent can make a grounded revision.
 - `record_artifact`
 - `record_feedback`
 - `propose_context_change`
@@ -167,7 +169,9 @@ The capability compiler should prefer proposal tools over exposing a write tool 
 Examples:
 
 - Opening a project may expose project-specific context and artifact operations.
-- Opening a Workbench artifact may expose feedback and influence-tracing operations.
+- Opening a Workbench artifact exposes the review-context form of
+  `trace_artifact_influences`; agents receive actionable annotations only for
+  that active task artifact, not a broad feed of private review data.
 - Pending proposals may expose approval and rejection operations.
 - Completing a task removes task-only retrieval or write operations.
 

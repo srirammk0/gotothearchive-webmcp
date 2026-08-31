@@ -129,11 +129,14 @@ export function compile(input: CapabilityInput): ToolSpec[] {
     input.pageState.activeArtifactId
       ? {
           name: "trace_artifact_influences",
-          description: "Show which context items and taste signals influenced the active artifact.",
+          description:
+            "Get the active artifact's current version, human annotations (including marked regions), and the context that influenced it. Use this before submitting a revision.",
           inputSchema: {
             type: "object",
-            properties: { version_id: { type: "string" } },
-            required: ["version_id"],
+            properties: {
+              version_id: { type: "string", description: "A specific immutable version to inspect." },
+              artifact_id: { type: "string", description: "Optional; defaults to the artifact open in Workbench." },
+            },
           },
           why: `An artifact is open (${input.pageState.activeArtifactId}) and you can view: ${slugs.join(", ")}.`,
         }

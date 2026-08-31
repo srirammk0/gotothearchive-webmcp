@@ -1,14 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router";
 import { motion } from "motion/react";
-import { REVIEW_DECISIONS, type ArtifactState, type ReviewDecision } from "@shared/contract";
-import { ApiError, getLens, listArtifacts, type WorkbenchArtifact } from "../api/client";
+import { REVIEW_DECISIONS, type ArtifactState, type Region, type ReviewDecision } from "@shared/contract";
+import { ApiError, listArtifacts, type WorkbenchArtifact } from "../api/client";
 import { Button } from "../ui/primitives/Button";
 import { EmptyState } from "../ui/primitives/EmptyState";
 import { EmptyRow } from "../ui/primitives/EmptyRow";
 import { Spinner } from "../ui/primitives/Spinner";
 import { Icon } from "../ui/primitives/Icon";
-import { SidePanel } from "../ui/primitives/SidePanel";
 import { useTrail } from "../ui/Breadcrumbs";
 import { useSpace } from "../ui/hooks/useSpace";
 import { duration, ease } from "../ui/tokens";
@@ -17,6 +16,7 @@ import { ArtifactThumb } from "../ui/workbench/ArtifactThumb";
 import { AnnotationRail } from "../ui/workbench/AnnotationRail";
 import { ProvenanceStrip } from "../ui/workbench/ProvenanceStrip";
 import { useWorkbench } from "../ui/workbench/useWorkbench";
+import { useCapabilities } from "../webmcp/useCapabilities";
 
 const DECISION_LABEL: Record<ReviewDecision, string> = {
   approve: "Approve",
@@ -71,51 +71,13 @@ function StateBadge({ state }: { state: string }) {
   );
 }
 
-/** A compact trace of what the agent has been doing on this task. */
-function RecentActivity({ taskId }: { taskId: string }) {
-  const [events, setEvents] = useState<{ id: string; label: string; at: number }[] | null>(null);
-
+/** Registers page-specific review context only while an artifact is open. */
+function ArtifactCapabilitySync({ taskId, artifactId, agentSessionId }: { taskId: string; artifactId: string; agentSessionId: string | null }) {
+  const { refresh } = useCapabilities(taskId, artifactId);
   useEffect(() => {
-    let cancelled = false;
-    getLens(taskId)
-      .then(({ lens }) => {
-        if (cancelled) return;
-        const merged = [
-          ...lens.audit.map((a) => ({ id: a.id, label: `${a.operation}${a.tool_name ? ` · ${a.tool_name}` : ""}`, at: a.at })),
-          ...lens.accesses.map((a) => ({ id: a.id, label: `read · ${a.tool_name}`, at: a.at })),
-          ...lens.denials.map((d) => ({ id: d.id, label: `denied · ${d.reason}`, at: d.at })),
-        ]
-          .sort((x, y) => y.at - x.at)
-          .slice(0, 6);
-        setEvents(merged);
-      })
-      .catch(() => !cancelled && setEvents([]));
-    return () => {
-      cancelled = true;
-    };
-  }, [taskId]);
-
-  return (
-    <SidePanel title="Agent activity" sticky={false}>
-      {events === null ? (
-        <Spinner label="Loading trace…" />
-      ) : events.length === 0 ? (
-        <p className="text-[length:var(--text-meta)] text-faint">Nothing logged yet.</p>
-      ) : (
-        <ul className="flex flex-col">
-          {events.map((e) => (
-            <li
-              key={e.id}
-              className="flex items-baseline justify-between gap-4 border-b border-line-soft py-2 text-[length:var(--text-meta)] last:border-0"
-            >
-              <span className="truncate text-muted">{e.label}</span>
-              <span className="shrink-0 text-[length:var(--text-micro)] text-faint">{relTime(e.at)}</span>
-            </li>
-          ))}
-        </ul>
-      )}
-    </SidePanel>
-  );
+    if (agentSessionId) void refresh();
+  }, [agentSessionId, refresh]);
+  return null;
 }
 
 function ArtifactCard({ artifact, onOpen }: { artifact: WorkbenchArtifact; onOpen: () => void }) {
@@ -152,9 +114,8 @@ function ArtifactCard({ artifact, onOpen }: { artifact: WorkbenchArtifact; onOpe
 }
 
 /** Shown at /workbench with no id: artifacts grouped by the folder that shaped them. */
-function ArtifactList() {
+function ArtifactList({ regions }: { regions: Region[] }) {
   const navigate = useNavigate();
-  const { regions } = useSpace();
   const [status, setStatus] = useState<"loading" | "error" | "ready">("loading");
   const [artifacts, setArtifacts] = useState<WorkbenchArtifact[]>([]);
 
@@ -237,6 +198,7 @@ function ArtifactList() {
 
 export function Workbench() {
   const { artifactId } = useParams();
+  const { regions, agentSessionId } = useSpace();
   const { status, error, data, selectVersion, addAnnotation, decide } = useWorkbench(artifactId);
   const [decisionPending, setDecisionPending] = useState(false);
   const [decisionError, setDecisionError] = useState<string | null>(null);
@@ -247,7 +209,7 @@ export function Workbench() {
       : [{ label: "Workbench" }],
   );
 
-  if (!artifactId) return <ArtifactList />;
+  if (!artifactId) return <ArtifactList regions={regions} />;
 
   if (status === "loading") return <Spinner label="Loading artifact…" />;
 
@@ -279,8 +241,8 @@ export function Workbench() {
   };
 
   return (
-    <div className="grid grid-cols-1 gap-12 lg:grid-cols-[minmax(0,1fr)_290px] lg:gap-14">
-      <div className="flex flex-col gap-8">
+    <div className="mx-auto flex w-full max-w-5xl flex-col gap-7">
+      <ArtifactCapabilitySync taskId={artifact.task_id} artifactId={artifact.id} agentSessionId={agentSessionId} />
         <header className="flex flex-col gap-4">
           <div className="min-w-0">
             <h1 className="text-[length:var(--text-display)] leading-tight text-text">{artifact.title}</h1>
@@ -321,9 +283,17 @@ export function Workbench() {
           onAddRegion={(target, comment) =>
             void addAnnotation({ sentiment: "neutral", comment, dimension: null, target })
           }
+          onAddComment={(comment) => void addAnnotation({ sentiment: "neutral", comment, dimension: null })}
         />
 
-        <ProvenanceStrip provenance={provenance} />
+        <AnnotationRail annotations={annotations} />
+
+        <details className="border-t border-line-soft pt-3">
+          <summary className="cursor-pointer text-[length:var(--text-meta)] text-muted hover:text-text">Context & access</summary>
+          <div className="pt-4">
+            <ProvenanceStrip provenance={provenance} />
+          </div>
+        </details>
 
         {/* Anchored review controls — never optimistic. Primary decision leads,
             reject sits at the trailing edge with equal button weight so it
@@ -357,14 +327,6 @@ export function Workbench() {
             </span>
           ) : null}
         </div>
-      </div>
-
-      {/* Right rail: agent activity then review annotations, scrolling together
-          as one sticky block so neither overlaps the other. */}
-      <div className="no-scrollbar flex flex-col gap-10 lg:sticky lg:top-20 lg:max-h-[calc(100vh-6rem)] lg:overflow-y-auto lg:pr-1">
-        <RecentActivity taskId={artifact.task_id} />
-        <AnnotationRail annotations={annotations} onAdd={(input) => void addAnnotation(input)} />
-      </div>
     </div>
   );
 }
