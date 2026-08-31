@@ -624,7 +624,7 @@ export function Archive() {
           ) : null}
         </header>
 
-        {total === 0 && !filtered ? (
+        {activeFolder && total === 0 && !filtered ? (
           <EmptyState
             title={activeFolder ? "This folder is empty" : "Your archive is empty"}
             body="Add a note, link, image, or PDF to start building this space's context."
