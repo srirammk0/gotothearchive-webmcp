@@ -1,19 +1,14 @@
-import { useMemo, useState } from "react";
-import type { ItemType } from "@shared/contract";
+import { useEffect, useMemo, useState } from "react";
+import type { ContextItem, ItemType } from "@shared/contract";
 import { HairlineRule } from "../ui/primitives/HairlineRule";
 import { EmptyState } from "../ui/primitives/EmptyState";
+import { Spinner } from "../ui/primitives/Spinner";
 import { Button } from "../ui/primitives/Button";
-import { Field } from "../ui/primitives/Field";
 import { AgentAccess } from "../ui/AgentAccess";
-import { mockAgentAccess, mockArchive } from "../ui/mockData";
+import { Capture } from "../ui/archive/Capture";
+import { useSpace } from "../ui/hooks/useSpace";
+import { blobUrl, listItems } from "../api/client";
 import type { ArchiveRegionView } from "../ui/viewmodels";
-
-const CAPTURE_KINDS: { type: ItemType; label: string }[] = [
-  { type: "note", label: "Note" },
-  { type: "link", label: "Link" },
-  { type: "image", label: "Image" },
-  { type: "pdf", label: "PDF" },
-];
 
 function typeMeta(type: ItemType): string {
   switch (type) {
@@ -29,6 +24,10 @@ function typeMeta(type: ItemType): string {
     case "note":
       return "Note";
   }
+}
+
+function hasImage(item: ContextItem): boolean {
+  return (item.type === "image" || item.type === "screenshot") && !!item.content_ref;
 }
 
 function RegionSection({ view, index }: { view: ArchiveRegionView; index: number }) {
@@ -53,12 +52,16 @@ function RegionSection({ view, index }: { view: ArchiveRegionView; index: number
         <div className="flex flex-col gap-8">
           {dominant ? (
             <article className="flex flex-col gap-3">
-              {dominant.type === "image" || dominant.type === "screenshot" ? (
-                <div className="aspect-[16/10] w-full max-w-2xl bg-paper-raised" aria-hidden="true" />
+              {hasImage(dominant) ? (
+                <img
+                  src={blobUrl(dominant.content_ref as string)}
+                  alt=""
+                  className="h-auto w-full max-w-2xl object-contain"
+                />
               ) : null}
               <h3 className="font-serif text-[length:var(--text-section)] text-ink">{dominant.title}</h3>
               <p className="font-sans text-[length:var(--text-meta)] text-stone">
-                {typeMeta(dominant.type)} · {dominant.owner_id === "human_1" ? "You" : dominant.owner_id}
+                {typeMeta(dominant.type)}
                 {dominant.source_url ? ` · ${new URL(dominant.source_url).hostname}` : ""}
               </p>
             </article>
@@ -67,11 +70,16 @@ function RegionSection({ view, index }: { view: ArchiveRegionView; index: number
           {rest.length > 0 ? (
             <ul className="grid grid-cols-1 gap-x-8 gap-y-5 sm:grid-cols-2">
               {rest.map((item) => (
-                <li key={item.id} className="flex flex-col gap-1 border-t border-hairline pt-3">
+                <li key={item.id} className="flex flex-col gap-2 border-t border-hairline pt-3">
+                  {hasImage(item) ? (
+                    <img
+                      src={blobUrl(item.content_ref as string)}
+                      alt=""
+                      className="h-auto max-h-64 w-full object-contain"
+                    />
+                  ) : null}
                   <p className="font-serif text-[length:var(--text-item)] text-ink">{item.title}</p>
-                  <p className="font-sans text-[length:var(--text-meta)] text-stone">
-                    {typeMeta(item.type)} · {item.owner_id === "human_1" ? "You" : item.owner_id}
-                  </p>
+                  <p className="font-sans text-[length:var(--text-meta)] text-stone">{typeMeta(item.type)}</p>
                 </li>
               ))}
             </ul>
@@ -83,15 +91,59 @@ function RegionSection({ view, index }: { view: ArchiveRegionView; index: number
 }
 
 export function Archive() {
+  const { space, regions, task, loading: spaceLoading, error: spaceError } = useSpace();
+  const [items, setItems] = useState<ContextItem[] | null>(null);
+  const [itemsError, setItemsError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [captureOpen, setCaptureOpen] = useState(false);
-  const archive = useMemo(() => mockArchive(), []);
+
+  useEffect(() => {
+    if (spaceLoading || spaceError) return;
+    let cancelled = false;
+    listItems()
+      .then(({ items: fetched }) => {
+        if (!cancelled) setItems(fetched);
+      })
+      .catch((err) => {
+        if (!cancelled) setItemsError(err instanceof Error ? err.message : "Could not load the archive.");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [spaceLoading, spaceError]);
+
+  const regionViews: ArchiveRegionView[] = useMemo(() => {
+    if (!items) return regions.map((region) => ({ region, items: [] }));
+    return regions.map((region) => ({ region, items: items.filter((i) => i.region_id === region.id) }));
+  }, [regions, items]);
 
   const filteredRegions = useMemo(() => {
-    if (!query.trim()) return archive.regions;
+    if (!query.trim()) return regionViews;
     const q = query.toLowerCase();
-    return archive.regions.map((r) => ({ ...r, items: r.items.filter((i) => i.title.toLowerCase().includes(q)) }));
-  }, [archive, query]);
+    return regionViews.map((r) => ({ ...r, items: r.items.filter((i) => i.title.toLowerCase().includes(q)) }));
+  }, [regionViews, query]);
+
+  if (spaceLoading || (items === null && !itemsError)) {
+    return (
+      <div className="flex min-h-[40vh] items-center justify-center">
+        <Spinner label="Opening the archive…" />
+      </div>
+    );
+  }
+
+  if (spaceError || itemsError) {
+    return (
+      <EmptyState
+        title="Couldn't load the archive"
+        body={spaceError ?? itemsError ?? "Something went wrong."}
+        action={
+          <Button variant="ghost" onClick={() => window.location.reload()}>
+            Try again
+          </Button>
+        }
+      />
+    );
+  }
 
   return (
     <div className="grid grid-cols-1 gap-16 lg:grid-cols-[1fr_260px]">
@@ -100,7 +152,7 @@ export function Archive() {
           <div className="flex flex-wrap items-end justify-between gap-4">
             <div>
               <p className="font-sans text-[length:var(--text-micro)] uppercase tracking-[0.18em] text-stone">
-                {archive.space.name}
+                {space?.name}
               </p>
               <h1 className="mt-2 font-serif text-[length:var(--text-display)] leading-[1.05] text-ink">Archive</h1>
             </div>
@@ -110,39 +162,41 @@ export function Archive() {
           </div>
 
           {captureOpen ? (
-            <div className="flex flex-wrap items-end gap-4 border-y border-hairline py-4">
-              <div className="min-w-[220px] flex-1">
-                <Field label="What are you saving?" placeholder="Paste a link, drop a file, or write a note…" />
-              </div>
-              <div className="flex gap-2">
-                {CAPTURE_KINDS.map((k) => (
-                  <Button key={k.type} variant="secondary">
-                    {k.label}
-                  </Button>
-                ))}
-              </div>
-            </div>
+            <Capture
+              regions={regions}
+              onCaptured={(item) => setItems((prev) => [item, ...(prev ?? [])])}
+            />
           ) : null}
 
           <div className="max-w-sm">
-            <Field
-              label="Search"
-              placeholder="Search the archive…"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-            />
+            <label className="flex flex-col gap-1.5">
+              <span className="font-sans text-[length:var(--text-micro)] uppercase tracking-[0.14em] text-stone">
+                Search
+              </span>
+              <input
+                placeholder="Search the archive…"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                className="border-b border-hairline bg-transparent py-1.5 font-sans text-[length:var(--text-body)] text-ink outline-none placeholder:text-stone-soft focus:border-ink"
+              />
+            </label>
           </div>
         </header>
 
-        {filteredRegions.every((r) => r.items.length === 0) ? (
+        {filteredRegions.every((r) => r.items.length === 0) && (items?.length ?? 0) > 0 ? (
           <EmptyState
             title="No matches"
-            body={`Nothing in the archive matches “${query}.” Try a different word, or clear the search.`}
+            body={`Nothing in the archive matches "${query}." Try a different word, or clear the search.`}
             action={
               <Button variant="ghost" onClick={() => setQuery("")}>
                 Clear search
               </Button>
             }
+          />
+        ) : (items?.length ?? 0) === 0 ? (
+          <EmptyState
+            title="Your archive is empty"
+            body="Capture a note, link, image, or PDF to start building this space's context."
           />
         ) : (
           filteredRegions.map((view, i) => (
@@ -154,7 +208,7 @@ export function Archive() {
         )}
       </div>
 
-      <AgentAccess model={mockAgentAccess} />
+      {task ? <AgentAccess taskId={task.id} regions={regions} /> : null}
     </div>
   );
 }

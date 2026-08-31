@@ -5,10 +5,12 @@ export interface DisclosureProps {
   children: ReactNode;
   defaultOpen?: boolean;
   className?: string;
+  /** Fired the first time the panel opens. For lazily loading its contents. */
+  onOpen?: () => void;
 }
 
 /** Inline expansion, preferred over modals per the visual system. */
-export function Disclosure({ summary, children, defaultOpen = false, className = "" }: DisclosureProps) {
+export function Disclosure({ summary, children, defaultOpen = false, className = "", onOpen }: DisclosureProps) {
   const [open, setOpen] = useState(defaultOpen);
   const panelId = useId();
 
@@ -18,7 +20,12 @@ export function Disclosure({ summary, children, defaultOpen = false, className =
         type="button"
         aria-expanded={open}
         aria-controls={panelId}
-        onClick={() => setOpen((o) => !o)}
+        onClick={() => {
+          setOpen((o) => {
+            if (!o) onOpen?.();
+            return !o;
+          });
+        }}
         className="flex w-full items-center justify-between gap-3 py-2 text-left font-sans text-[length:var(--text-meta)] text-ink-soft hover:text-ink"
       >
         <span>{summary}</span>

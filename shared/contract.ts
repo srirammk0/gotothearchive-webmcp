@@ -454,5 +454,7 @@ export const API = {
   annotations: "/api/annotations",
   decisions: "/api/decisions",
   taste: "/api/taste",
+  /** GET ?signal_id=… — the evidence cited by one taste signal. */
+  tasteEvidence: "/api/taste/evidence",
   lens: "/api/lens",
 } as const;

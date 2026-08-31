@@ -179,11 +179,31 @@ export const createTasteSignal = (input: {
   scope: "personal" | "project";
 }) => req<{ signal: TasteSignal }>(API.taste, { method: "POST", body: JSON.stringify(input) });
 
-export const updateTasteSignal = (id: string, status: TasteSignal["status"], statement?: string) =>
+/**
+ * Accept, edit, rescope, or reject a signal. Every field is optional except the
+ * id, so an edit does not require restating the status and a rescope does not
+ * imply acceptance — nothing is ever confirmed as a side effect.
+ */
+export const updateTasteSignal = (
+  id: string,
+  changes: { status?: TasteSignal["status"]; statement?: string; scope?: TasteSignal["scope"] },
+) =>
   req<{ signal: TasteSignal }>(API.taste, {
     method: "PATCH",
-    body: JSON.stringify({ id, status, statement }),
+    body: JSON.stringify({ id, ...changes }),
   });
+
+export interface EvidenceRecord {
+  id: string;
+  signal_id: string;
+  kind: "supports" | "contradicts";
+  annotation: Annotation | null;
+  item: ContextItem | null;
+}
+
+/** The feedback and artifacts a signal cites. A proposal without these is just an assertion. */
+export const getTasteEvidence = (signalId: string) =>
+  req<{ evidence: EvidenceRecord[] }>(`${API.tasteEvidence}${qs({ signal_id: signalId })}`);
 
 /* ---------------- agent lens ---------------- */
 

@@ -792,6 +792,13 @@ export class Queries {
       .map(toAnnotation);
   }
 
+  getAnnotation(id: string): Annotation | null {
+    const row = this.sql
+      .exec<AnnotationRow>(`SELECT * FROM annotations WHERE id = ?`, id)
+      .toArray()[0];
+    return row ? toAnnotation(row) : null;
+  }
+
   insertDecision(d: DecisionRecord): void {
     this.sql.exec(
       `INSERT INTO decisions (id, version_id, actor_id, decision, note, prev_state, at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
@@ -853,6 +860,15 @@ export class Queries {
       approvedBy,
       id,
     );
+  }
+
+  /** Editing a proposal's wording is a review action, not a status change. */
+  setTasteSignalStatement(id: string, statement: string): void {
+    this.sql.exec(`UPDATE taste_signals SET statement = ? WHERE id = ?`, statement, id);
+  }
+
+  setTasteSignalScope(id: string, scope: TasteSignal["scope"]): void {
+    this.sql.exec(`UPDATE taste_signals SET scope = ? WHERE id = ?`, scope, id);
   }
 
   insertTasteEvidence(e: TasteEvidence): void {

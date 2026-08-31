@@ -79,6 +79,8 @@ export async function handleRoute(
       return withCookie(await handleDecisions(request, q, human.human_id));
     case API.taste:
       return withCookie(await handleTaste(request, q, human.human_id));
+    case API.tasteEvidence:
+      return withCookie(handleTasteEvidence(request, q));
     case API.lens:
       return withCookie(handleLens(request, q));
     default:
@@ -628,11 +630,54 @@ async function handleTaste(request: Request, q: Queries, humanId: string): Promi
     return json({ ok: true, signal: q.getTasteSignal(id) });
   }
   if (request.method === "PATCH") {
-    const body = (await request.json()) as { id: string; status: "confirmed" | "rejected" | "superseded" };
-    q.setTasteSignalStatus(body.id, body.status, humanId);
+    const body = (await request.json()) as {
+      id: string;
+      status?: "proposed" | "confirmed" | "rejected" | "superseded";
+      statement?: string;
+      scope?: "personal" | "project";
+    };
+    const existing = q.getTasteSignal(body.id);
+    if (!existing) return badRequest("unknown signal");
+
+    // Editing and rescoping are first-class review actions, not just status
+    // changes: the doc's actions are accept, edit, rescope, reject. Dropping the
+    // statement here would make the edit UI silently fail — the worst outcome
+    // for a surface whose whole promise is that nothing changes without you.
+    if (typeof body.statement === "string" && body.statement.trim()) {
+      q.setTasteSignalStatement(body.id, body.statement.trim());
+    }
+    if (body.scope === "personal" || body.scope === "project") {
+      q.setTasteSignalScope(body.id, body.scope);
+    }
+    if (body.status) {
+      q.setTasteSignalStatus(body.id, body.status, humanId);
+    }
     return json({ ok: true, signal: q.getTasteSignal(body.id) });
   }
   return badRequest("unsupported method");
+}
+
+/* ---------------- taste evidence ---------------- */
+
+/**
+ * The evidence behind one taste signal, hydrated into the annotations, versions
+ * and items it cites.
+ *
+ * A proposal that cannot show its evidence is just an assertion, and the product
+ * promises the opposite: signals cite the feedback and artifacts that support
+ * them, and are never confirmed through silence.
+ */
+function handleTasteEvidence(request: Request, q: Queries): Response {
+  if (request.method !== "GET") return badRequest("GET required");
+  const signalId = new URL(request.url).searchParams.get("signal_id");
+  if (!signalId) return badRequest("signal_id required");
+
+  const evidence = q.listTasteEvidence(signalId).map((e) => ({
+    ...e,
+    annotation: e.annotation_id ? (q.getAnnotation(e.annotation_id) ?? null) : null,
+    item: e.item_id ? (q.getItem(e.item_id) ?? null) : null,
+  }));
+  return json({ ok: true, evidence });
 }
 
 /* ---------------- lens ---------------- */

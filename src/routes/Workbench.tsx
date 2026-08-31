@@ -1,11 +1,19 @@
-import { useMemo, useState } from "react";
+import { useEffect, useState } from "react";
+import { useNavigate, useParams } from "react-router";
 import { REVIEW_DECISIONS, type ReviewDecision } from "@shared/contract";
+import type { Artifact } from "@shared/contract";
+import { ApiError, listArtifacts } from "../api/client";
 import { Button } from "../ui/primitives/Button";
 import { HairlineRule } from "../ui/primitives/HairlineRule";
 import { Disclosure } from "../ui/primitives/Disclosure";
 import { EmptyState } from "../ui/primitives/EmptyState";
+import { Spinner } from "../ui/primitives/Spinner";
 import { AgentAccess } from "../ui/AgentAccess";
-import { mockAgentAccess, mockAgentLens, mockWorkbench } from "../ui/mockData";
+import { mockAgentAccess, mockAgentLens } from "../ui/mockData";
+import { ArtifactViewer } from "../ui/workbench/ArtifactViewer";
+import { AnnotationRail } from "../ui/workbench/AnnotationRail";
+import { ProvenanceStrip } from "../ui/workbench/ProvenanceStrip";
+import { useWorkbench } from "../ui/workbench/useWorkbench";
 
 const DECISION_LABEL: Record<ReviewDecision, string> = {
   approve: "Approve",
@@ -18,19 +26,103 @@ function formatTime(at: number): string {
   return new Date(at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 }
 
-export function Workbench() {
-  const model = useMemo(() => mockWorkbench(), []);
-  const lens = useMemo(() => mockAgentLens(), []);
-  const [decisionSent, setDecisionSent] = useState<ReviewDecision | null>(null);
+/** Shown at /workbench with no id: pick an artifact to review. */
+function ArtifactList() {
+  const navigate = useNavigate();
+  const [status, setStatus] = useState<"loading" | "error" | "ready">("loading");
+  const [artifacts, setArtifacts] = useState<Artifact[]>([]);
 
-  if (!model.artifact) {
+  useEffect(() => {
+    let cancelled = false;
+    listArtifacts()
+      .then(({ artifacts: loaded }) => {
+        if (!cancelled) {
+          setArtifacts(loaded);
+          setStatus("ready");
+        }
+      })
+      .catch(() => !cancelled && setStatus("error"));
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  if (status === "loading") return <Spinner label="Loading artifacts…" />;
+  if (status === "error") {
+    return <EmptyState title="Couldn't load artifacts" body="Something went wrong reaching the server. Try again shortly." />;
+  }
+  if (artifacts.length === 0) {
     return (
       <EmptyState
-        title="No artifact open"
-        body="Start a task from the Archive, or open an artifact awaiting review, and it will appear here."
+        title="No artifacts yet"
+        body="Start a task from the Archive and an agent's work will land here for review."
       />
     );
   }
+  return (
+    <div className="flex flex-col gap-14">
+      <header>
+        <p className="font-sans text-[length:var(--text-micro)] uppercase tracking-[0.18em] text-stone">Workbench</p>
+        <h1 className="mt-2 font-serif text-[length:var(--text-display)] leading-[1.05] text-ink">Artifacts</h1>
+      </header>
+      <ul className="flex flex-col gap-4">
+        {artifacts.map((a) => (
+          <li key={a.id} className="border-t border-hairline pt-4">
+            <button
+              type="button"
+              onClick={() => navigate(`/workbench/${a.id}`)}
+              className="text-left font-serif text-[length:var(--text-item)] text-ink hover:text-accent"
+            >
+              {a.title}
+            </button>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+export function Workbench() {
+  const { artifactId } = useParams();
+  const { status, error, data, selectVersion, addAnnotation, decide } = useWorkbench(artifactId);
+  const [decisionPending, setDecisionPending] = useState(false);
+  const [decisionError, setDecisionError] = useState<string | null>(null);
+
+  if (!artifactId) return <ArtifactList />;
+
+  if (status === "loading") return <Spinner label="Loading artifact…" />;
+
+  if (status === "denied") {
+    return (
+      <EmptyState
+        title="Access denied"
+        body={error ?? "You don't currently have access to this artifact."}
+      />
+    );
+  }
+
+  if (status === "error" || !data) {
+    return (
+      <EmptyState
+        title="Couldn't load this artifact"
+        body={error ?? "Something went wrong reaching the server. Try again shortly."}
+      />
+    );
+  }
+
+  const { artifact, version, versions, provenance, annotations } = data;
+
+  const handleDecide = async (decision: ReviewDecision) => {
+    setDecisionPending(true);
+    setDecisionError(null);
+    try {
+      await decide(decision);
+    } catch (e) {
+      setDecisionError(e instanceof ApiError ? e.message : "Couldn't record that decision. Try again.");
+    } finally {
+      setDecisionPending(false);
+    }
+  };
 
   return (
     <div className="grid grid-cols-1 gap-16 lg:grid-cols-[minmax(0,1fr)_300px]">
@@ -38,20 +130,25 @@ export function Workbench() {
         <header className="flex flex-wrap items-baseline justify-between gap-3">
           <div>
             <p className="font-sans text-[length:var(--text-micro)] uppercase tracking-[0.18em] text-stone">
-              v{model.version.version_no} · {model.state.replace(/_/g, " ")}
+              v{version.version_no} · {version.state.replace(/_/g, " ")}
             </p>
-            <h1 className="mt-1 font-serif text-[length:var(--text-headline)] text-ink">{model.artifact.title}</h1>
+            <h1 className="mt-1 font-serif text-[length:var(--text-headline)] text-ink">{artifact.title}</h1>
           </div>
           <Disclosure summary="Version history" className="w-full max-w-xs sm:w-auto">
             <ul className="flex flex-col gap-2 py-2">
-              {model.versions
+              {versions
                 .slice()
                 .reverse()
                 .map((v) => (
                   <li key={v.id} className="flex items-center justify-between gap-4 font-sans text-[length:var(--text-meta)]">
-                    <span className={v.id === model.version.id ? "text-ink" : "text-stone"}>
+                    <button
+                      type="button"
+                      onClick={() => selectVersion(v.id)}
+                      className={`text-left hover:text-accent ${v.id === version.id ? "text-ink" : "text-stone"}`}
+                    >
                       v{v.version_no} — {v.state.replace(/_/g, " ")}
-                    </span>
+                      {v.parent_version_id ? null : " (initial)"}
+                    </button>
                     <span className="text-stone">{formatTime(v.created_at)}</span>
                   </li>
                 ))}
@@ -59,75 +156,29 @@ export function Workbench() {
           </Disclosure>
         </header>
 
-        {/* Artifact viewer */}
-        <article
-          className="border border-hairline bg-paper-raised p-8 font-serif text-[length:var(--text-body)] leading-relaxed text-ink"
-          // ponytail: mock content is trusted first-party data, not user HTML — real fetch layer must sanitize before this dangerouslySetInnerHTML stays safe
-          dangerouslySetInnerHTML={{ __html: model.version.content_html }}
-        />
+        {/* Versions are immutable — no edit affordance, only view + review. */}
+        <ArtifactViewer version={version} />
 
-        {/* Provenance strip — three groups, never merged */}
-        <div className="flex flex-col gap-6 border-t border-hairline pt-6 sm:flex-row sm:gap-10">
-          <div className="flex-1">
-            <p className="font-sans text-[length:var(--text-micro)] uppercase tracking-[0.14em] text-stone">
-              Used these references
-            </p>
-            <ul className="mt-2 flex flex-col gap-1 font-sans text-[length:var(--text-meta)] text-ink">
-              {model.provenance.influences.length === 0 ? (
-                <li className="text-stone">None</li>
-              ) : (
-                model.provenance.influences.map((inf) => (
-                  <li key={inf.id}>
-                    {inf.item?.title ?? "Unknown item"} <span className="text-stone">— {inf.role}</span>
-                  </li>
-                ))
-              )}
-            </ul>
-          </div>
-          <div className="flex-1">
-            <p className="font-sans text-[length:var(--text-micro)] uppercase tracking-[0.14em] text-stone">
-              Accessed for this task
-            </p>
-            <ul className="mt-2 flex flex-col gap-1 font-sans text-[length:var(--text-meta)] text-ink">
-              {model.provenance.accesses.length === 0 ? (
-                <li className="text-stone">None</li>
-              ) : (
-                model.provenance.accesses.map((acc) => (
-                  <li key={acc.id}>{acc.item?.title ?? "Unknown item"}</li>
-                ))
-              )}
-            </ul>
-          </div>
-          <div className="flex-1">
-            <p className="font-sans text-[length:var(--text-micro)] uppercase tracking-[0.14em] text-stone">
-              Unavailable or denied
-            </p>
-            <ul className="mt-2 flex flex-col gap-1 font-sans text-[length:var(--text-meta)] text-bad">
-              {model.provenance.denials.length === 0 ? (
-                <li className="text-stone">None</li>
-              ) : (
-                model.provenance.denials.map((d) => <li key={d.id}>{d.reason}</li>)
-              )}
-            </ul>
-          </div>
-        </div>
+        <ProvenanceStrip provenance={provenance} />
 
         <HairlineRule />
 
-        {/* Anchored review controls */}
+        {/* Anchored review controls — never optimistic. */}
         <div className="flex flex-wrap items-center gap-3">
           {REVIEW_DECISIONS.map((d) => (
             <Button
               key={d}
               variant={d === "approve" ? "primary" : d === "reject" ? "danger" : "secondary"}
-              onClick={() => setDecisionSent(d)}
+              disabled={decisionPending}
+              onClick={() => void handleDecide(d)}
             >
               {DECISION_LABEL[d]}
             </Button>
           ))}
-          {decisionSent ? (
-            <span role="status" className="font-sans text-[length:var(--text-meta)] text-good">
-              Recorded: {DECISION_LABEL[decisionSent]}
+          {decisionPending ? <Spinner label="Recording…" /> : null}
+          {decisionError ? (
+            <span role="alert" className="font-sans text-[length:var(--text-meta)] text-bad">
+              {decisionError}
             </span>
           ) : null}
         </div>
@@ -135,32 +186,15 @@ export function Workbench() {
 
       {/* Right rail: annotations + collapsible Agent Access */}
       <div className="flex flex-col gap-10">
-        <section aria-label="Annotations" className="flex flex-col gap-4">
-          <p className="font-sans text-[length:var(--text-micro)] uppercase tracking-[0.14em] text-stone">
-            Annotations
-          </p>
-          {model.annotations.length === 0 ? (
-            <EmptyState title="No annotations yet" body="Select part of the artifact to leave one." />
-          ) : (
-            <ul className="flex flex-col gap-4">
-              {model.annotations.map((a) => (
-                <li key={a.id} className="border-t border-hairline pt-3">
-                  <p className="font-sans text-[length:var(--text-meta)] text-stone">
-                    {a.sentiment === "positive" ? "+ " : a.sentiment === "negative" ? "− " : "· "}
-                    {a.dimension ?? "general"} · {a.status}
-                  </p>
-                  <p className="mt-1 font-sans text-[length:var(--text-body)] text-ink">{a.comment}</p>
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
+        <AnnotationRail annotations={annotations} onAdd={(input) => void addAnnotation(input)} />
 
         <HairlineRule />
 
+        {/* Agent Access is owned by another track — this slot passes through
+            the shared demo view models it already renders elsewhere. */}
         <Disclosure summary="Agent Access" defaultOpen>
           <div className="pt-2">
-            <AgentAccess model={mockAgentAccess} lens={lens} />
+            <AgentAccess model={mockAgentAccess} lens={mockAgentLens()} />
           </div>
         </Disclosure>
       </div>
