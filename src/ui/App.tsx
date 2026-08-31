@@ -1,15 +1,22 @@
+import { BrowserRouter, Route, Routes } from "react-router";
+import { Rail } from "./Rail";
+import { Archive } from "../routes/Archive";
+import { Workbench } from "../routes/Workbench";
+import { Taste } from "../routes/Taste";
+
 export function App() {
   return (
-    <main className="mx-auto max-w-3xl px-8 py-24">
-      <p className="font-sans text-xs uppercase tracking-[0.18em] text-stone">
-        GoToTheArchive
-      </p>
-      <h1 className="mt-6 font-serif text-5xl leading-tight text-ink">
-        Human-owned context, artifacts, and taste.
-      </h1>
-      <p className="mt-6 max-w-prose font-sans text-base leading-relaxed text-ink-soft">
-        Foundation is live. Archive, Workbench, and Taste are being built.
-      </p>
-    </main>
+    <BrowserRouter>
+      <div className="mx-auto flex min-h-full max-w-[1400px] items-start gap-12 px-8 py-12">
+        <Rail />
+        <div className="min-w-0 flex-1">
+          <Routes>
+            <Route path="/" element={<Archive />} />
+            <Route path="/workbench/:artifactId?" element={<Workbench />} />
+            <Route path="/taste" element={<Taste />} />
+          </Routes>
+        </div>
+      </div>
+    </BrowserRouter>
   );
 }
