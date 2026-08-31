@@ -412,6 +412,30 @@ export async function handleToolCall(
 
       const fromId = typeof input.from_item_id === "string" ? input.from_item_id : "";
       const toId = typeof input.to_item_id === "string" ? input.to_item_id : "";
+      const from = q.getItem(fromId);
+      const to = q.getItem(toId);
+      const reachable = authorizedRegionIds(q, task.id, now);
+      if (
+        !from ||
+        !to ||
+        from.id === to.id ||
+        from.region_id !== authResult.region.id ||
+        !reachable.has(from.region_id) ||
+        !reachable.has(to.region_id)
+      ) {
+        writeDenial(
+          q,
+          {
+            taskId: task.id,
+            agentSessionId: session.id,
+            toolName: body.tool,
+            requested: input,
+            reason: DENIAL_REASONS.NO_GRANT,
+          },
+          now,
+        );
+        return denyResult(DENIAL_REASONS.NO_GRANT);
+      }
       const relationship: Relationship =
         typeof input.relationship === "string" &&
         (RELATIONSHIPS as readonly string[]).includes(input.relationship)

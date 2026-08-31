@@ -9,6 +9,7 @@
  */
 import {
   GRANT_LEVELS,
+  RELATIONSHIPS,
   type CapabilityInput,
   type GrantLevel,
   type ToolSpec,
@@ -36,16 +37,6 @@ function effectiveRegions(input: CapabilityInput): { slug: string; level: GrantL
 /** Region slugs whose effective level meets or exceeds `requires`. */
 function eligibleSlugs(regions: { slug: string; level: GrantLevel }[], requires: GrantLevel): string[] {
   return regions.filter((r) => levelIndex(r.level) >= levelIndex(requires)).map((r) => r.slug);
-}
-
-function regionSchema(slugs: string[]): ToolSpec["inputSchema"] {
-  return {
-    type: "object",
-    properties: {
-      region: { type: "string", enum: slugs },
-    },
-    required: ["region"],
-  };
 }
 
 export function compile(input: CapabilityInput): ToolSpec[] {
@@ -93,8 +84,15 @@ export function compile(input: CapabilityInput): ToolSpec[] {
 
   push("read", (slugs) => ({
     name: "get_context_for_task",
-    description: "Retrieve context items relevant to the current task, scoped to accessible regions.",
-    inputSchema: regionSchema(slugs),
+    description: "Retrieve context items relevant to the current task, scoped to accessible regions. Omit region to search every accessible region.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        region: { type: "string", enum: slugs },
+        query: { type: "string", description: "What context is useful for the current task." },
+        limit: { type: "number", description: "Maximum items to return, from 1 to 20." },
+      },
+    },
     why: `Read access is live on: ${slugs.join(", ")}.`,
   }));
 
@@ -123,7 +121,7 @@ export function compile(input: CapabilityInput): ToolSpec[] {
   push("read", (slugs) => ({
     name: "get_taste_for_task",
     description: "Retrieve confirmed and proposed taste signals relevant to this task.",
-    inputSchema: regionSchema(slugs),
+    inputSchema: { type: "object", properties: {} },
     why: `Read access is live on: ${slugs.join(", ")}.`,
   }));
 
@@ -134,8 +132,8 @@ export function compile(input: CapabilityInput): ToolSpec[] {
           description: "Show which context items and taste signals influenced the active artifact.",
           inputSchema: {
             type: "object",
-            properties: { region: { type: "string", enum: slugs }, artifact_id: { type: "string" } },
-            required: ["artifact_id"],
+            properties: { version_id: { type: "string" } },
+            required: ["version_id"],
           },
           why: `An artifact is open (${input.pageState.activeArtifactId}) and you can view: ${slugs.join(", ")}.`,
         }
@@ -145,14 +143,33 @@ export function compile(input: CapabilityInput): ToolSpec[] {
   push("propose", (slugs) => ({
     name: "propose_context_change",
     description: "Suggest a new or changed context item or relationship. Stays proposed until a human accepts it.",
-    inputSchema: regionSchema(slugs),
+    inputSchema: {
+      type: "object",
+      properties: {
+        region: { type: "string", enum: slugs },
+        from_item_id: { type: "string" },
+        to_item_id: { type: "string" },
+        relationship: { type: "string", enum: RELATIONSHIPS },
+      },
+      required: ["region", "from_item_id", "to_item_id"],
+    },
     why: `You can suggest changes on: ${slugs.join(", ")}.`,
   }));
 
   push("propose", (slugs) => ({
     name: "record_feedback",
     description: "Attach feedback or an annotation to an artifact under review.",
-    inputSchema: regionSchema(slugs),
+    inputSchema: {
+      type: "object",
+      properties: {
+        region: { type: "string", enum: slugs },
+        version_id: { type: "string" },
+        sentiment: { type: "string", enum: ["positive", "negative", "neutral"] },
+        dimension: { type: "string" },
+        comment: { type: "string" },
+      },
+      required: ["region", "version_id", "comment"],
+    },
     why: `You can suggest changes on: ${slugs.join(", ")}.`,
   }));
 

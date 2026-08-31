@@ -125,3 +125,23 @@ test("trace_artifact_influences appears only when an artifact is active", () => 
   };
   assert.ok(findTool(compile(withArtifact), "trace_artifact_influences"));
 });
+
+test("registered schemas expose every input their runtime handler needs", () => {
+  const input: CapabilityInput = {
+    humanRegions: [{ slug: "work", level: "propose" }],
+    grants: [{ slug: "work", level: "propose" }],
+    task,
+    pageState: { hasPendingProposals: false, activeArtifactId: "art1" },
+  };
+  const specs = compile(input);
+  const props = (name: string) => findTool(specs, name)!.inputSchema.properties;
+
+  assert.ok(props("get_context_for_task").query);
+  assert.ok(props("get_context_for_task").limit);
+  assert.ok(props("trace_artifact_influences").version_id);
+  assert.equal(props("trace_artifact_influences").artifact_id, undefined);
+  assert.ok(props("record_feedback").version_id);
+  assert.ok(props("record_feedback").comment);
+  assert.ok(props("propose_context_change").from_item_id);
+  assert.ok(props("propose_context_change").to_item_id);
+});
