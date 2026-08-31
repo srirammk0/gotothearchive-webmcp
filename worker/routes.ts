@@ -494,6 +494,8 @@ function handleProvenance(request: Request, q: Queries, humanId: string): Respon
   if (!version) return badRequest("unknown version");
   const artifact = q.getArtifact(version.artifact_id);
   if (!artifact) return badRequest("unknown artifact");
+  // Ids are guessable in principle; ownership is the actual boundary.
+  if (artifact.space_id !== spaceIdFor(humanId)) return badRequest("unknown version");
 
   const influences = q.listInfluences(versionId).map((inf) => ({
     ...inf,
@@ -525,6 +527,8 @@ async function handleGraph(request: Request, q: Queries, humanId: string): Promi
   const url = new URL(request.url);
   const taskId = url.searchParams.get("task_id");
   if (!taskId) return badRequest("task_id required");
+  const task = q.getTask(taskId);
+  if (!task || task.human_id !== humanId) return badRequest("unknown task");
   const body = (await request.json()) as { seed_item_ids: string[] };
   const allowed = authorizedRegionIds(q, taskId, Date.now());
   const result = traverse(q, body.seed_item_ids, allowed);
@@ -669,6 +673,7 @@ function handleCapabilities(request: Request, q: Queries, humanId: string): Resp
   if (!taskId) return badRequest("task_id required");
   const task = q.getTask(taskId);
   if (!task) return badRequest("unknown task");
+  if (task.human_id !== humanId) return badRequest("unknown task");
 
   const regions = q.listRegions(task.space_id);
   const slugById = new Map(regions.map((r) => [r.id, r.slug]));
@@ -854,6 +859,10 @@ function handleTasteEvidence(request: Request, q: Queries, humanId: string): Res
   if (request.method !== "GET") return badRequest("GET required");
   const signalId = new URL(request.url).searchParams.get("signal_id");
   if (!signalId) return badRequest("signal_id required");
+
+  // Evidence quotes a person's own annotations. Only its owner may read it.
+  const signal = q.getTasteSignal(signalId);
+  if (!signal || signal.space_id !== spaceIdFor(humanId)) return badRequest("unknown signal");
 
   const evidence = q.listTasteEvidence(signalId).map((e) => ({
     ...e,
