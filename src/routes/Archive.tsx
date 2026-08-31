@@ -639,7 +639,7 @@ export function Archive() {
               </Button>
             }
           />
-        ) : visible === 0 ? (
+        ) : visible === 0 && filtered ? (
           <EmptyState
             title="No matches"
             body="Nothing here matches the current search and filters."
