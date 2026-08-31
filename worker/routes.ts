@@ -35,6 +35,8 @@ import { traverse } from "./graph";
 import { handleToolCall } from "./mcp";
 import { SEED_ASSETS } from "./seed-assets";
 import { deriveTasteSignals, statementOverlap } from "./taste/derive";
+import { extractUrl } from "./extract";
+import { deriveEdgesForItem } from "./graph-build";
 
 /**
  * Each signed-in human gets their own Space, keyed to their Clerk id.
@@ -799,11 +801,12 @@ async function handleItems(request: Request, q: Queries, humanId: string): Promi
     const region = q.getRegionBySlug(spaceIdFor(humanId), body.region_slug);
     if (!region) return badRequest("unknown region");
     if (!(ITEM_TYPES as readonly string[]).includes(body.type)) return badRequest("unknown item type");
+    const spaceId = spaceIdFor(humanId);
     const now = Date.now();
     const id = crypto.randomUUID();
     q.insertItem({
       id,
-      space_id: spaceIdFor(humanId),
+      space_id: spaceId,
       region_id: region.id,
       owner_id: humanId,
       type: body.type as ItemType,
@@ -817,6 +820,61 @@ async function handleItems(request: Request, q: Queries, humanId: string): Promi
       created_at: now,
       updated_at: now,
     });
+
+    // Enrich a captured link: pull the page / tweet content, spin off child
+    // items for the media and links it references, then wire up the graph.
+    // Best-effort and inline — a slow or failed fetch still leaves the bare item.
+    // ponytail: inline await adds the fetch latency to the capture request; move
+    // to ctx.waitUntil or a DO alarm if capture needs to feel instant.
+    if (body.source_url && (body.type === "link" || body.type === "note")) {
+      const ex = await extractUrl(body.source_url).catch(() => null);
+      if (ex) {
+        const parent = q.getItem(id);
+        if (parent) {
+          const looksRaw = !parent.title.trim() || /^https?:\/\//i.test(parent.title.trim());
+          q.updateItem({
+            ...parent,
+            title: ex.title && looksRaw ? ex.title.slice(0, 140) : parent.title,
+            semantic_text: ex.text ?? parent.semantic_text,
+            metadata: { extracted: { images: ex.images, links: ex.links, author: ex.author, kind: ex.kind } },
+            updated_at: now,
+          });
+        }
+        const child = (type: ItemType, url: string, title: string): string => {
+          const cid = crypto.randomUUID();
+          q.insertItem({
+            id: cid,
+            space_id: spaceId,
+            region_id: region.id,
+            owner_id: humanId,
+            type,
+            title: title.slice(0, 140),
+            source_url: url,
+            content_ref: null,
+            semantic_text: null,
+            metadata: { derived_from_item_id: id },
+            authority_class: "imported_source_linked",
+            created_by: humanId,
+            created_at: now,
+            updated_at: now,
+          });
+          return cid;
+        };
+        const kids: string[] = [];
+        for (const img of ex.images.slice(0, 8)) kids.push(child("image", img, ex.title ?? "Image from link"));
+        for (const lnk of ex.links.slice(0, 12)) kids.push(child("link", lnk, lnk));
+        deriveEdgesForItem(q, q.getItem(id)!, now);
+        for (const cid of kids) {
+          const c = q.getItem(cid);
+          if (c) deriveEdgesForItem(q, c, now);
+        }
+      } else {
+        deriveEdgesForItem(q, q.getItem(id)!, now);
+      }
+    } else {
+      deriveEdgesForItem(q, q.getItem(id)!, now);
+    }
+
     return json({ ok: true, item: q.getItem(id) });
   }
   if (request.method === "PATCH" || request.method === "DELETE") {

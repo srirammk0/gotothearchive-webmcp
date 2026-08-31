@@ -564,28 +564,40 @@ export class Queries {
   searchItems(query: string, allowedRegionIds: string[], limit: number): ContextItem[] {
     if (allowedRegionIds.length === 0 || query.trim() === "") return [];
 
-    const matched = this.sql
-      .exec<{ rowid: number }>(
-        `SELECT rowid FROM items_fts WHERE items_fts MATCH ? ORDER BY rank LIMIT ?`,
-        ftsQuery(query),
-        limit * 4, // over-fetch; region filter happens below
-      )
-      .toArray();
-    if (matched.length === 0) return [];
-    const rankByFold = new Map(matched.map((r, i) => [r.rowid, i]));
+    // ponytail: FTS fetch cap of max(limit*8, 200). A space with >200 strong
+    // matches all sitting in regions the caller can't see could still clip
+    // in-scope hits past this window; a region-scoped FTS index is the upgrade.
+    const cap = Math.max(limit * 8, 200);
 
-    const ph = allowedRegionIds.map(() => "?").join(",");
-    const scored: { item: ContextItem; rank: number }[] = [];
-    for (const row of this.sql
-      .exec<ItemRow>(`SELECT * FROM items WHERE region_id IN (${ph})`, ...allowedRegionIds)
-      .toArray()) {
-      const rank = rankByFold.get(rowidFor(row.id));
-      if (rank !== undefined) scored.push({ item: toItem(row), rank });
-    }
-    return scored
-      .sort((a, b) => a.rank - b.rank)
-      .slice(0, limit)
-      .map((s) => s.item);
+    const run = (match: string): ContextItem[] => {
+      const matched = this.sql
+        .exec<{ rowid: number }>(
+          `SELECT rowid FROM items_fts WHERE items_fts MATCH ? ORDER BY rank LIMIT ?`,
+          match,
+          cap,
+        )
+        .toArray();
+      if (matched.length === 0) return [];
+      const rankByFold = new Map(matched.map((r, i) => [r.rowid, i]));
+
+      const ph = allowedRegionIds.map(() => "?").join(",");
+      const scored: { item: ContextItem; rank: number }[] = [];
+      for (const row of this.sql
+        .exec<ItemRow>(`SELECT * FROM items WHERE region_id IN (${ph})`, ...allowedRegionIds)
+        .toArray()) {
+        const rank = rankByFold.get(rowidFor(row.id));
+        if (rank !== undefined) scored.push({ item: toItem(row), rank });
+      }
+      return scored
+        .sort((a, b) => a.rank - b.rank)
+        .slice(0, limit)
+        .map((s) => s.item);
+    };
+
+    // Strict AND first; if it yields nothing, fall back once to the loose OR form
+    // so a slightly-off query still returns something.
+    const strict = run(ftsQuery(query));
+    return strict.length > 0 ? strict : run(ftsQuery(query, true));
   }
 
   /* ---------------- edges ---------------- */
@@ -601,6 +613,24 @@ export class Queries {
       e.created_by,
       e.approval_state,
       e.created_at,
+    );
+  }
+
+  /** True if an edge already links these two items with this relationship (either direction). */
+  edgeExists(a: string, b: string, relationship: string): boolean {
+    return (
+      (this.sql
+        .exec<{ n: number }>(
+          `SELECT COUNT(*) AS n FROM edges
+           WHERE relationship = ?
+             AND ((from_id = ? AND to_id = ?) OR (from_id = ? AND to_id = ?))`,
+          relationship,
+          a,
+          b,
+          b,
+          a,
+        )
+        .toArray()[0]?.n ?? 0) > 0
     );
   }
 
@@ -899,6 +929,17 @@ export class Queries {
       a.item_id,
       a.tool_name,
       a.at,
+    );
+  }
+
+  /** Batch form of insertAccess — one multi-row insert instead of N. */
+  insertAccesses(rows: AccessRecord[]): void {
+    if (rows.length === 0) return;
+    const tuples = rows.map(() => "(?, ?, ?, ?, ?)").join(", ");
+    const args = rows.flatMap((a) => [a.id, a.task_id, a.item_id, a.tool_name, a.at]);
+    this.sql.exec(
+      `INSERT INTO accesses (id, task_id, item_id, tool_name, at) VALUES ${tuples}`,
+      ...args,
     );
   }
 
@@ -1294,6 +1335,11 @@ export class Queries {
  * fully control. Items already have a stable text id; fold it to a 63-bit
  * integer so fts5 rowid math works, and reuse the identical fold for lookup,
  * update, and delete.
+ *
+ * ponytail: multiplicative fold mod MAX_SAFE_INTEGER with no collision handling.
+ * Birthday-collision odds are negligible below ~10k items per space; if a space
+ * gets large, add a real surrogate-key column or move items_fts to a proper
+ * external-content table keyed on the sequential rowid.
  */
 export function rowidFor(itemId: string): number {
   let hash = 0n;
@@ -1303,13 +1349,20 @@ export function rowidFor(itemId: string): number {
   return Number(hash % 9007199254740991n);
 }
 
-/** Turn free text into an fts5 MATCH query: quote each token, OR them, prefix-match the last. */
-function ftsQuery(input: string): string {
+/**
+ * Turn free text into an fts5 MATCH query: quote each token, AND them together,
+ * and prefix-wildcard only the last token. `loose` switches to the old form —
+ * every token prefix-wildcarded and OR'd — for the fallback in searchItems().
+ */
+function ftsQuery(input: string, loose = false): string {
   const tokens = input
     .trim()
     .split(/\s+/)
     .filter(Boolean)
     .map((t) => t.replace(/["]/g, ""));
   if (tokens.length === 0) return '""';
-  return tokens.map((t) => `"${t}"*`).join(" OR ");
+  if (loose) return tokens.map((t) => `"${t}"*`).join(" OR ");
+  return tokens
+    .map((t, i) => (i === tokens.length - 1 ? `"${t}"*` : `"${t}"`))
+    .join(" AND ");
 }

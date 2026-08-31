@@ -26,7 +26,7 @@ export interface RetrieveInput {
 }
 
 /** Contribution below this counts as taste staying silent, not lifting an item. */
-const TASTE_APPLIED_MIN = 0.15;
+const TASTE_APPLIED_MIN = 0.1;
 
 export function retrieve(q: Queries, input: RetrieveInput, now: number): RetrievedItem[] {
   const task = q.getTask(input.taskId);
@@ -107,9 +107,11 @@ export function retrieve(q: Queries, input: RetrieveInput, now: number): Retriev
     const ageMs = Math.max(now - item.updated_at, 0);
     const recency = 1 / (1 + ageMs / (1000 * 60 * 60 * 24 * 30)); // ~30-day decay
 
+    // Explicit readout only — the graph LIST already feeds RRF; this never enters `score`.
     const graph_strength = graphStrengthFor(graph.edges, item.id, items);
 
-    const score = fused * authority_weight * curation * (1 + taste.value);
+    const score =
+      fused * authority_weight * curation * (1 + taste.value) * (0.75 + 0.25 * recency);
 
     const signals: RetrievalSignals = {
       fused,
@@ -135,20 +137,26 @@ export function retrieve(q: Queries, input: RetrieveInput, now: number): Retriev
   }
 
   // oxlint(no-array-sort): `rows` is a fresh local array, mutation-in-place is safe here.
-  rows.sort((a, b) => b.entry.signals.score - a.entry.signals.score);
+  rows.sort(
+    (a, b) =>
+      b.entry.signals.score - a.entry.signals.score ||
+      a.entry.item.id.localeCompare(b.entry.item.id),
+  );
   const top = rows.slice(0, input.limit);
 
   // 4. applied_signal_ids: confirmed signals that materially lifted an item that landed in the top N.
-  for (const row of top) {
-    row.entry.applied_signal_ids = row.contributingSignalIds;
-    q.insertAccess({
+  // ponytail: one access row per returned item. Fine as an audit trail at beta
+  // scale; if reads get hot, move this to a queue. Batched into one insert below.
+  for (const row of top) row.entry.applied_signal_ids = row.contributingSignalIds;
+  q.insertAccesses(
+    top.map((row) => ({
       id: crypto.randomUUID(),
       task_id: input.taskId,
       item_id: row.entry.item.id,
       tool_name: "retrieve",
       at: now,
-    });
-  }
+    })),
+  );
 
   return top.map((r) => r.entry);
 }
@@ -231,8 +239,10 @@ function overlap(signal: TasteSignal, item: ContextItem): number {
 
 /**
  * §2.1 — max over confirmed in-scope signals of
- *   confidence · authorityOrderWeight · overlap(signal, item), clamped [0, 1.5].
- * 0 when no confirmed signal is in scope: taste stays silent rather than inventing a boost.
+ *   confidence · authorityOrderWeight · overlap(signal, item), clamped [0, 0.6].
+ * The lever rides on lexical Jaccard of short strings, so the cap keeps the
+ * (1 + taste.value) multiplier under ~1.6x. 0 when no confirmed signal is in
+ * scope: taste stays silent rather than inventing a boost.
  */
 function tasteRelevanceFor(
   item: ContextItem,
@@ -247,7 +257,7 @@ function tasteRelevanceFor(
     if (c > best) best = c;
     if (c > TASTE_APPLIED_MIN) contributing.push(signal.id);
   }
-  return { value: Math.max(0, Math.min(1.5, best)), contributingSignalIds: contributing };
+  return { value: Math.max(0, Math.min(0.6, best)), contributingSignalIds: contributing };
 }
 
 /**

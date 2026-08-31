@@ -3,6 +3,55 @@
 Status: proposed 2026-08-31. Supersedes the stub in `worker/retrieval.ts`.
 Companion to [taste-learning.md](./taste-learning.md).
 
+## 8. Hardening pass (2026-08-31, round 2)
+
+Seven fixes to the round-1 pipeline, plus real graph construction and capture-time
+content extraction. All stay inside the DO, no new cost.
+
+**retrieval.ts / queries.ts**
+1. `ftsQuery` was `"a"* OR "b"* OR "c"*` — matched anything vaguely related. Now
+   AND-joins quoted tokens, prefix-wildcards only the last, and `searchItems`
+   falls back to the loose OR form once if the strict query returns nothing.
+2. `searchItems` FTS fetch cap raised to `max(limit·8, 200)` so narrow grants
+   don't clip in-scope matches sitting behind forbidden-region hits.
+3. `rowidFor` collision ceiling documented (negligible < ~10k items/space).
+4. `recency` wired into `score` as a gentle `0.75 + 0.25·recency` multiplier;
+   `graph_strength` is an explicit readout (the graph list already feeds RRF).
+5. Taste lever tightened: `taste.value` clamped to `[0, 0.6]` (was 1.5), so a
+   confirmed signal lifts an item at most ~1.6×, not 2.5×, on a lexical estimate.
+6. Per-read `insertAccess` writes documented / batched.
+7. Final sort gets `item.id` as a stable secondary key.
+
+**Context graph — `worker/graph-build.ts`** (new). Was seed + agent-proposal only.
+`deriveEdgesForItem(q, item, now)` runs on every capture and links the new item to
+existing ones in the same space:
+
+| Rule | Relationship | Weight | State |
+|---|---|---|---|
+| same source hostname | `related_to` | 0.6 | approved |
+| tweet → its extracted image | `derived_from` | 1.0 | approved |
+| tweet → link it references | `mentions` | 1.0 | approved |
+| shared salient words (jaccard ≥ .18, ≥ 3 words) | `related_to` | ≤ .5 | proposed |
+| same region, captured < 10 min apart | `related_to` | 0.3 | proposed |
+
+`rebuildSpaceEdges(q, spaceId, now)` backfills every space on DO boot (in
+`migrate.ts`), idempotent via `q.edgeExists`.
+
+**Capture-time extraction — `worker/extract.ts`** (new). `extractUrl(url)`:
+- X/Twitter (`.../status/<id>`): the public syndication endpoint
+  `cdn.syndication.twimg.com/tweet-result` → text, author, `photos[]`, and
+  `entities.urls[].expanded_url`. oEmbed fallback.
+- Any other URL: `fetch` (5 s timeout, 512 KB cap) → `<title>` / `og:title`,
+  `og:description`, `og:image`. Regex-only parsing (no DOM in Workers).
+- Returns `null` on any failure — never throws.
+
+`handleItems` POST orchestration (Claude owns this): on a captured link, call
+`extractUrl` → set the item's `title` / `semantic_text` / `metadata.extracted`,
+create child `image` items (`source_url` = the media URL, no R2 write) and `link`
+items for referenced URLs, each tagged `metadata.derived_from_item_id`, then run
+`deriveEdgesForItem` for the parent and children. Best-effort: a failed extraction
+still stores the bare link.
+
 ## 0. What we looked at
 
 **Cloudflare AI Search** (formerly AutoRAG, still open beta Aug 2026). Managed RAG:
