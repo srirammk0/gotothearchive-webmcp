@@ -6,6 +6,7 @@ import {
   API,
   ITEM_TYPES,
   REVIEW_DECISIONS,
+  type AccessRecord,
   type ArtifactState,
   type CapabilityInput,
   type GrantLevel,
@@ -54,6 +55,10 @@ export async function handleRoute(
       return withCookie(await handleItems(request, q, human.human_id));
     case API.upload:
       return withCookie(await handleUpload(request, env));
+    case API.blob:
+      return withCookie(await handleBlob(request, env));
+    case API.provenance:
+      return withCookie(handleProvenance(request, q));
     case API.graph:
       return withCookie(await handleGraph(request, q));
     case API.task:
@@ -266,6 +271,73 @@ async function handleUpload(request: Request, env: Env): Promise<Response> {
   const body = await request.arrayBuffer();
   await env.BLOBS.put(key, body, { httpMetadata: { contentType } });
   return json({ ok: true, key });
+}
+
+/**
+ * Streams a canonical original back out of R2.
+ *
+ * Keys are confined to this space's prefix, so a caller cannot walk out of the
+ * bucket by supplying a crafted key. The agent never receives a bucket
+ * credential or a raw R2 URL — it only ever sees this path.
+ */
+async function handleBlob(request: Request, env: Env): Promise<Response> {
+  if (request.method !== "GET") return badRequest("GET required");
+  const key = new URL(request.url).searchParams.get("key");
+  if (!key) return badRequest("key required");
+  if (!key.startsWith(`${GUEST_SPACE_ID}/`) || key.includes("..")) {
+    return new Response("Not found", { status: 404 });
+  }
+  const object = await env.BLOBS.get(key);
+  if (!object) return new Response("Not found", { status: 404 });
+  return new Response(object.body, {
+    headers: {
+      "content-type": object.httpMetadata?.contentType ?? "application/octet-stream",
+      "cache-control": "private, max-age=3600",
+    },
+  });
+}
+
+/**
+ * The three provenance record types for one artifact version, kept separate.
+ *
+ *   influences → "Used these references"
+ *   accesses   → "Accessed for this task"
+ *   denials    → "Unavailable or denied" (Agent Lens only)
+ *
+ * Merging these would erase the distinction between what shaped the work, what
+ * was merely looked at, and what was refused. See BUILD-CONTRACT invariant 5.
+ */
+function handleProvenance(request: Request, q: Queries): Response {
+  if (request.method !== "GET") return badRequest("GET required");
+  const versionId = new URL(request.url).searchParams.get("version_id");
+  if (!versionId) return badRequest("version_id required");
+
+  const version = q.getArtifactVersion(versionId);
+  if (!version) return badRequest("unknown version");
+  const artifact = q.getArtifact(version.artifact_id);
+  if (!artifact) return badRequest("unknown artifact");
+
+  const influences = q.listInfluences(versionId).map((inf) => ({
+    ...inf,
+    item: q.getItem(inf.item_id) ?? null,
+  }));
+
+  // Accessed-but-not-influential: retrieved during the task, minus anything
+  // already credited as an influence.
+  const influenced = new Set(influences.map((i) => i.item_id));
+  const accesses = q
+    .recentAccesses(artifact.task_id, 200)
+    .filter((a: AccessRecord) => !influenced.has(a.item_id))
+    .map((a: AccessRecord) => ({ ...a, item: q.getItem(a.item_id) ?? null }));
+
+  return json({
+    ok: true,
+    provenance: {
+      influences,
+      accesses,
+      denials: q.recentDenials(artifact.task_id, 50),
+    },
+  });
 }
 
 /* ---------------- graph ---------------- */

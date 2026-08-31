@@ -439,6 +439,10 @@ export const API = {
   regions: "/api/regions",
   items: "/api/items",
   upload: "/api/upload",
+  /** GET ?key=… — streams a canonical original back out of R2. */
+  blob: "/api/blob",
+  /** GET ?version_id=… — the three provenance record types for one version. */
+  provenance: "/api/provenance",
   graph: "/api/graph",
   task: "/api/task",
   /** Registers an agent session bound to the authenticated human + task. */
