@@ -13,9 +13,11 @@ import {
   type ToolCallResponse,
 } from "@shared/contract";
 import type { Queries } from "./db/queries";
+import { consumeQuota } from "./quota";
 import { authorize, authorizedRegionIds, writeDenial } from "./permissions";
 import { retrieve } from "./retrieval";
 import { traverse } from "./graph";
+import { deriveTasteSignals } from "./taste/derive";
 import type { ResolvedHuman } from "./auth";
 
 function denyResult(reason: string): ToolCallResponse {
@@ -127,6 +129,25 @@ export async function handleToolCall(
         { taskId: task.id, query, regionSlugs: regionSlug ? [regionSlug] : null, limit },
         now,
       );
+
+      // A confirmed signal that materially lifted a returned item is a real
+      // "this taste shaped the work" record — emit one 'applied' event per pair.
+      for (const ret of items) {
+        for (const signalId of ret.applied_signal_ids) {
+          q.insertTasteEvent({
+            id: crypto.randomUUID(),
+            signal_id: signalId,
+            kind: "applied",
+            actor_type: "agent",
+            actor_label: "Agent",
+            agent_session_id: session.id,
+            detail: `Applied while retrieving context for "${task.title}": ${ret.item.title}`,
+            version_id: null,
+            at: now,
+          });
+        }
+      }
+
       return { ok: true, result: { items } };
     }
 
@@ -240,6 +261,9 @@ export async function handleToolCall(
       );
       if (!authResult.ok) return denyResult(authResult.reason);
 
+      const budget = consumeQuota(q, human.human_id, "artifacts");
+      if (!budget.ok) return denyResult(budget.message);
+
       const title = typeof input.title === "string" ? input.title : "Untitled artifact";
       const contentHtml = typeof input.content_html === "string" ? input.content_html : "";
       const parentVersionId =
@@ -351,6 +375,9 @@ export async function handleToolCall(
         status: "open",
         created_at: now,
       });
+
+      // Agent-authored feedback feeds the same taste-derivation loop as human annotations.
+      deriveTasteSignals(q, task.space_id, now);
 
       return { ok: true, result: { annotation_id: annotationId } };
     }

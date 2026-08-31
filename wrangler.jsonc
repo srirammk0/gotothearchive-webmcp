@@ -19,5 +19,15 @@
 	"r2_buckets": [
 		{ "binding": "BLOBS", "bucket_name": "gotothearchive-blobs" }
 	],
-	"ai": { "binding": "AI" }
+	"ai": { "binding": "AI" },
+	"unsafe": {
+		"bindings": [
+			{
+				"name": "API_RL",
+				"type": "ratelimit",
+				"namespace_id": "1001",
+				"simple": { "limit": 240, "period": 60 }
+			}
+		]
+	}
 }

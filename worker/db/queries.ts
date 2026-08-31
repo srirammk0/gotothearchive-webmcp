@@ -193,6 +193,7 @@ interface TasteSignalRow {
   created_by: string;
   approved_by: string | null;
   created_at: number;
+  supersedes: string | null;
 }
 interface TasteEvidenceRow {
   [key: string]: SqlStorageValue;
@@ -552,22 +553,39 @@ export class Queries {
       .map(toItem);
   }
 
-  /** FTS match, restricted to a set of allowed region ids (hard pre-filter). */
+  /**
+   * FTS match, restricted to a set of allowed region ids (hard pre-filter).
+   *
+   * items_fts is contentless and keyed by rowidFor(item.id) (a 63-bit fold of
+   * the TEXT id), which never equals items' hidden sequential rowid — so there
+   * is no SQL join. Match in FTS to get the ranked fold values, then resolve
+   * them against the allowed items in JS.
+   */
   searchItems(query: string, allowedRegionIds: string[], limit: number): ContextItem[] {
     if (allowedRegionIds.length === 0 || query.trim() === "") return [];
-    const placeholders = allowedRegionIds.map(() => "?").join(",");
-    const rows = this.sql
-      .exec<ItemRow>(
-        `SELECT items.* FROM items_fts
-         JOIN items ON items.rowid = items_fts.rowid
-         WHERE items_fts MATCH ? AND items.region_id IN (${placeholders})
-         ORDER BY rank LIMIT ?`,
+
+    const matched = this.sql
+      .exec<{ rowid: number }>(
+        `SELECT rowid FROM items_fts WHERE items_fts MATCH ? ORDER BY rank LIMIT ?`,
         ftsQuery(query),
-        ...allowedRegionIds,
-        limit,
+        limit * 4, // over-fetch; region filter happens below
       )
       .toArray();
-    return rows.map(toItem);
+    if (matched.length === 0) return [];
+    const rankByFold = new Map(matched.map((r, i) => [r.rowid, i]));
+
+    const ph = allowedRegionIds.map(() => "?").join(",");
+    const scored: { item: ContextItem; rank: number }[] = [];
+    for (const row of this.sql
+      .exec<ItemRow>(`SELECT * FROM items WHERE region_id IN (${ph})`, ...allowedRegionIds)
+      .toArray()) {
+      const rank = rankByFold.get(rowidFor(row.id));
+      if (rank !== undefined) scored.push({ item: toItem(row), rank });
+    }
+    return scored
+      .sort((a, b) => a.rank - b.rank)
+      .slice(0, limit)
+      .map((s) => s.item);
   }
 
   /* ---------------- edges ---------------- */
@@ -1020,8 +1038,8 @@ export class Queries {
 
   insertTasteSignal(t: TasteSignal): void {
     this.sql.exec(
-      `INSERT INTO taste_signals (id, space_id, owner_id, statement, dimensions, scope, status, confidence, created_by, approved_by, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO taste_signals (id, space_id, owner_id, statement, dimensions, scope, status, confidence, created_by, approved_by, created_at, supersedes)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       t.id,
       t.space_id,
       t.owner_id,
@@ -1033,6 +1051,7 @@ export class Queries {
       t.created_by,
       t.approved_by,
       t.created_at,
+      t.supersedes ?? null,
     );
   }
 
@@ -1124,6 +1143,53 @@ export class Queries {
       .map((r) => ({ ...toTasteEvent(r), statement: r.statement }));
   }
 
+  /** supporting / contradicting evidence counts for a signal. */
+  tasteEvidenceCounts(signalId: string): { supporting: number; contradicting: number } {
+    const rows = this.sql
+      .exec<{ kind: string; n: number }>(
+        `SELECT kind, COUNT(*) AS n FROM taste_evidence WHERE signal_id = ? GROUP BY kind`,
+        signalId,
+      )
+      .toArray();
+    const get = (k: string) => rows.find((r) => r.kind === k)?.n ?? 0;
+    return { supporting: get("supports"), contradicting: get("contradicts") };
+  }
+
+  setTasteSignalConfidence(id: string, confidence: number): void {
+    this.sql.exec(`UPDATE taste_signals SET confidence = ? WHERE id = ?`, confidence, id);
+  }
+
+  /** Bitemporal replace: old row → superseded, new row records the link. */
+  supersedeTasteSignal(oldId: string, newId: string): void {
+    this.sql.exec(`UPDATE taste_signals SET status = 'superseded' WHERE id = ?`, oldId);
+    this.sql.exec(`UPDATE taste_signals SET supersedes = ? WHERE id = ?`, oldId, newId);
+  }
+
+  confirmedTasteSignals(spaceId: string): TasteSignal[] {
+    return this.sql
+      .exec<TasteSignalRow>(
+        `SELECT * FROM taste_signals WHERE space_id = ? AND status = 'confirmed'`,
+        spaceId,
+      )
+      .toArray()
+      .map(toTasteSignal);
+  }
+
+  /** Every open annotation in a space, with the version's task, for taste derivation. */
+  openAnnotationsForSpace(spaceId: string): (Annotation & { space_id: string })[] {
+    return this.sql
+      .exec<AnnotationRow & { space_id: string }>(
+        `SELECT a.*, ar.space_id AS space_id
+         FROM annotations a
+         JOIN artifact_versions av ON av.id = a.version_id
+         JOIN artifacts ar ON ar.id = av.artifact_id
+         WHERE ar.space_id = ? AND a.status = 'open'`,
+        spaceId,
+      )
+      .toArray()
+      .map((r) => ({ ...toAnnotation(r), space_id: r.space_id }));
+  }
+
   /* ---------------- audit ---------------- */
 
   insertAuditEvent(e: AuditEvent): void {
@@ -1153,6 +1219,74 @@ export class Queries {
       .toArray()
       .map(toAuditEvent);
   }
+
+  /* ---------------- beta membership + usage quota ---------------- */
+
+  betaMemberCount(): number {
+    return (
+      this.sql.exec<{ n: number }>(`SELECT COUNT(*) AS n FROM beta_members`).toArray()[0]?.n ?? 0
+    );
+  }
+
+  betaSlot(humanId: string): number | null {
+    const row = this.sql
+      .exec<{ slot_no: number }>(`SELECT slot_no FROM beta_members WHERE human_id = ?`, humanId)
+      .toArray()[0];
+    return row ? row.slot_no : null;
+  }
+
+  /** Claim a beta slot if one is free. Returns the slot number, or null if full. */
+  claimBetaSlot(humanId: string, max: number, now: number): number | null {
+    const existing = this.betaSlot(humanId);
+    if (existing !== null) return existing;
+    const taken = this.betaMemberCount();
+    if (taken >= max) return null;
+    const slot = taken + 1;
+    this.sql.exec(
+      `INSERT INTO beta_members (human_id, slot_no, joined_at) VALUES (?, ?, ?)`,
+      humanId,
+      slot,
+      now,
+    );
+    return slot;
+  }
+
+  usageGet(humanId: string, period: string, metric: string): number {
+    const row = this.sql
+      .exec<{ used: number }>(
+        `SELECT used FROM usage_counters WHERE human_id = ? AND period = ? AND metric = ?`,
+        humanId,
+        period,
+        metric,
+      )
+      .toArray()[0];
+    return row ? row.used : 0;
+  }
+
+  usageAdd(humanId: string, period: string, metric: string, n: number): void {
+    this.sql.exec(
+      `INSERT INTO usage_counters (human_id, period, metric, used) VALUES (?, ?, ?, ?)
+       ON CONFLICT (human_id, period, metric) DO UPDATE SET used = used + excluded.used`,
+      humanId,
+      period,
+      metric,
+      n,
+    );
+  }
+
+  usageForPeriod(humanId: string, period: string): Record<string, number> {
+    const out: Record<string, number> = {};
+    for (const r of this.sql
+      .exec<{ metric: string; used: number }>(
+        `SELECT metric, used FROM usage_counters WHERE human_id = ? AND period = ?`,
+        humanId,
+        period,
+      )
+      .toArray()) {
+      out[r.metric] = r.used;
+    }
+    return out;
+  }
 }
 
 /**
@@ -1161,7 +1295,7 @@ export class Queries {
  * integer so fts5 rowid math works, and reuse the identical fold for lookup,
  * update, and delete.
  */
-function rowidFor(itemId: string): number {
+export function rowidFor(itemId: string): number {
   let hash = 0n;
   for (let i = 0; i < itemId.length; i++) {
     hash = (hash * 131n + BigInt(itemId.charCodeAt(i))) & 0x7fffffffffffffffn;

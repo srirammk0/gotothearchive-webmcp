@@ -8,6 +8,7 @@ interface __BaseEnv_Env {
 	CLERK_SECRET_KEY: string;
 	CLERK_PUBLISHABLE_KEY: string;
 	SPACE: DurableObjectNamespace<import("./worker/index").SpaceDO>;
+	API_RL?: RateLimit;
 }
 declare namespace Cloudflare {
 	interface GlobalProps {

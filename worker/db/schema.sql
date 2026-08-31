@@ -40,7 +40,10 @@ CREATE TABLE IF NOT EXISTS items (
 CREATE INDEX IF NOT EXISTS idx_items_region ON items(region_id);
 CREATE INDEX IF NOT EXISTS idx_items_space ON items(space_id);
 
--- Full-text search over title + derived text. Kept in sync by triggers.
+-- Full-text search over title + derived text. Contentless (content=''); rowid is
+-- rowidFor(item.id) (a fold of the TEXT id), set explicitly on every write. That
+-- fold never equals items' hidden sequential rowid, so searchItems() resolves
+-- FTS hits back to items in JS rather than via a SQL join.
 CREATE VIRTUAL TABLE IF NOT EXISTS items_fts USING fts5(
   title, semantic_text, content=''
 );
@@ -195,7 +198,12 @@ CREATE TABLE IF NOT EXISTS taste_signals (
   confidence  REAL NOT NULL DEFAULT 0.5,
   created_by  TEXT NOT NULL CHECK (created_by IN ('system','human')),
   approved_by TEXT,
-  created_at  INTEGER NOT NULL
+  created_at  INTEGER NOT NULL,
+  -- Bitemporal correction: a materially changed or replaced signal is not
+  -- overwritten. The old row goes status='superseded' and the new row points
+  -- back at it here. Retrieval reads only status='confirmed'; the Taste UI
+  -- walks this chain for the "how the judgement changed" timeline.
+  supersedes  TEXT REFERENCES taste_signals(id)
 );
 
 CREATE TABLE IF NOT EXISTS taste_evidence (
@@ -239,3 +247,19 @@ CREATE TABLE IF NOT EXISTS audit_events (
   at               INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_audit_at ON audit_events(at);
+
+-- Closed beta: a hard 25-member cap plus a per-member monthly usage counter.
+-- Both live in the single DO alongside every space, so the cap is global.
+CREATE TABLE IF NOT EXISTS beta_members (
+  human_id  TEXT PRIMARY KEY,
+  slot_no   INTEGER NOT NULL,
+  joined_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS usage_counters (
+  human_id TEXT NOT NULL,
+  period   TEXT NOT NULL,
+  metric   TEXT NOT NULL,
+  used     INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (human_id, period, metric)
+);

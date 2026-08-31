@@ -305,10 +305,26 @@ export interface TasteSignal {
   dimensions: TasteDimension[];
   scope: "personal" | "project";
   status: "proposed" | "confirmed" | "rejected" | "superseded";
+  /** Derived from evidence counts, never a literal. See confidenceFrom(). */
   confidence: number;
   created_by: "system" | "human";
   approved_by: Id | null;
   created_at: number;
+  /** Bitemporal: id of the signal this one replaces, or null. */
+  supersedes: Id | null;
+}
+
+/** Words, not false-precision percentages (taste-learning.md §Taste interface). */
+export function confidenceLabel(c: number): "tentative" | "growing" | "well-supported" {
+  if (c < 0.4) return "tentative";
+  if (c < 0.7) return "growing";
+  return "well-supported";
+}
+
+/** confidence from supporting/contradicting evidence counts. Monotonic, bounded. */
+export function confidenceFrom(supporting: number, contradicting: number): number {
+  const c = (supporting - 0.5 * contradicting) / (supporting + contradicting + 2);
+  return Math.max(0.05, Math.min(0.98, c));
 }
 
 export interface TasteEvidence {
@@ -371,13 +387,17 @@ export interface AuditEvent {
  * item is absent, never low-ranked.
  */
 export interface RetrievalSignals {
-  text_match: number;
+  /** Reciprocal-rank-fused score over the lists this item appeared in. */
+  fused: number;
+  /** Per-list 1-based rank, or null if absent from that list. */
+  ranks: { fts: number | null; recency: number | null; graph: number | null };
   graph_strength: number;
+  /** Lexical + dimension overlap with confirmed in-scope taste signals, weighted by confidence and authority order. 0 when taste is silent. */
   taste_relevance: number;
   curation: number;
   recency: number;
   authority_weight: number;
-  /** Product of the above. */
+  /** fused · authority_weight · curation · (1 + taste_relevance). */
   score: number;
 }
 
@@ -385,9 +405,14 @@ export interface RetrievedItem {
   item: ContextItem;
   region_slug: string;
   signals: RetrievalSignals;
+  /** confirmed taste signal ids that materially boosted this item (→ taste_events 'applied'). */
+  applied_signal_ids: Id[];
   /** Human-readable reason, surfaced in Agent Lens. */
   why: string;
 }
+
+/** Reciprocal rank fusion constant. */
+export const RRF_K = 60;
 
 /* ------------------------------------------------------------------ *
  * WebMCP tool surface
@@ -494,6 +519,8 @@ export const API = {
   lens: "/api/lens",
   /** GET — assembled agent-usage stats for the whole space. */
   stats: "/api/stats",
+  /** GET — this member's beta slot and monthly quota usage. */
+  quota: "/api/quota",
   /** Links between items. GET ?item_id=… · POST create · PATCH review · DELETE ?id=… */
   edges: "/api/edges",
   /** Notes on one item. GET ?item_id=… · POST create · DELETE ?id=… */

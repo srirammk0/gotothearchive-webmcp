@@ -7,6 +7,7 @@ import {
   ITEM_TYPES,
   RELATIONSHIPS,
   REVIEW_DECISIONS,
+  confidenceFrom,
   type AccessRecord,
   type ArtifactState,
   type CapabilityInput,
@@ -20,10 +21,20 @@ import {
 } from "@shared/contract";
 import { Queries } from "./db/queries";
 import { resolveHuman } from "./auth";
+import {
+  BETA_MAX_USERS,
+  QUOTA,
+  QUOTA_METRICS,
+  UPLOAD_MAX_BYTES,
+  consumeQuota,
+  quotaPeriod,
+  type QuotaMetric,
+} from "./quota";
 import { authorizedRegionIds, humanRegions, liveGrants } from "./permissions";
 import { traverse } from "./graph";
 import { handleToolCall } from "./mcp";
 import { SEED_ASSETS } from "./seed-assets";
+import { deriveTasteSignals, statementOverlap } from "./taste/derive";
 
 /**
  * Each signed-in human gets their own Space, keyed to their Clerk id.
@@ -54,15 +65,31 @@ export async function handleRoute(
   const human = await resolveHuman(request, env);
   if (!human) return json({ ok: false, error: "Sign in required" }, { status: 401 });
 
+  // Closed-beta gate. Bootstrap claims a slot (or 403s when full); every other
+  // route requires an already-claimed slot.
+  if (url.pathname === API.bootstrap) {
+    const slot = q.claimBetaSlot(human.human_id, BETA_MAX_USERS, Date.now());
+    if (slot === null) {
+      return json(
+        { ok: false, error: "beta_full", message: `The beta is full (${BETA_MAX_USERS} members). Check back later.` },
+        { status: 403 },
+      );
+    }
+  } else if (q.betaSlot(human.human_id) === null) {
+    return json({ ok: false, error: "beta_required", message: "Open the app first to join the beta." }, { status: 403 });
+  }
+
   switch (url.pathname) {
     case API.bootstrap:
       return await handleBootstrap(request, env, q, human.human_id);
+    case API.quota:
+      return handleQuota(q, human.human_id);
     case API.regions:
       return await handleRegions(request, q, human.human_id);
     case API.items:
       return await handleItems(request, q, human.human_id);
     case API.upload:
-      return await handleUpload(request, env, human.human_id);
+      return await handleUpload(request, env, q, human.human_id);
     case API.blob:
       return await handleBlob(request, env, human.human_id);
     case API.provenance:
@@ -177,6 +204,7 @@ async function handleBootstrap(request: Request, env: Env, q: Queries, humanId: 
   const seededIds = seedItems(q, spaceIdFor(humanId), regionIds, humanId, now);
   await attachSeedAssets(env, q, spaceIdFor(humanId), seededIds);
   seedActivity(q, spaceIdFor(humanId), now);
+  topUpSeedAgents(q, spaceIdFor(humanId), now);
 
   return json({
     ok: true,
@@ -397,6 +425,7 @@ Drafted from the Atlas creative brief and two references in Inspiration.</p></ar
     confidence: 0.62,
     created_by: "system",
     approved_by: null,
+    supersedes: null,
     created_at: now,
   });
   q.insertTasteEvidence({
@@ -427,29 +456,21 @@ function seedActivity(q: Queries, spaceId: string, now: number): void {
   const chatgptSession = v1?.agent_session_id ?? null;
   const signals = q.listTasteSignals(spaceId);
 
-  // Two more clients have worked this task. Real sessions with declared
+  // Three more clients have worked this task. Real sessions with declared
   // identities (attribution only) so the Stats page can break contributions
-  // down by product.
-  const claudeSession = crypto.randomUUID();
-  q.insertAgentSession({
-    id: claudeSession,
-    human_id: owner,
-    task_id: taskId,
-    declared: { provider: "anthropic", client: "Claude", model: "claude-sonnet-4" },
-    created_at: now - 15 * DAY,
-  });
-  const cursorSession = crypto.randomUUID();
-  q.insertAgentSession({
-    id: cursorSession,
-    human_id: owner,
-    task_id: taskId,
-    declared: { provider: "anthropic", client: "Cursor", model: "claude-sonnet-4" },
-    created_at: now - 8 * DAY,
-  });
-  const sessions = [chatgptSession, claudeSession, cursorSession] as const;
+  // down by product — and so all four brand logos have data to render.
+  const mkSession = (client: string, provider: string, model: string, ago: number) => {
+    const id = crypto.randomUUID();
+    q.insertAgentSession({ id, human_id: owner, task_id: taskId, declared: { provider, client, model }, created_at: now - ago * DAY });
+    return id;
+  };
+  const claudeSession = mkSession("Claude", "anthropic", "claude-sonnet-4", 15);
+  const cursorSession = mkSession("Cursor", "anthropic", "claude-sonnet-4", 8);
+  const copilotSession = mkSession("GitHub Copilot", "openai", "gpt-4o", 6);
+  const sessions = [chatgptSession, claudeSession, cursorSession, copilotSession] as const;
 
   // 1) Agent activity trail over the last three weeks. Column 4 picks the client.
-  const trail: [number, string, string | null, 0 | 1 | 2][] = [
+  const trail: [number, string, string | null, 0 | 1 | 2 | 3][] = [
     [21, "started task", null, 0],
     [21, "registered tools", "webmcp", 0],
     [20, "retrieved context for task", "get_context_for_task", 0],
@@ -458,12 +479,16 @@ function seedActivity(q: Queries, spaceId: string, now: number): void {
     [18, "read reference", "get_context_for_task", 0],
     [18, "applied taste signal", "get_taste_for_task", 0],
     [17, "generated draft v1", "record_artifact", 0],
+    [16, "inspected relationships", "inspect_relationships", 3],
     [15, "retrieved context for task", "get_context_for_task", 1],
     [14, "read review notes", "record_feedback", 1],
     [13, "applied taste signal", "get_taste_for_task", 1],
     [12, "generated draft v2", "record_artifact", 1],
+    [11, "searched archive", "get_context_for_task", 3],
+    [10, "applied taste signal", "get_taste_for_task", 3],
     [9, "searched archive", "get_context_for_task", 1],
     [7, "read reference", "get_context_for_task", 2],
+    [5, "proposed a connection", "propose_context_change", 3],
     [4, "generated moodboard", "record_artifact", 2],
     [2, "applied taste signal", "get_taste_for_task", 2],
     [1, "read review notes", "record_feedback", 2],
@@ -584,6 +609,7 @@ function seedActivity(q: Queries, spaceId: string, now: number): void {
     confidence: 0.84,
     created_by: "system",
     approved_by: owner,
+    supersedes: null,
     created_at: now - 20 * DAY,
   });
   ev(s2, "proposed", "system", now - 20 * DAY, { detail: "Derived from repeated reference picks" });
@@ -591,6 +617,101 @@ function seedActivity(q: Queries, spaceId: string, now: number): void {
   ev(s2, "applied", "agent", now - 13 * DAY, { detail: "Kept the type system in v2", version_id: null, session: claudeSession });
   ev(s2, "accepted", "human", now - 16 * DAY);
   ev(s2, "applied", "agent", now - 1 * DAY, { detail: "Reused on the moodboard", version_id: moodV2, session: cursorSession });
+  ev(s2, "applied", "agent", now - 10 * DAY, { detail: "Checked headline type before editing", version_id: null, session: copilotSession });
+
+  // A human-created link + an agent-proposed one, so the graph and its review
+  // queue aren't empty on a fresh space.
+  const byTitle: Record<string, string> = {};
+  for (const it of q.listItemsBySpace(spaceId)) {
+    if (it.title.startsWith("Terracotta")) byTitle.terracotta = it.id;
+    if (it.title.startsWith("Editorial serif")) byTitle.serif = it.id;
+    if (it.title.startsWith("Friendly onboarding")) byTitle.onboarding = it.id;
+  }
+  const link = (from: string, to: string, state: "approved" | "proposed", by: string) => {
+    if (byTitle[from] && byTitle[to]) {
+      q.insertEdge({
+        id: crypto.randomUUID(),
+        from_id: byTitle[from],
+        to_id: byTitle[to],
+        relationship: "related_to",
+        weight: 1,
+        created_by: by,
+        approval_state: state,
+        created_at: now - 3 * DAY,
+      });
+    }
+  };
+  link("terracotta", "serif", "approved", owner);
+  link("serif", "onboarding", "proposed", `agent:${copilotSession}`);
+}
+
+/**
+ * Adds any of the four demo clients (ChatGPT / Claude / Cursor / Copilot) that
+ * are missing from a space seeded before multi-agent support, each with a small
+ * activity trail and one taste application. Idempotent — keyed on the declared
+ * client name, so it does nothing once every client is present.
+ */
+function topUpSeedAgents(q: Queries, spaceId: string, now: number): void {
+  const artifacts = q.listArtifacts(spaceId);
+  if (artifacts.length === 0) return;
+  const taskId = artifacts[0].task_id;
+  const owner = artifacts[0].space_id;
+  const signal = q.listTasteSignals(spaceId).find((s) => s.status === "confirmed") ?? q.listTasteSignals(spaceId)[0];
+
+  const have = new Set(
+    q.listAgentSessions(spaceId).map((s) => (s.declared?.client ?? "").toLowerCase()),
+  );
+  const wanted: { client: string; provider: string; model: string; ago: number }[] = [
+    { client: "chatgpt-desktop", provider: "openai", model: "gpt-5", ago: 21 },
+    { client: "Claude", provider: "anthropic", model: "claude-sonnet-4", ago: 15 },
+    { client: "Cursor", provider: "anthropic", model: "claude-sonnet-4", ago: 8 },
+    { client: "GitHub Copilot", provider: "openai", model: "gpt-4o", ago: 6 },
+  ];
+
+  for (const w of wanted) {
+    if (have.has(w.client.toLowerCase())) continue;
+    const sid = crypto.randomUUID();
+    q.insertAgentSession({
+      id: sid,
+      human_id: owner,
+      task_id: taskId,
+      declared: { provider: w.provider, client: w.client, model: w.model },
+      created_at: now - w.ago * DAY,
+    });
+    const ops: [number, string, string][] = [
+      [w.ago, "retrieved context for task", "get_context_for_task"],
+      [w.ago - 1, "read reference", "get_context_for_task"],
+      [w.ago - 2, "applied taste signal", "get_taste_for_task"],
+      [Math.max(1, w.ago - 4), "read review notes", "record_feedback"],
+    ];
+    for (const [ago, operation, tool] of ops) {
+      q.insertAuditEvent({
+        id: crypto.randomUUID(),
+        actor_type: "agent",
+        actor_label: "Agent",
+        agent_session_id: sid,
+        human_id: null,
+        task_id: taskId,
+        tool_name: tool,
+        operation,
+        payload: {},
+        at: now - ago * DAY + Math.floor(Math.random() * DAY),
+      });
+    }
+    if (signal) {
+      q.insertTasteEvent({
+        id: crypto.randomUUID(),
+        signal_id: signal.id,
+        kind: "applied",
+        actor_type: "agent",
+        actor_label: w.client,
+        agent_session_id: sid,
+        detail: "Applied while retrieving context",
+        version_id: null,
+        at: now - (w.ago - 2) * DAY,
+      });
+    }
+  }
 }
 
 /* ---------------- regions ---------------- */
@@ -768,11 +889,21 @@ async function attachSeedAssets(
 
 /* ---------------- upload ---------------- */
 
-async function handleUpload(request: Request, env: Env, humanId: string): Promise<Response> {
+async function handleUpload(request: Request, env: Env, q: Queries, humanId: string): Promise<Response> {
   if (request.method !== "POST") return badRequest("POST required");
   const contentType = request.headers.get("content-type") ?? "application/octet-stream";
-  const key = `${spaceIdFor(humanId)}/${crypto.randomUUID()}`;
   const body = await request.arrayBuffer();
+  // Size check BEFORE metering — a rejected oversize upload must not burn a
+  // monthly quota unit.
+  if (body.byteLength > UPLOAD_MAX_BYTES) {
+    return json(
+      { ok: false, error: "file_too_large", message: `Files are capped at ${Math.round(UPLOAD_MAX_BYTES / 1048576)} MB in the beta.` },
+      { status: 413 },
+    );
+  }
+  const over = meter(q, humanId, "uploads");
+  if (over) return over;
+  const key = `${spaceIdFor(humanId)}/${crypto.randomUUID()}`;
   await env.BLOBS.put(key, body, { httpMetadata: { contentType } });
   return json({ ok: true, key });
 }
@@ -1036,6 +1167,8 @@ async function handleMcpCall(
   human: { human_id: string },
 ): Promise<Response> {
   if (request.method !== "POST") return badRequest("POST required");
+  const over = meter(q, human.human_id, "agent_calls");
+  if (over) return over;
   const body = (await request.json()) as ToolCallRequest;
   const result = await handleToolCall(body, q, human, Date.now());
   return json(result, { status: result.ok ? 200 : 403 });
@@ -1103,6 +1236,8 @@ async function handleAnnotations(request: Request, q: Queries, humanId: string):
       status: "open",
       created_at: Date.now(),
     });
+    // Step 5 of the taste loop: this new note may complete a candidate signal.
+    deriveTasteSignals(q, spaceIdFor(humanId), Date.now());
     return json({ ok: true, annotation: { id } });
   }
   return badRequest("unsupported method");
@@ -1138,6 +1273,7 @@ async function handleDecisions(request: Request, q: Queries, humanId: string): P
           ? "changes_requested"
           : "rejected";
   q.setArtifactVersionState(body.version_id, nextState);
+  deriveTasteSignals(q, spaceIdFor(humanId), now);
   return json({ ok: true, version: q.getArtifactVersion(body.version_id) });
 }
 
@@ -1167,11 +1303,21 @@ function logTasteEvent(
 
 async function handleTaste(request: Request, q: Queries, humanId: string): Promise<Response> {
   if (request.method === "GET") {
-    return json({
-      ok: true,
-      signals: q.listTasteSignals(spaceIdFor(humanId)),
-      recent_events: q.recentTasteEvents(spaceIdFor(humanId), 12),
+    const spaceId = spaceIdFor(humanId);
+    // Hydrate each activity event with a thumbnail: the artifact it shaped
+    // (preview HTML) or the first source item its signal cites (image / host).
+    const recent_events = q.recentTasteEvents(spaceId, 14).map((e) => {
+      let artifact: { title: string; preview_html: string } | null = null;
+      if (e.version_id) {
+        const v = q.getArtifactVersion(e.version_id);
+        const a = v ? q.getArtifact(v.artifact_id) : null;
+        if (a && v) artifact = { title: a.title, preview_html: v.content_html };
+      }
+      const cited = q.listTasteEvidence(e.signal_id).find((ev) => ev.item_id);
+      const item = cited?.item_id ? (q.getItem(cited.item_id) ?? null) : null;
+      return { ...e, artifact, item };
     });
+    return json({ ok: true, signals: q.listTasteSignals(spaceId), recent_events });
   }
   if (request.method === "POST") {
     const body = (await request.json()) as {
@@ -1191,6 +1337,7 @@ async function handleTaste(request: Request, q: Queries, humanId: string): Promi
       confidence: 0.5,
       created_by: "human",
       approved_by: null,
+      supersedes: null,
       created_at: Date.now(),
     });
     logTasteEvent(q, id, "proposed", "human", "Added by hand");
@@ -1211,7 +1358,35 @@ async function handleTaste(request: Request, q: Queries, humanId: string): Promi
     // statement here would make the edit UI silently fail — the worst outcome
     // for a surface whose whole promise is that nothing changes without you.
     if (typeof body.statement === "string" && body.statement.trim() && body.statement.trim() !== existing.statement) {
-      q.setTasteSignalStatement(body.id, body.statement.trim());
+      const next = body.statement.trim();
+      // A materially different claim on a confirmed signal is a bitemporal
+      // correction (retrieval-architecture.md §3.3), not an in-place edit: the
+      // old judgement stays on the record, the new one supersedes it. Minor
+      // rewording (≥ 40% word overlap) keeps the in-place update.
+      if (existing.status === "confirmed" && statementOverlap(existing.statement, next) < 0.4) {
+        const newId = crypto.randomUUID();
+        q.insertTasteSignal({
+          id: newId,
+          space_id: existing.space_id,
+          owner_id: existing.owner_id,
+          statement: next,
+          dimensions: existing.dimensions,
+          scope: existing.scope,
+          status: "confirmed",
+          confidence: existing.confidence,
+          created_by: "human",
+          approved_by: humanId,
+          created_at: Date.now(),
+          supersedes: existing.id,
+        });
+        q.supersedeTasteSignal(existing.id, newId);
+        logTasteEvent(q, existing.id, "superseded", "human", "Replaced by a materially different statement");
+        logTasteEvent(q, newId, "edited", "human", "Rewrote as a new claim");
+        const counts = q.tasteEvidenceCounts(newId);
+        q.setTasteSignalConfidence(newId, confidenceFrom(counts.supporting, counts.contradicting));
+        return json({ ok: true, signal: q.getTasteSignal(newId) });
+      }
+      q.setTasteSignalStatement(body.id, next);
       logTasteEvent(q, body.id, "edited", "human", "Reworded the statement");
     }
     if ((body.scope === "personal" || body.scope === "project") && body.scope !== existing.scope) {
@@ -1222,6 +1397,9 @@ async function handleTaste(request: Request, q: Queries, humanId: string): Promi
       q.setTasteSignalStatus(body.id, body.status, humanId);
       const kind = body.status === "confirmed" ? "accepted" : body.status === "rejected" ? "rejected" : "superseded";
       logTasteEvent(q, body.id, kind, "human");
+      // Confidence is derived from evidence, recomputed whenever it changes.
+      const counts = q.tasteEvidenceCounts(body.id);
+      q.setTasteSignalConfidence(body.id, confidenceFrom(counts.supporting, counts.contradicting));
     }
     return json({ ok: true, signal: q.getTasteSignal(body.id) });
   }
@@ -1352,6 +1530,18 @@ function handleStats(request: Request, q: Queries, humanId: string): Response {
     }
   }
 
+  // Taste learning: signal mix, how often signals get applied, which ones most.
+  const signals = q.listTasteSignals(spaceId);
+  const statementById = new Map(signals.map((s) => [s.id, s.statement]));
+  const appliedByDay: Record<string, number> = {};
+  const appliedBySignal: Record<string, number> = {};
+  for (const ta of tasteApps) {
+    bumpCount(appliedByDay, new Date(ta.at).toISOString().slice(0, 10));
+    bumpCount(appliedBySignal, ta.signal_id);
+  }
+  const dimensionCounts: Record<string, number> = {};
+  for (const s of signals) for (const d of s.dimensions) bumpCount(dimensionCounts, d.replace(/_/g, " "));
+
   return json({
     ok: true,
     stats: {
@@ -1363,6 +1553,18 @@ function handleStats(request: Request, q: Queries, humanId: string): Response {
       sources: sortedRows(sourceCounts).slice(0, 8),
       outcomes: sortedRows(outcomeCounts),
       latest: latest.sort((a, b) => b.updated_at - a.updated_at).slice(0, 6),
+      taste: {
+        total: signals.length,
+        confirmed: signals.filter((s) => s.status === "confirmed").length,
+        proposed: signals.filter((s) => s.status === "proposed").length,
+        applications: tasteApps.length,
+        applied_by_day: appliedByDay,
+        dimensions: sortedRows(dimensionCounts).slice(0, 8),
+        top_applied: Object.entries(appliedBySignal)
+          .map(([id, value]) => ({ label: statementById.get(id) ?? "Unknown signal", value }))
+          .sort((a, b) => b.value - a.value)
+          .slice(0, 5),
+      },
     },
   });
 }
@@ -1466,6 +1668,34 @@ async function handleItemNotes(request: Request, q: Queries, humanId: string): P
   }
 
   return badRequest("unsupported method");
+}
+
+/* ---------------- beta quota ---------------- */
+
+/**
+ * Check-and-consume `cost` units of a monthly quota metric. Returns a 429
+ * Response when the member is over budget; null (and a recorded increment) when
+ * the call may proceed. Reads still work at the limit — only metered writes stop.
+ */
+function meter(q: Queries, humanId: string, metric: QuotaMetric, cost = 1): Response | null {
+  const check = consumeQuota(q, humanId, metric, cost);
+  return check.ok ? null : json(check, { status: 429 });
+}
+
+function handleQuota(q: Queries, humanId: string): Response {
+  const period = quotaPeriod();
+  const used = q.usageForPeriod(humanId, period);
+  const now = new Date();
+  const monthEnd = Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1);
+  return json({
+    ok: true,
+    quota: {
+      period,
+      resets_at: monthEnd,
+      beta: { slot: q.betaSlot(humanId), taken: q.betaMemberCount(), max: BETA_MAX_USERS },
+      metrics: QUOTA_METRICS.map((m) => ({ metric: m, used: used[m] ?? 0, limit: QUOTA[m] })),
+    },
+  });
 }
 
 /* ---------------- lens ---------------- */

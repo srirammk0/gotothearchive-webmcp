@@ -1,9 +1,19 @@
 /**
  * retrieve(): permission is a hard pre-filter, never a ranking signal.
  * Inaccessible items are absent from candidate generation — this is an invariant.
+ *
+ * Pipeline: three ranked candidate lists (FTS, recency, graph) fused with
+ * reciprocal rank fusion, then priors applied as multipliers. No signal-weight
+ * tuning. Everything here is a SQLite read or string work in JS — no I/O, sync.
  */
-import { AUTHORITY_CLASSES } from "@shared/contract";
-import type { ContextItem, RetrievalSignals, RetrievedItem } from "@shared/contract";
+import { AUTHORITY_CLASSES, RRF_K } from "@shared/contract";
+import type {
+  ContextItem,
+  Id,
+  RetrievalSignals,
+  RetrievedItem,
+  TasteSignal,
+} from "@shared/contract";
 import type { Queries } from "./db/queries";
 import { authorizedRegionIds } from "./permissions";
 import { traverse } from "./graph";
@@ -14,6 +24,9 @@ export interface RetrieveInput {
   regionSlugs: string[] | null;
   limit: number;
 }
+
+/** Contribution below this counts as taste staying silent, not lifting an item. */
+const TASTE_APPLIED_MIN = 0.15;
 
 export function retrieve(q: Queries, input: RetrieveInput, now: number): RetrievedItem[] {
   const task = q.getTask(input.taskId);
@@ -29,99 +42,265 @@ export function retrieve(q: Queries, input: RetrieveInput, now: number): Retriev
     candidateRegionIds = candidateRegionIds.filter((id) => wanted.has(slugById.get(id) ?? ""));
   }
   if (candidateRegionIds.length === 0) return [];
+  const inScope = new Set(candidateRegionIds);
 
-  // 2. Candidate generation — FTS, graph neighbourhood, recency — all scoped to allowed regions only.
-  const candidates = new Map<string, ContextItem>();
+  // 2. Three ranked candidate lists, all scoped to allowed regions only.
+  const items = new Map<string, ContextItem>();
+  const remember = (list: ContextItem[]) => {
+    for (const it of list) if (inScope.has(it.region_id)) items.set(it.id, it);
+  };
 
-  for (const item of q.searchItems(input.query, candidateRegionIds, input.limit * 3)) {
-    candidates.set(item.id, item);
-  }
+  // A — full-text match, best first.
+  const ftsList = q.searchItems(input.query, candidateRegionIds, input.limit * 3);
+  remember(ftsList);
 
-  const recent = q
+  // B — recency, most recently updated first.
+  const recencyList = q
     .listItemsByRegions(candidateRegionIds)
     .sort((a, b) => b.updated_at - a.updated_at)
-    .slice(0, input.limit * 2);
-  for (const item of recent) candidates.set(item.id, item);
+    .slice(0, input.limit * 3);
+  remember(recencyList);
 
-  if (candidates.size > 0) {
-    const seedIds = [...candidates.keys()].slice(0, 8);
-    const graphResult = traverse(q, seedIds, allowedIds);
-    for (const item of graphResult.nodes) {
-      if (candidateRegionIds.includes(item.region_id)) candidates.set(item.id, item);
-    }
-  }
+  // C — graph neighbourhood seeded by the union of A and B, ordered by decayed edge weight.
+  const seedIds = [...new Set([...ftsList, ...recencyList].map((it) => it.id))];
+  const graph = traverse(q, seedIds, allowedIds);
+  const graphList = orderGraphNodes(graph);
+  remember(graphList);
 
-  // 3. Score multiplicatively over every RetrievalSignals field.
+  const ftsRank = rankMap(ftsList);
+  const recencyRank = rankMap(recencyList);
+  const graphRank = rankMap(graphList);
+
+  // 3. Fuse with reciprocal rank fusion, then apply priors as multipliers.
+  const confirmed = q.confirmedTasteSignals(task.space_id);
   const queryTokens = input.query.toLowerCase().split(/\s+/).filter(Boolean);
-  const scored: RetrievedItem[] = [];
 
-  for (const item of candidates.values()) {
-    const haystack = `${item.title} ${item.semantic_text ?? ""}`.toLowerCase();
-    const text_match =
-      queryTokens.length === 0
-        ? 0.5
-        : queryTokens.filter((t) => haystack.includes(t)).length / queryTokens.length || 0.1;
+  type Row = {
+    entry: RetrievedItem;
+    contributingSignalIds: Id[];
+  };
+  const rows: Row[] = [];
 
-    const graph_strength = graphStrengthFor(q, item.id, [...candidates.keys()]);
+  for (const item of items.values()) {
+    if (!inScope.has(item.region_id)) continue;
 
-    const taste_relevance = 0.5; // ponytail: no taste-signal matcher yet, add when taste_signals influence scoring
-    const curation = item.authority_class === "human_authored" || item.authority_class === "human_confirmed_preference" ? 1 : 0.7;
+    const rFts = ftsRank.get(item.id) ?? null;
+    const rRecency = recencyRank.get(item.id) ?? null;
+    const rGraph = graphRank.get(item.id) ?? null;
 
-    const ageMs = Math.max(now - item.updated_at, 0);
-    const recency = 1 / (1 + ageMs / (1000 * 60 * 60 * 24 * 30)); // ~30-day half-life-ish decay
+    const fused =
+      (rFts === null ? 0 : 1 / (RRF_K + rFts)) +
+      (rRecency === null ? 0 : 1 / (RRF_K + rRecency)) +
+      (rGraph === null ? 0 : 1 / (RRF_K + rGraph));
 
     const authority_weight =
       1 - AUTHORITY_CLASSES.indexOf(item.authority_class) / AUTHORITY_CLASSES.length;
 
-    const score = text_match * (0.5 + graph_strength) * taste_relevance * curation * recency * authority_weight;
+    const curation =
+      item.authority_class === "human_authored" ||
+      item.authority_class === "human_confirmed_preference"
+        ? 1
+        : 0.7;
+
+    const taste = tasteRelevanceFor(item, confirmed);
+
+    const ageMs = Math.max(now - item.updated_at, 0);
+    const recency = 1 / (1 + ageMs / (1000 * 60 * 60 * 24 * 30)); // ~30-day decay
+
+    const graph_strength = graphStrengthFor(graph.edges, item.id, items);
+
+    const score = fused * authority_weight * curation * (1 + taste.value);
 
     const signals: RetrievalSignals = {
-      text_match,
+      fused,
+      ranks: { fts: rFts, recency: rRecency, graph: rGraph },
       graph_strength,
-      taste_relevance,
+      taste_relevance: taste.value,
       curation,
       recency,
       authority_weight,
       score,
     };
 
-    q.insertAccess({
-      id: crypto.randomUUID(),
-      task_id: input.taskId,
-      item_id: item.id,
-      tool_name: "retrieve",
-      at: now,
-    });
-
-    scored.push({
-      item,
-      region_slug: slugById.get(item.region_id) ?? "",
-      signals,
-      why: why(item, signals, queryTokens),
+    rows.push({
+      contributingSignalIds: taste.contributingSignalIds,
+      entry: {
+        item,
+        region_slug: slugById.get(item.region_id) ?? "",
+        signals,
+        applied_signal_ids: [],
+        why: why(item, signals, queryTokens, taste, confirmed),
+      },
     });
   }
 
-  // oxlint(no-array-sort): `scored` is a fresh local array, mutation-in-place is safe here.
-  scored.sort((a, b) => b.signals.score - a.signals.score);
-  return scored.slice(0, input.limit);
+  // oxlint(no-array-sort): `rows` is a fresh local array, mutation-in-place is safe here.
+  rows.sort((a, b) => b.entry.signals.score - a.entry.signals.score);
+  const top = rows.slice(0, input.limit);
+
+  // 4. applied_signal_ids: confirmed signals that materially lifted an item that landed in the top N.
+  for (const row of top) {
+    row.entry.applied_signal_ids = row.contributingSignalIds;
+    q.insertAccess({
+      id: crypto.randomUUID(),
+      task_id: input.taskId,
+      item_id: row.entry.item.id,
+      tool_name: "retrieve",
+      at: now,
+    });
+  }
+
+  return top.map((r) => r.entry);
 }
 
-function graphStrengthFor(q: Queries, itemId: string, candidateIds: string[]): number {
-  const edges = q.edgesFrom(itemId);
-  const candidateSet = new Set(candidateIds);
-  const connections = edges.filter(
-    (e) => candidateSet.has(e.from_id) && candidateSet.has(e.to_id),
+/** 1-based rank of each item id in a list, first occurrence wins. */
+function rankMap(list: ContextItem[]): Map<string, number> {
+  const m = new Map<string, number>();
+  list.forEach((it, i) => {
+    if (!m.has(it.id)) m.set(it.id, i + 1);
+  });
+  return m;
+}
+
+/** Graph nodes ordered by the strongest decayed edge that touches each one. */
+function orderGraphNodes(graph: ReturnType<typeof traverse>): ContextItem[] {
+  const strongest = new Map<string, number>();
+  for (const e of graph.edges) {
+    strongest.set(e.from_id, Math.max(strongest.get(e.from_id) ?? 0, e.decayed_weight));
+    strongest.set(e.to_id, Math.max(strongest.get(e.to_id) ?? 0, e.decayed_weight));
+  }
+  return [...graph.nodes].sort(
+    (a, b) => (strongest.get(b.id) ?? 0) - (strongest.get(a.id) ?? 0),
   );
-  if (connections.length === 0) return 0;
-  const total = connections.reduce((sum, e) => sum + e.weight, 0);
-  return Math.min(total / connections.length, 1);
 }
 
-function why(item: ContextItem, s: RetrievalSignals, queryTokens: string[]): string {
+/** Avg decayed weight of traversal edges whose endpoints are both candidates. Signal readout only. */
+function graphStrengthFor(
+  edges: ReturnType<typeof traverse>["edges"],
+  itemId: string,
+  candidates: Map<string, ContextItem>,
+): number {
+  const touching = edges.filter(
+    (e) =>
+      (e.from_id === itemId || e.to_id === itemId) &&
+      candidates.has(e.from_id) &&
+      candidates.has(e.to_id),
+  );
+  if (touching.length === 0) return 0;
+  const total = touching.reduce((sum, e) => sum + e.decayed_weight, 0);
+  return Math.min(total / touching.length, 1);
+}
+
+const WORD = /[a-z0-9]{3,}/g;
+
+function contentWords(s: string): Set<string> {
+  return new Set(s.toLowerCase().match(WORD) ?? []);
+}
+
+function jaccard(a: Set<string>, b: Set<string>): number {
+  if (a.size === 0 || b.size === 0) return 0;
+  let shared = 0;
+  for (const w of a) if (b.has(w)) shared++;
+  return shared / (a.size + b.size - shared);
+}
+
+/** taste-learning.md §Authority order: project taste outranks personal. */
+function authorityOrderWeight(signal: TasteSignal): number {
+  return signal.scope === "project" ? 1.0 : 0.7;
+}
+
+function itemDimensionTokens(item: ContextItem): Set<string> {
+  const tokens = new Set<string>([item.type]);
+  const dims = (item.metadata as { dimensions?: unknown }).dimensions;
+  if (Array.isArray(dims)) for (const d of dims) if (typeof d === "string") tokens.add(d);
+  return tokens;
+}
+
+function overlap(signal: TasteSignal, item: ContextItem): number {
+  const itemDims = itemDimensionTokens(item);
+  const sharedDims = signal.dimensions.filter((d) => itemDims.has(d)).length;
+  const dimScore = signal.dimensions.length === 0 ? 0 : sharedDims / signal.dimensions.length;
+
+  const lexical = jaccard(
+    contentWords(signal.statement),
+    contentWords(`${item.title} ${item.semantic_text ?? ""}`),
+  );
+
+  return 0.5 * dimScore + 0.5 * lexical;
+}
+
+/**
+ * §2.1 — max over confirmed in-scope signals of
+ *   confidence · authorityOrderWeight · overlap(signal, item), clamped [0, 1.5].
+ * 0 when no confirmed signal is in scope: taste stays silent rather than inventing a boost.
+ */
+function tasteRelevanceFor(
+  item: ContextItem,
+  confirmed: TasteSignal[],
+): { value: number; contributingSignalIds: Id[] } {
+  if (confirmed.length === 0) return { value: 0, contributingSignalIds: [] };
+
+  let best = 0;
+  const contributing: Id[] = [];
+  for (const signal of confirmed) {
+    const c = signal.confidence * authorityOrderWeight(signal) * overlap(signal, item);
+    if (c > best) best = c;
+    if (c > TASTE_APPLIED_MIN) contributing.push(signal.id);
+  }
+  return { value: Math.max(0, Math.min(1.5, best)), contributingSignalIds: contributing };
+}
+
+/**
+ * Names which lists placed the item, whether taste lifted it (and on which
+ * dimension), and its authority class in plain words. Never hides the class.
+ */
+function why(
+  item: ContextItem,
+  s: RetrievalSignals,
+  queryTokens: string[],
+  taste: { value: number; contributingSignalIds: Id[] },
+  confirmed: TasteSignal[],
+): string {
+  const placements: string[] = [];
+  if (s.ranks.fts !== null) {
+    placements.push(s.ranks.fts <= 3 ? "top text match" : "a text match");
+  }
+  if (s.ranks.recency !== null && s.ranks.recency <= 5) placements.push("recently updated");
+  if (s.ranks.graph !== null) placements.push("a graph neighbour of another hit");
+
   const parts: string[] = [];
-  if (s.text_match > 0.5 && queryTokens.length > 0) parts.push(`matches "${queryTokens.join(" ")}"`);
-  if (s.graph_strength > 0.3) parts.push("connected to other candidates");
-  if (s.recency > 0.5) parts.push("recently updated");
-  if (parts.length === 0) parts.push(`a ${item.type} in this region`);
-  return parts.join(", ");
+  if (placements.length === 0) {
+    parts.push(`a ${AUTHORITY_LABEL[item.authority_class]} ${item.type} in this region`);
+  } else {
+    parts.push(joinList(placements));
+  }
+
+  if (taste.value > TASTE_APPLIED_MIN && taste.contributingSignalIds.length > 0) {
+    const dims = new Set<string>();
+    for (const sig of confirmed) {
+      if (taste.contributingSignalIds.includes(sig.id)) for (const d of sig.dimensions) dims.add(d);
+    }
+    parts.push(
+      dims.size > 0
+        ? `taste lifted it (${[...dims].join(", ")})`
+        : "taste lifted it",
+    );
+  }
+
+  parts.push(`authority: ${AUTHORITY_LABEL[item.authority_class]}`);
+  return parts.join("; ");
+}
+
+const AUTHORITY_LABEL: Record<string, string> = {
+  human_authored: "human-authored",
+  imported_source_linked: "imported, source-linked",
+  human_confirmed_preference: "human-confirmed preference",
+  agent_artifact: "agent artifact",
+  agent_proposal: "agent proposal",
+  inferred_taste_signal: "inferred taste signal",
+};
+
+function joinList(xs: string[]): string {
+  if (xs.length === 1) return xs[0];
+  return `${xs.slice(0, -1).join(", ")}, also ${xs[xs.length - 1]}`;
 }
