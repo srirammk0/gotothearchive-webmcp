@@ -1,4 +1,21 @@
 import type { Provenance } from "../../api/client";
+import type { RetrievalProvenanceFields } from "../viewmodels";
+
+/** retrieval-architecture.md §5: the why() line and a "taste applied" chip. */
+function RetrievalNote({ why, applied_signal_ids }: RetrievalProvenanceFields) {
+  const applied = (applied_signal_ids ?? []).length > 0;
+  if (!why && !applied) return null;
+  return (
+    <>
+      {why ? <span className="mt-0.5 block text-[length:var(--text-micro)] text-faint">{why}</span> : null}
+      {applied ? (
+        <span className="mt-1 inline-block rounded-[var(--radius-sm)] bg-accent/15 px-1.5 py-px text-[length:var(--text-micro)] text-accent">
+          taste applied
+        </span>
+      ) : null}
+    </>
+  );
+}
 
 /**
  * Three visually distinct groups, never merged — a contract invariant.
@@ -29,7 +46,13 @@ function Group({
   );
 }
 
-export function ProvenanceStrip({ provenance }: { provenance: Provenance }) {
+type ProvenanceWithNotes = {
+  influences: (Provenance["influences"][number] & RetrievalProvenanceFields)[];
+  accesses: (Provenance["accesses"][number] & RetrievalProvenanceFields)[];
+  denials: Provenance["denials"];
+};
+
+export function ProvenanceStrip({ provenance }: { provenance: ProvenanceWithNotes }) {
   return (
     <div className="flex flex-col gap-6 sm:flex-row sm:gap-10">
       <Group title={`Used these references${count(provenance.influences.length)}`} accent="var(--color-good)">
@@ -40,6 +63,7 @@ export function ProvenanceStrip({ provenance }: { provenance: Provenance }) {
             <li key={inf.id}>
               {inf.item?.title ?? "Unknown item"}
               <span className="block text-[length:var(--text-micro)] text-faint">{inf.role}</span>
+              <RetrievalNote why={inf.why} applied_signal_ids={inf.applied_signal_ids} />
             </li>
           ))
         )}
@@ -48,7 +72,12 @@ export function ProvenanceStrip({ provenance }: { provenance: Provenance }) {
         {provenance.accesses.length === 0 ? (
           <li className="text-faint">None</li>
         ) : (
-          provenance.accesses.map((acc) => <li key={acc.id}>{acc.item?.title ?? "Unknown item"}</li>)
+          provenance.accesses.map((acc) => (
+            <li key={acc.id}>
+              {acc.item?.title ?? "Unknown item"}
+              <RetrievalNote why={acc.why} applied_signal_ids={acc.applied_signal_ids} />
+            </li>
+          ))
         )}
       </Group>
       <Group title={`Unavailable or denied${count(provenance.denials.length)}`} accent="var(--color-line-soft)" muted>

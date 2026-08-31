@@ -67,9 +67,9 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
   } catch {
     throw new ApiError(`Unexpected response from ${path}`, res.status);
   }
-  const body = data as { ok?: boolean; error?: string };
+  const body = data as { ok?: boolean; error?: string; message?: string };
   if (!res.ok || body.ok === false) {
-    throw new ApiError(body.error ?? `Request to ${path} failed`, res.status);
+    throw new ApiError(body.message ?? body.error ?? `Request to ${path} failed`, res.status);
   }
   return data as T;
 }
@@ -160,9 +160,15 @@ export async function uploadBlob(file: File): Promise<string> {
     headers: { "content-type": file.type || "application/octet-stream", ...(await authHeader()) },
     body: file,
   });
-  if (!res.ok) throw new ApiError("Upload failed", res.status);
-  const { key } = (await res.json()) as { key: string };
-  return key;
+  const body = (await res.json().catch(() => null)) as
+    | { ok?: boolean; key?: string; error?: string; message?: string }
+    | null;
+  if (!res.ok || !body?.key) {
+    // Surface the real reason — quota reached, file too large, rate limited —
+    // not a generic "Upload failed".
+    throw new ApiError(body?.message ?? body?.error ?? "Upload failed", res.status);
+  }
+  return body.key;
 }
 
 /** The URL to render a stored original. Never a raw R2 URL. */
@@ -247,7 +253,11 @@ export const recordDecision = (versionId: string, decision: ReviewDecision, note
 
 /* ---------------- taste ---------------- */
 
-export type TasteFeedEvent = TasteEvent & { statement: string };
+export type TasteFeedEvent = TasteEvent & {
+  statement: string;
+  artifact: { title: string; preview_html: string } | null;
+  item: ContextItem | null;
+};
 
 export const listTasteSignals = () =>
   req<{ signals: TasteSignal[]; recent_events: TasteFeedEvent[] }>(API.taste);
@@ -301,9 +311,29 @@ export interface SpaceStats {
   sources: { label: string; value: number }[];
   outcomes: { label: string; value: number }[];
   latest: { id: string; title: string; preview_html: string; updated_at: number }[];
+  taste: {
+    total: number;
+    confirmed: number;
+    proposed: number;
+    applications: number;
+    applied_by_day: Record<string, number>;
+    dimensions: { label: string; value: number }[];
+    top_applied: { label: string; value: number }[];
+  };
 }
 
 export const getStats = () => req<{ stats: SpaceStats }>(API.stats);
+
+/* ---------------- beta quota ---------------- */
+
+export interface QuotaInfo {
+  period: string;
+  resets_at: number;
+  beta: { slot: number | null; taken: number; max: number };
+  metrics: { metric: string; used: number; limit: number }[];
+}
+
+export const getQuota = () => req<{ quota: QuotaInfo }>(API.quota);
 
 /* ---------------- agent lens ---------------- */
 

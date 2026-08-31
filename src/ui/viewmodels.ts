@@ -53,10 +53,21 @@ export interface ArchiveViewModel {
   regions: ArchiveRegionView[];
 }
 
+/**
+ * Retrieval surfacing (retrieval-architecture.md §5). The worker may attach a
+ * why() line and the taste signals it applied to each retrieved/accessed row
+ * once retrieval Tracks A/B land. Until then both are absent and the UI omits
+ * them — always treat these as optional.
+ */
+export interface RetrievalProvenanceFields {
+  why?: string | null;
+  applied_signal_ids?: string[] | null;
+}
+
 /** Workbench: an artifact version plus everything needed to review it. */
 export interface ProvenanceGroups {
-  influences: (InfluenceRecord & { item: ContextItem | null })[];
-  accesses: (AccessRecord & { item: ContextItem | null })[];
+  influences: (InfluenceRecord & { item: ContextItem | null } & RetrievalProvenanceFields)[];
+  accesses: (AccessRecord & { item: ContextItem | null } & RetrievalProvenanceFields)[];
   denials: DenialRecord[];
 }
 

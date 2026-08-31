@@ -38,3 +38,4 @@ dist-ssr
 
 # graphify knowledge graph (regenerate with `graphify update .`)
 graphify-out/
+.logo-originals/

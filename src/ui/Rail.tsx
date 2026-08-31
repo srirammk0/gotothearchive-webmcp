@@ -1,6 +1,8 @@
+import { useEffect, useState } from "react";
 import { NavLink } from "react-router";
 import { motion } from "motion/react";
 import { Show, SignInButton, UserButton } from "@clerk/react";
+import { getQuota, type QuotaInfo } from "../api/client";
 
 const destinations = [
   { to: "/", label: "Archive", end: true },
@@ -45,9 +47,40 @@ export function Rail() {
 
         <div className="flex-1" />
 
-        <Account />
+        <div className="flex shrink-0 items-center gap-2">
+          <Account />
+          <BetaBadge />
+        </div>
       </div>
     </header>
+  );
+}
+
+/**
+ * Small, quiet marker that this is a closed beta with a per-member quota.
+ * Links to Stats where the full usage breakdown lives.
+ */
+function BetaBadge() {
+  const [quota, setQuota] = useState<QuotaInfo | null>(null);
+
+  useEffect(() => {
+    getQuota()
+      .then((r) => setQuota(r.quota))
+      .catch(() => undefined);
+  }, []);
+
+  return (
+    <NavLink
+      to="/stats"
+      title={
+        quota
+          ? `Beta member ${quota.beta.slot} of ${quota.beta.max} · quota resets monthly`
+          : "Closed beta"
+      }
+      className="shrink-0 rounded-[var(--radius-sm)] bg-accent/15 px-1.5 py-px text-[length:var(--text-micro)] text-accent transition-opacity duration-[var(--duration-fast)] hover:opacity-80"
+    >
+      Beta{quota?.beta.slot ? ` ${quota.beta.slot}/${quota.beta.max}` : ""}
+    </NavLink>
   );
 }
 
