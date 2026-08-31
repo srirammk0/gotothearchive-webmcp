@@ -1,0 +1,22 @@
+{
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "gotothearchive",
+	"main": "worker/index.ts",
+	"compatibility_date": "2026-08-25",
+	"compatibility_flags": ["nodejs_compat"],
+	"assets": {
+		"not_found_handling": "single-page-application"
+	},
+	"observability": { "enabled": true },
+	"upload_source_maps": true,
+	"durable_objects": {
+		"bindings": [{ "name": "SPACE", "class_name": "SpaceDO" }]
+	},
+	"migrations": [
+		{ "tag": "v1", "new_sqlite_classes": ["SpaceDO"] }
+	],
+	"r2_buckets": [
+		{ "binding": "BLOBS", "bucket_name": "gotothearchive-blobs" }
+	],
+	"ai": { "binding": "AI" }
+}

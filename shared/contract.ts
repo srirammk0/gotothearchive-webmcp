@@ -1,0 +1,450 @@
+/**
+ * FROZEN BUILD CONTRACT — GoToTheArchive
+ *
+ * Every track compiles against this file. No track may edit it.
+ * If you believe something here is wrong or missing, STOP and report the drift
+ * to the integrating agent. Do not work around it locally.
+ *
+ * See docs/technical/BUILD-CONTRACT.md for track ownership and rationale.
+ */
+
+/* ------------------------------------------------------------------ *
+ * Identity & scope
+ * ------------------------------------------------------------------ */
+
+export type Id = string;
+
+/** Agent authority levels. Ordered — higher index implies all lower powers. */
+export const GRANT_LEVELS = ["none", "read", "propose", "write"] as const;
+export type GrantLevel = (typeof GRANT_LEVELS)[number];
+
+export function grantAtLeast(have: GrantLevel, need: GrantLevel): boolean {
+  return GRANT_LEVELS.indexOf(have) >= GRANT_LEVELS.indexOf(need);
+}
+
+/** Plain-language labels. UI must use these, never the raw enum. */
+export const GRANT_LABEL: Record<GrantLevel, string> = {
+  none: "No access",
+  read: "Can view",
+  propose: "Can suggest changes",
+  write: "Can edit directly",
+};
+
+export const GRANT_GLYPH: Record<GrantLevel, string> = {
+  none: "\u{1F512}", // 🔒
+  read: "◷", // ◷
+  propose: "✦", // ✦
+  write: "✎", // ✎
+};
+
+/** Authority classes, ranked. Lower index = more authoritative. */
+export const AUTHORITY_CLASSES = [
+  "human_authored",
+  "imported_source_linked",
+  "human_confirmed_preference",
+  "agent_artifact",
+  "agent_proposal",
+  "inferred_taste_signal",
+] as const;
+export type AuthorityClass = (typeof AUTHORITY_CLASSES)[number];
+
+/* ------------------------------------------------------------------ *
+ * Context graph
+ * ------------------------------------------------------------------ */
+
+export const RELATIONSHIPS = [
+  "belongs_to",
+  "related_to",
+  "inspired_by",
+  "influenced",
+  "created_for",
+  "mentions",
+  "derived_from",
+  "used_in",
+  "authored_by",
+  "supports",
+  "contradicts",
+  "approved_by",
+  "rejected_because",
+] as const;
+export type Relationship = (typeof RELATIONSHIPS)[number];
+
+/** Traversal limits. Enforced server-side; not configurable by the agent. */
+export const GRAPH_MAX_DEPTH = 3;
+export const GRAPH_MAX_FANOUT = 12;
+export const GRAPH_MAX_NODES = 60;
+
+/* ------------------------------------------------------------------ *
+ * Core entities
+ * ------------------------------------------------------------------ */
+
+export const ITEM_TYPES = [
+  "note",
+  "image",
+  "screenshot",
+  "link",
+  "pdf",
+  "document",
+] as const;
+export type ItemType = (typeof ITEM_TYPES)[number];
+
+export interface Space {
+  id: Id;
+  name: string;
+  owner_id: Id;
+  kind: "personal" | "guest";
+  created_at: number;
+}
+
+export interface Region {
+  id: Id;
+  space_id: Id;
+  parent_id: Id | null;
+  name: string;
+  /** Stable lowercase key used in tool inputSchema enums. */
+  slug: string;
+  created_at: number;
+}
+
+export interface ContextItem {
+  id: Id;
+  space_id: Id;
+  region_id: Id;
+  owner_id: Id;
+  type: ItemType;
+  title: string;
+  source_url: string | null;
+  /** R2 object key for the canonical original, when there is one. */
+  content_ref: string | null;
+  /** Derived text used for search. Never replaces the canonical original. */
+  semantic_text: string | null;
+  metadata: Record<string, unknown>;
+  authority_class: AuthorityClass;
+  created_by: Id;
+  created_at: number;
+  updated_at: number;
+}
+
+export interface ContextEdge {
+  id: Id;
+  from_id: Id;
+  to_id: Id;
+  relationship: Relationship;
+  weight: number;
+  created_by: Id;
+  approval_state: "approved" | "proposed" | "rejected";
+  created_at: number;
+}
+
+export interface Task {
+  id: Id;
+  space_id: Id;
+  human_id: Id;
+  title: string;
+  instruction: string;
+  status: "open" | "complete" | "cancelled";
+  created_at: number;
+  expires_at: number | null;
+}
+
+export interface Grant {
+  id: Id;
+  task_id: Id;
+  space_id: Id;
+  region_id: Id;
+  level: GrantLevel;
+  grantor_id: Id;
+  created_at: number;
+  expires_at: number | null;
+  revoked_at: number | null;
+  revoked_by: Id | null;
+  reason: string | null;
+}
+
+export interface AgentSession {
+  id: Id;
+  human_id: Id;
+  task_id: Id;
+  /** Self-declared by the client. Useful for attribution, NEVER for authorization. */
+  declared: { provider?: string; client?: string; model?: string } | null;
+  created_at: number;
+}
+
+/* ------------------------------------------------------------------ *
+ * Artifacts, provenance, review
+ * ------------------------------------------------------------------ */
+
+export type ArtifactState =
+  | "processing"
+  | "ready_for_review"
+  | "in_review"
+  | "approved"
+  | "approved_with_notes"
+  | "changes_requested"
+  | "rejected";
+
+export const REVIEW_DECISIONS = [
+  "approve",
+  "approve_with_notes",
+  "request_changes",
+  "reject",
+] as const;
+export type ReviewDecision = (typeof REVIEW_DECISIONS)[number];
+
+export interface Artifact {
+  id: Id;
+  space_id: Id;
+  task_id: Id;
+  kind: "visual_brief";
+  title: string;
+  created_at: number;
+}
+
+/** Artifacts are immutable at the version level. Never mutate a row. */
+export interface ArtifactVersion {
+  id: Id;
+  artifact_id: Id;
+  version_no: number;
+  parent_version_id: Id | null;
+  content_html: string;
+  agent_session_id: Id | null;
+  state: ArtifactState;
+  created_at: number;
+}
+
+/**
+ * The three provenance record types are DISTINCT and must never be collapsed.
+ *   influence → "Used these references"     (shaped the result)
+ *   access    → "Accessed for this task"    (retrieved, not necessarily influential)
+ *   denial    → "Unavailable or denied"     (Agent Lens only, never ordinary provenance)
+ */
+export interface InfluenceRecord {
+  id: Id;
+  version_id: Id;
+  item_id: Id;
+  role: string;
+  strength: number;
+  note: string | null;
+}
+
+export interface AccessRecord {
+  id: Id;
+  task_id: Id;
+  item_id: Id;
+  tool_name: string;
+  at: number;
+}
+
+export interface DenialRecord {
+  id: Id;
+  task_id: Id | null;
+  agent_session_id: Id | null;
+  tool_name: string;
+  requested: Record<string, unknown>;
+  reason: string;
+  at: number;
+}
+
+export interface Annotation {
+  id: Id;
+  version_id: Id;
+  author_id: Id;
+  /** null target = whole-artifact comment. */
+  target: { kind: "region"; x: number; y: number; w: number; h: number } | null;
+  sentiment: "positive" | "negative" | "neutral";
+  dimension: string | null;
+  comment: string;
+  status: "open" | "resolved" | "superseded";
+  created_at: number;
+}
+
+/** Every state transition records actor, time and previous state. */
+export interface DecisionRecord {
+  id: Id;
+  version_id: Id;
+  actor_id: Id;
+  decision: ReviewDecision;
+  note: string | null;
+  prev_state: ArtifactState;
+  at: number;
+}
+
+/* ------------------------------------------------------------------ *
+ * Taste
+ * ------------------------------------------------------------------ */
+
+export const TASTE_DIMENSIONS = [
+  "typography",
+  "composition",
+  "layout_density",
+  "color",
+  "imagery",
+  "motion",
+  "visual_hierarchy",
+  "tone_voice",
+  "structure_clarity",
+] as const;
+export type TasteDimension = (typeof TASTE_DIMENSIONS)[number];
+
+export interface TasteSignal {
+  id: Id;
+  space_id: Id;
+  owner_id: Id;
+  /** Must be specific and contextual. Not "likes minimal design". */
+  statement: string;
+  dimensions: TasteDimension[];
+  scope: "personal" | "project";
+  status: "proposed" | "confirmed" | "rejected" | "superseded";
+  confidence: number;
+  created_by: "system" | "human";
+  approved_by: Id | null;
+  created_at: number;
+}
+
+export interface TasteEvidence {
+  id: Id;
+  signal_id: Id;
+  kind: "supports" | "contradicts";
+  annotation_id: Id | null;
+  version_id: Id | null;
+  item_id: Id | null;
+}
+
+/* ------------------------------------------------------------------ *
+ * Audit
+ * ------------------------------------------------------------------ */
+
+export interface AuditEvent {
+  id: Id;
+  actor_type: "human" | "agent" | "system";
+  actor_label: string;
+  agent_session_id: Id | null;
+  human_id: Id | null;
+  task_id: Id | null;
+  tool_name: string | null;
+  operation: string;
+  payload: Record<string, unknown>;
+  at: number;
+}
+
+/* ------------------------------------------------------------------ *
+ * Retrieval
+ * ------------------------------------------------------------------ */
+
+/**
+ * Scoring factors, logged per returned item. Permission is NOT a factor here —
+ * it is a hard pre-filter applied before candidate generation. An inaccessible
+ * item is absent, never low-ranked.
+ */
+export interface RetrievalSignals {
+  text_match: number;
+  graph_strength: number;
+  taste_relevance: number;
+  curation: number;
+  recency: number;
+  authority_weight: number;
+  /** Product of the above. */
+  score: number;
+}
+
+export interface RetrievedItem {
+  item: ContextItem;
+  region_slug: string;
+  signals: RetrievalSignals;
+  /** Human-readable reason, surfaced in Agent Lens. */
+  why: string;
+}
+
+/* ------------------------------------------------------------------ *
+ * WebMCP tool surface
+ * ------------------------------------------------------------------ */
+
+export const TOOL_NAMES = [
+  "get_current_context_scope",
+  "get_context_for_task",
+  "inspect_context_item",
+  "inspect_relationships",
+  "get_taste_for_task",
+  "trace_artifact_influences",
+  "record_artifact",
+  "record_feedback",
+  "propose_context_change",
+  "approve_proposed_changes",
+  "reject_proposed_changes",
+] as const;
+export type ToolName = (typeof TOOL_NAMES)[number];
+
+export interface ToolSpec {
+  name: ToolName;
+  description: string;
+  inputSchema: {
+    type: "object";
+    properties: Record<string, unknown>;
+    required?: string[];
+  };
+  /** Minimum grant level on at least one region for this tool to exist at all. */
+  requires: GrantLevel;
+  /**
+   * Plain-language reason this tool is currently registered.
+   * Rendered verbatim in Agent Lens.
+   */
+  why: string;
+}
+
+/** Inputs to the capability compiler. Pure function, no I/O. */
+export interface CapabilityInput {
+  /** Regions the invoking human can actually reach. Ceiling on agent authority. */
+  humanRegions: { slug: string; level: GrantLevel }[];
+  /** Live, unexpired, unrevoked grants keyed by region slug. */
+  grants: { slug: string; level: GrantLevel }[];
+  task: { id: Id; title: string; expires_at: number | null } | null;
+  pageState: { hasPendingProposals: boolean; activeArtifactId: Id | null };
+}
+
+/* ------------------------------------------------------------------ *
+ * Wire protocol (client → worker)
+ * ------------------------------------------------------------------ */
+
+export interface ToolCallRequest {
+  tool: ToolName;
+  input: Record<string, unknown>;
+  agent_session_id: Id;
+  task_id: Id;
+}
+
+export type ToolCallResponse =
+  | { ok: true; result: unknown }
+  | { ok: false; error: string; denial: true; reason: string };
+
+/** Server-side denial reasons. Surfaced verbatim in Agent Lens. */
+export const DENIAL_REASONS = {
+  NO_GRANT: "No grant exists for the requested region",
+  REVOKED: "The grant for this region was revoked",
+  EXPIRED: "The grant for this region has expired",
+  TASK_CLOSED: "The task this grant was bound to is no longer open",
+  EXCEEDS_HUMAN: "The invoking person does not have this access themselves",
+  INSUFFICIENT_LEVEL: "This operation needs a higher access level than granted",
+  UNKNOWN_REGION: "That region does not exist or is not visible",
+} as const;
+
+/* ------------------------------------------------------------------ *
+ * API routes
+ * ------------------------------------------------------------------ */
+
+export const API = {
+  health: "/api/health",
+  bootstrap: "/api/bootstrap",
+  regions: "/api/regions",
+  items: "/api/items",
+  upload: "/api/upload",
+  graph: "/api/graph",
+  task: "/api/task",
+  grants: "/api/grants",
+  capabilities: "/api/capabilities",
+  toolCall: "/api/mcp/call",
+  artifacts: "/api/artifacts",
+  annotations: "/api/annotations",
+  decisions: "/api/decisions",
+  taste: "/api/taste",
+  lens: "/api/lens",
+} as const;

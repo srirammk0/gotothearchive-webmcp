@@ -31,3 +31,7 @@ dist-ssr
 !.env.example
 
 .vite
+.gstack/
+
+.vite
+.dev.vars
