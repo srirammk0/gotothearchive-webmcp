@@ -23,6 +23,11 @@ interface ModelContextLike {
   executeTool?: (tool: ModelContextTool, json: string, opts: { signal: AbortSignal }) => Promise<string>;
 }
 
+/** Whether this browser exposes WebMCP at all. */
+export function isWebMcpAvailable(): boolean {
+  return getModelContext() !== null;
+}
+
 function getModelContext(): ModelContextLike | null {
   if (typeof document !== "undefined") {
     const ctx = (document as unknown as { modelContext?: ModelContextLike }).modelContext;

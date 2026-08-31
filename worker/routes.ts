@@ -21,7 +21,18 @@ import { authorizedRegionIds, humanRegions, liveGrants } from "./permissions";
 import { traverse } from "./graph";
 import { handleToolCall } from "./mcp";
 
-const GUEST_SPACE_ID = "space-guest";
+/**
+ * Each visitor gets their own Space, keyed to their guest identity.
+ *
+ * A single shared guest space would be owned by whoever opened the app first;
+ * every later visitor would have no human access to any region, and since agent
+ * authority can never exceed the invoking human's, their agent could do nothing
+ * at all. The product would look dead to everyone but the first person through
+ * the door — and several judges will open this at once.
+ */
+function spaceIdFor(humanId: string): string {
+  return `space-${humanId}`;
+}
 
 function json(data: unknown, init?: ResponseInit): Response {
   return Response.json(data, init);
@@ -50,17 +61,17 @@ export async function handleRoute(
     case API.bootstrap:
       return withCookie(await handleBootstrap(request, q, human.human_id));
     case API.regions:
-      return withCookie(handleRegions(request, q));
+      return withCookie(handleRegions(request, q, human.human_id));
     case API.items:
       return withCookie(await handleItems(request, q, human.human_id));
     case API.upload:
-      return withCookie(await handleUpload(request, env));
+      return withCookie(await handleUpload(request, env, human.human_id));
     case API.blob:
-      return withCookie(await handleBlob(request, env));
+      return withCookie(await handleBlob(request, env, human.human_id));
     case API.provenance:
-      return withCookie(handleProvenance(request, q));
+      return withCookie(handleProvenance(request, q, human.human_id));
     case API.graph:
-      return withCookie(await handleGraph(request, q));
+      return withCookie(await handleGraph(request, q, human.human_id));
     case API.task:
       return withCookie(await handleTask(request, q, human.human_id));
     case API.session:
@@ -68,11 +79,11 @@ export async function handleRoute(
     case API.grants:
       return withCookie(await handleGrants(request, q, human.human_id));
     case API.capabilities:
-      return withCookie(handleCapabilities(request, q));
+      return withCookie(handleCapabilities(request, q, human.human_id));
     case API.toolCall:
       return withCookie(await handleMcpCall(request, q, human));
     case API.artifacts:
-      return withCookie(handleArtifacts(request, q));
+      return withCookie(handleArtifacts(request, q, human.human_id));
     case API.annotations:
       return withCookie(await handleAnnotations(request, q, human.human_id));
     case API.decisions:
@@ -80,7 +91,7 @@ export async function handleRoute(
     case API.taste:
       return withCookie(await handleTaste(request, q, human.human_id));
     case API.tasteEvidence:
-      return withCookie(handleTasteEvidence(request, q));
+      return withCookie(handleTasteEvidence(request, q, human.human_id));
     case API.lens:
       return withCookie(handleLens(request, q));
     default:
@@ -92,14 +103,31 @@ export async function handleRoute(
 
 async function handleBootstrap(request: Request, q: Queries, humanId: string): Promise<Response> {
   if (request.method !== "POST") return badRequest("POST required");
-  const existing = q.getSpace(GUEST_SPACE_ID);
+  const existing = q.getSpace(spaceIdFor(humanId));
   if (existing) {
+    // Backfill rather than skip: a space created by an earlier build may predate
+    // the seeded review round, and returning early would leave that visitor
+    // looking at an empty Workbench forever.
+    if (q.listArtifacts(existing.id).length === 0) {
+      const byRegion: Record<string, string> = {};
+      for (const r of q.listRegions(existing.id)) byRegion[r.slug] = r.id;
+      const ids: Record<string, string> = {};
+      for (const item of q.listItemsBySpace(existing.id)) {
+        if (item.title.startsWith("Atlas rebrand")) ids["brief_atlas"] = item.id;
+        if (item.title.startsWith("Atlas logo draft")) ids["draft_atlas_v1"] = item.id;
+        if (item.title.startsWith("Terracotta")) ids["ref_terracotta"] = item.id;
+        if (item.title.startsWith("Editorial serif")) ids["ref_editorial_type"] = item.id;
+      }
+      if (ids["brief_atlas"] && ids["ref_terracotta"] && ids["ref_editorial_type"] && ids["draft_atlas_v1"]) {
+        seedPriorReview(q, existing.id, ids, existing.owner_id, Date.now());
+      }
+    }
     return json({ ok: true, space: existing, regions: q.listRegions(existing.id) });
   }
 
   const now = Date.now();
   q.insertSpace({
-    id: GUEST_SPACE_ID,
+    id: spaceIdFor(humanId),
     name: "Guest Archive",
     owner_id: humanId,
     kind: "guest",
@@ -117,7 +145,7 @@ async function handleBootstrap(request: Request, q: Queries, humanId: string): P
     regionIds[r.slug] = id;
     q.insertRegion({
       id,
-      space_id: GUEST_SPACE_ID,
+      space_id: spaceIdFor(humanId),
       parent_id: null,
       name: r.name,
       slug: r.slug,
@@ -125,12 +153,12 @@ async function handleBootstrap(request: Request, q: Queries, humanId: string): P
     });
   }
 
-  seedItems(q, GUEST_SPACE_ID, regionIds, humanId, now);
+  seedItems(q, spaceIdFor(humanId), regionIds, humanId, now);
 
   return json({
     ok: true,
-    space: q.getSpace(GUEST_SPACE_ID),
-    regions: q.listRegions(GUEST_SPACE_ID),
+    space: q.getSpace(spaceIdFor(humanId)),
+    regions: q.listRegions(spaceIdFor(humanId)),
   });
 }
 
@@ -207,13 +235,161 @@ function seedItems(
   // Deliberate leak-test edge: a Work item related to a Personal item. The graph
   // traversal must never surface note_therapy/note_family to a Work-only grant.
   edge("brief_atlas", "note_therapy", "related_to", 0.4);
+
+  seedPriorReview(q, spaceId, ids, ownerId, now);
+}
+
+/**
+ * One completed round of the loop, so a first-time visitor sees the product
+ * rather than three empty states.
+ *
+ * This is demo scaffolding for the guest space only: a real signed-in Archive
+ * starts empty and fills with the person's own uploads and their agent's actual
+ * output. What is seeded here is honest — the artifact's influences point at
+ * real seeded items, the denial records a real refusal to cite a Personal item,
+ * and the taste proposal cites the annotation it was derived from.
+ */
+function seedPriorReview(
+  q: Queries,
+  spaceId: string,
+  ids: Record<string, string>,
+  ownerId: string,
+  now: number,
+): void {
+  const taskId = crypto.randomUUID();
+  q.insertTask({
+    id: taskId,
+    space_id: spaceId,
+    human_id: ownerId,
+    title: "Atlas rebrand — visual brief",
+    instruction: "Draft a visual brief for the Atlas rebrand from the brief and the references.",
+    status: "open",
+    created_at: now,
+    expires_at: null,
+  });
+
+  const sessionId = crypto.randomUUID();
+  q.insertAgentSession({
+    id: sessionId,
+    human_id: ownerId,
+    task_id: taskId,
+    declared: { provider: "openai", client: "chatgpt-desktop", model: "gpt-5" },
+    created_at: now,
+  });
+
+  const artifactId = crypto.randomUUID();
+  q.insertArtifact({
+    id: artifactId,
+    space_id: spaceId,
+    task_id: taskId,
+    kind: "visual_brief",
+    title: "Atlas rebrand — visual brief",
+    created_at: now,
+  });
+
+  const versionId = crypto.randomUUID();
+  q.insertArtifactVersion({
+    id: versionId,
+    artifact_id: artifactId,
+    version_no: 1,
+    parent_version_id: null,
+    content_html: `<article style="font-family:Georgia,serif;color:#211d17;line-height:1.55;padding:40px 44px;max-width:64ch">
+<p style="font-family:system-ui,sans-serif;font-size:12px;letter-spacing:.16em;text-transform:uppercase;color:#8a8071;margin:0 0 20px">Atlas rebrand</p>
+<h1 style="font-size:40px;line-height:1.1;margin:0 0 20px;font-weight:400">Warmer, and unmistakably human</h1>
+<p style="margin:0 0 26px">Atlas reads as competent and cold. The move is not to soften the logo but to change
+the material the brand is made of: a terracotta and cream ground instead of corporate blue, and an
+editorial serif carrying the voice.</p>
+<h2 style="font-size:15px;font-family:system-ui,sans-serif;letter-spacing:.06em;text-transform:uppercase;color:#57503f;margin:0 0 12px">Direction</h2>
+<ul style="margin:0 0 26px;padding-left:20px"><li style="margin-bottom:7px">Terracotta accent on a cream ground</li>
+<li style="margin-bottom:7px">Large serif headline over a humanist sans body</li>
+<li style="margin-bottom:7px">One dominant image per view, generous negative space</li></ul>
+<p style="font-family:system-ui,sans-serif;font-size:13px;color:#8a8071;margin:0;border-top:1px solid #d9d1bf;padding-top:16px">
+Drafted from the Atlas creative brief and two references in Inspiration.</p></article>`,
+    agent_session_id: sessionId,
+    state: "ready_for_review",
+    created_at: now,
+  });
+
+  const influence = (itemKey: string, role: string, note: string) => {
+    q.insertInfluence({
+      id: crypto.randomUUID(),
+      version_id: versionId,
+      item_id: ids[itemKey],
+      role,
+      strength: 1,
+      note,
+    });
+  };
+  influence("brief_atlas", "brief", "Set the goal: warmer, away from corporate blue.");
+  influence("ref_terracotta", "reference", "Source of the terracotta and cream ground.");
+  influence("ref_editorial_type", "reference", "Serif headline over humanist sans.");
+
+  // Accessed but not influential — looked at, did not shape the result.
+  q.insertAccess({
+    id: crypto.randomUUID(),
+    task_id: taskId,
+    item_id: ids["draft_atlas_v1"],
+    tool_name: "get_context_for_task",
+    at: now,
+  });
+
+  // A real refusal: the agent reached for a Personal item and was denied. This
+  // is what the third provenance group exists to show.
+  q.insertDenial({
+    id: crypto.randomUUID(),
+    task_id: taskId,
+    agent_session_id: sessionId,
+    tool_name: "get_context_for_task",
+    requested: { region: "personal" },
+    reason: "No grant exists for the requested region",
+    at: now,
+  });
+
+  const annotationId = crypto.randomUUID();
+  q.insertAnnotation({
+    id: annotationId,
+    version_id: versionId,
+    author_id: ownerId,
+    target: null,
+    sentiment: "positive",
+    dimension: "composition",
+    comment: "The single dominant image is right. Don't turn this into a grid of equal tiles.",
+    status: "open",
+    created_at: now,
+  });
+
+  // Derived from that annotation, and citing it. Proposed — never confirmed
+  // without the person acting on it.
+  const signalId = crypto.randomUUID();
+  q.insertTasteSignal({
+    id: signalId,
+    space_id: spaceId,
+    owner_id: ownerId,
+    statement:
+      "For brand and research presentations, prefers a single dominant visual with generous negative space rather than evenly weighted card grids.",
+    dimensions: ["composition", "layout_density"],
+    scope: "personal",
+    status: "proposed",
+    confidence: 0.62,
+    created_by: "system",
+    approved_by: null,
+    created_at: now,
+  });
+  q.insertTasteEvidence({
+    id: crypto.randomUUID(),
+    signal_id: signalId,
+    kind: "supports",
+    annotation_id: annotationId,
+    version_id: versionId,
+    item_id: null,
+  });
 }
 
 /* ---------------- regions ---------------- */
 
-function handleRegions(request: Request, q: Queries): Response {
+function handleRegions(request: Request, q: Queries, humanId: string): Response {
   if (request.method !== "GET") return badRequest("GET required");
-  return json({ ok: true, regions: q.listRegions(GUEST_SPACE_ID) });
+  return json({ ok: true, regions: q.listRegions(spaceIdFor(humanId)) });
 }
 
 /* ---------------- items ---------------- */
@@ -223,11 +399,11 @@ async function handleItems(request: Request, q: Queries, humanId: string): Promi
     const url = new URL(request.url);
     const regionSlug = url.searchParams.get("region");
     if (regionSlug) {
-      const region = q.getRegionBySlug(GUEST_SPACE_ID, regionSlug);
+      const region = q.getRegionBySlug(spaceIdFor(humanId), regionSlug);
       if (!region) return badRequest("unknown region");
       return json({ ok: true, items: q.listItemsByRegion(region.id) });
     }
-    return json({ ok: true, items: q.listItemsBySpace(GUEST_SPACE_ID) });
+    return json({ ok: true, items: q.listItemsBySpace(spaceIdFor(humanId)) });
   }
   if (request.method === "POST") {
     const body = (await request.json()) as {
@@ -238,14 +414,14 @@ async function handleItems(request: Request, q: Queries, humanId: string): Promi
       content_ref?: string | null;
       semantic_text?: string | null;
     };
-    const region = q.getRegionBySlug(GUEST_SPACE_ID, body.region_slug);
+    const region = q.getRegionBySlug(spaceIdFor(humanId), body.region_slug);
     if (!region) return badRequest("unknown region");
     if (!(ITEM_TYPES as readonly string[]).includes(body.type)) return badRequest("unknown item type");
     const now = Date.now();
     const id = crypto.randomUUID();
     q.insertItem({
       id,
-      space_id: GUEST_SPACE_ID,
+      space_id: spaceIdFor(humanId),
       region_id: region.id,
       owner_id: humanId,
       type: body.type as ItemType,
@@ -266,10 +442,10 @@ async function handleItems(request: Request, q: Queries, humanId: string): Promi
 
 /* ---------------- upload ---------------- */
 
-async function handleUpload(request: Request, env: Env): Promise<Response> {
+async function handleUpload(request: Request, env: Env, humanId: string): Promise<Response> {
   if (request.method !== "POST") return badRequest("POST required");
   const contentType = request.headers.get("content-type") ?? "application/octet-stream";
-  const key = `${GUEST_SPACE_ID}/${crypto.randomUUID()}`;
+  const key = `${spaceIdFor(humanId)}/${crypto.randomUUID()}`;
   const body = await request.arrayBuffer();
   await env.BLOBS.put(key, body, { httpMetadata: { contentType } });
   return json({ ok: true, key });
@@ -278,15 +454,15 @@ async function handleUpload(request: Request, env: Env): Promise<Response> {
 /**
  * Streams a canonical original back out of R2.
  *
- * Keys are confined to this space's prefix, so a caller cannot walk out of the
- * bucket by supplying a crafted key. The agent never receives a bucket
+ * Keys are confined to this visitor's own space prefix, so a caller can neither
+ * walk out of the bucket with a crafted key nor read another visitor's uploads. The agent never receives a bucket
  * credential or a raw R2 URL — it only ever sees this path.
  */
-async function handleBlob(request: Request, env: Env): Promise<Response> {
+async function handleBlob(request: Request, env: Env, humanId: string): Promise<Response> {
   if (request.method !== "GET") return badRequest("GET required");
   const key = new URL(request.url).searchParams.get("key");
   if (!key) return badRequest("key required");
-  if (!key.startsWith(`${GUEST_SPACE_ID}/`) || key.includes("..")) {
+  if (!key.startsWith(`${spaceIdFor(humanId)}/`) || key.includes("..")) {
     return new Response("Not found", { status: 404 });
   }
   const object = await env.BLOBS.get(key);
@@ -309,7 +485,7 @@ async function handleBlob(request: Request, env: Env): Promise<Response> {
  * Merging these would erase the distinction between what shaped the work, what
  * was merely looked at, and what was refused. See BUILD-CONTRACT invariant 5.
  */
-function handleProvenance(request: Request, q: Queries): Response {
+function handleProvenance(request: Request, q: Queries, humanId: string): Response {
   if (request.method !== "GET") return badRequest("GET required");
   const versionId = new URL(request.url).searchParams.get("version_id");
   if (!versionId) return badRequest("version_id required");
@@ -344,7 +520,7 @@ function handleProvenance(request: Request, q: Queries): Response {
 
 /* ---------------- graph ---------------- */
 
-async function handleGraph(request: Request, q: Queries): Promise<Response> {
+async function handleGraph(request: Request, q: Queries, humanId: string): Promise<Response> {
   if (request.method !== "POST") return badRequest("POST required");
   const url = new URL(request.url);
   const taskId = url.searchParams.get("task_id");
@@ -394,7 +570,7 @@ async function handleTask(request: Request, q: Queries, humanId: string): Promis
     const id = crypto.randomUUID();
     q.insertTask({
       id,
-      space_id: GUEST_SPACE_ID,
+      space_id: spaceIdFor(humanId),
       human_id: humanId,
       title: body.title,
       instruction: body.instruction ?? "",
@@ -412,7 +588,14 @@ async function handleTask(request: Request, q: Queries, humanId: string): Promis
       if (!task) return badRequest("not found");
       return json({ ok: true, task });
     }
-    return json({ ok: true, tasks: q.listTasks(GUEST_SPACE_ID) });
+    // Only the caller's own tasks. The guest space is shared, so without this
+    // filter one visitor would see another's tasks and try to bind an agent
+    // session to work that is not theirs — which the session route correctly
+    // refuses, leaving the app wedged. Several judges will use this at once.
+    return json({
+      ok: true,
+      tasks: q.listTasks(spaceIdFor(humanId)).filter((t) => t.human_id === humanId),
+    });
   }
   return badRequest("unsupported method");
 }
@@ -422,7 +605,7 @@ async function handleTask(request: Request, q: Queries, humanId: string): Promis
 async function handleGrants(request: Request, q: Queries, humanId: string): Promise<Response> {
   if (request.method === "POST") {
     const body = (await request.json()) as { task_id: string; region_slug: string; level: GrantLevel; expires_at?: number | null };
-    const region = q.getRegionBySlug(GUEST_SPACE_ID, body.region_slug);
+    const region = q.getRegionBySlug(spaceIdFor(humanId), body.region_slug);
     if (!region) return badRequest("unknown region");
 
     // Setting a region's level SUPERSEDES whatever it was before. Any live grant
@@ -451,7 +634,7 @@ async function handleGrants(request: Request, q: Queries, humanId: string): Prom
     q.insertGrant({
       id,
       task_id: body.task_id,
-      space_id: GUEST_SPACE_ID,
+      space_id: spaceIdFor(humanId),
       region_id: region.id,
       level: body.level,
       grantor_id: humanId,
@@ -479,7 +662,7 @@ async function handleGrants(request: Request, q: Queries, humanId: string): Prom
 
 /* ---------------- capabilities ---------------- */
 
-function handleCapabilities(request: Request, q: Queries): Response {
+function handleCapabilities(request: Request, q: Queries, humanId: string): Response {
   if (request.method !== "GET") return badRequest("GET required");
   const url = new URL(request.url);
   const taskId = url.searchParams.get("task_id");
@@ -522,7 +705,7 @@ async function handleMcpCall(
 
 /* ---------------- artifacts ---------------- */
 
-function handleArtifacts(request: Request, q: Queries): Response {
+function handleArtifacts(request: Request, q: Queries, humanId: string): Response {
   if (request.method !== "GET") return badRequest("GET required");
   const url = new URL(request.url);
   const id = url.searchParams.get("id");
@@ -531,7 +714,7 @@ function handleArtifacts(request: Request, q: Queries): Response {
     if (!artifact) return badRequest("not found");
     return json({ ok: true, artifact, versions: q.listArtifactVersions(id) });
   }
-  return json({ ok: true, artifacts: q.listArtifacts(GUEST_SPACE_ID) });
+  return json({ ok: true, artifacts: q.listArtifacts(spaceIdFor(humanId)) });
 }
 
 /* ---------------- annotations ---------------- */
@@ -605,7 +788,7 @@ async function handleDecisions(request: Request, q: Queries, humanId: string): P
 
 async function handleTaste(request: Request, q: Queries, humanId: string): Promise<Response> {
   if (request.method === "GET") {
-    return json({ ok: true, signals: q.listTasteSignals(GUEST_SPACE_ID) });
+    return json({ ok: true, signals: q.listTasteSignals(spaceIdFor(humanId)) });
   }
   if (request.method === "POST") {
     const body = (await request.json()) as {
@@ -616,7 +799,7 @@ async function handleTaste(request: Request, q: Queries, humanId: string): Promi
     const id = crypto.randomUUID();
     q.insertTasteSignal({
       id,
-      space_id: GUEST_SPACE_ID,
+      space_id: spaceIdFor(humanId),
       owner_id: humanId,
       statement: body.statement,
       dimensions: body.dimensions,
@@ -667,7 +850,7 @@ async function handleTaste(request: Request, q: Queries, humanId: string): Promi
  * promises the opposite: signals cite the feedback and artifacts that support
  * them, and are never confirmed through silence.
  */
-function handleTasteEvidence(request: Request, q: Queries): Response {
+function handleTasteEvidence(request: Request, q: Queries, humanId: string): Response {
   if (request.method !== "GET") return badRequest("GET required");
   const signalId = new URL(request.url).searchParams.get("signal_id");
   if (!signalId) return badRequest("signal_id required");

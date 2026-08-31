@@ -9,7 +9,7 @@ import { Disclosure } from "../ui/primitives/Disclosure";
 import { EmptyState } from "../ui/primitives/EmptyState";
 import { Spinner } from "../ui/primitives/Spinner";
 import { AgentAccess } from "../ui/AgentAccess";
-import { mockAgentAccess, mockAgentLens } from "../ui/mockData";
+import { useSpace } from "../ui/hooks/useSpace";
 import { ArtifactViewer } from "../ui/workbench/ArtifactViewer";
 import { AnnotationRail } from "../ui/workbench/AnnotationRail";
 import { ProvenanceStrip } from "../ui/workbench/ProvenanceStrip";
@@ -84,6 +84,7 @@ function ArtifactList() {
 
 export function Workbench() {
   const { artifactId } = useParams();
+  const { task, regions } = useSpace();
   const { status, error, data, selectVersion, addAnnotation, decide } = useWorkbench(artifactId);
   const [decisionPending, setDecisionPending] = useState(false);
   const [decisionError, setDecisionError] = useState<string | null>(null);
@@ -194,7 +195,12 @@ export function Workbench() {
             the shared demo view models it already renders elsewhere. */}
         <Disclosure summary="Agent Access" defaultOpen>
           <div className="pt-2">
-            <AgentAccess model={mockAgentAccess} lens={mockAgentLens()} />
+            {/*
+              The live panel, not a mock. Archive and Workbench must never show
+              different permission state — two surfaces disagreeing about what
+              the agent may do is exactly the theater this product disproves.
+            */}
+            {task ? <AgentAccess taskId={task.id} regions={regions} /> : null}
           </div>
         </Disclosure>
       </div>
