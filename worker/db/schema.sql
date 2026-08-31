@@ -143,11 +143,14 @@ CREATE TABLE IF NOT EXISTS influences (
 CREATE INDEX IF NOT EXISTS idx_influences_version ON influences(version_id);
 
 CREATE TABLE IF NOT EXISTS accesses (
-  id        TEXT PRIMARY KEY,
-  task_id   TEXT NOT NULL REFERENCES tasks(id),
-  item_id   TEXT NOT NULL REFERENCES items(id),
-  tool_name TEXT NOT NULL,
-  at        INTEGER NOT NULL
+  id                 TEXT PRIMARY KEY,
+  task_id            TEXT NOT NULL REFERENCES tasks(id),
+  item_id            TEXT NOT NULL REFERENCES items(id),
+  tool_name          TEXT NOT NULL,
+  at                 INTEGER NOT NULL,
+  -- retrieve() fills these; other tool calls leave them null / '[]'.
+  why                TEXT,
+  applied_signal_ids TEXT NOT NULL DEFAULT '[]'
 );
 CREATE INDEX IF NOT EXISTS idx_accesses_task ON accesses(task_id);
 

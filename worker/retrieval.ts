@@ -155,6 +155,8 @@ export function retrieve(q: Queries, input: RetrieveInput, now: number): Retriev
       item_id: row.entry.item.id,
       tool_name: "retrieve",
       at: now,
+      why: row.entry.why,
+      applied_signal_ids: row.entry.applied_signal_ids,
     })),
   );
 

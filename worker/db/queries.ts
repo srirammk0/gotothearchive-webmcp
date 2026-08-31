@@ -147,6 +147,8 @@ interface AccessRow {
   item_id: string;
   tool_name: string;
   at: number;
+  why: string | null;
+  applied_signal_ids: string;
 }
 interface DenialRow {
   [key: string]: SqlStorageValue;
@@ -284,7 +286,8 @@ function toInfluence(r: InfluenceRow): InfluenceRecord {
   return { ...r };
 }
 function toAccess(r: AccessRow): AccessRecord {
-  return { ...r };
+  const { applied_signal_ids, ...rest } = r;
+  return { ...rest, applied_signal_ids: JSON.parse(applied_signal_ids || "[]") as string[] };
 }
 function toDenial(r: DenialRow): DenialRecord {
   return {
@@ -922,23 +925,24 @@ export class Queries {
   }
 
   insertAccess(a: AccessRecord): void {
-    this.sql.exec(
-      `INSERT INTO accesses (id, task_id, item_id, tool_name, at) VALUES (?, ?, ?, ?, ?)`,
-      a.id,
-      a.task_id,
-      a.item_id,
-      a.tool_name,
-      a.at,
-    );
+    this.insertAccesses([a]);
   }
 
   /** Batch form of insertAccess — one multi-row insert instead of N. */
   insertAccesses(rows: AccessRecord[]): void {
     if (rows.length === 0) return;
-    const tuples = rows.map(() => "(?, ?, ?, ?, ?)").join(", ");
-    const args = rows.flatMap((a) => [a.id, a.task_id, a.item_id, a.tool_name, a.at]);
+    const tuples = rows.map(() => "(?, ?, ?, ?, ?, ?, ?)").join(", ");
+    const args = rows.flatMap((a) => [
+      a.id,
+      a.task_id,
+      a.item_id,
+      a.tool_name,
+      a.at,
+      a.why ?? null,
+      JSON.stringify(a.applied_signal_ids ?? []),
+    ]);
     this.sql.exec(
-      `INSERT INTO accesses (id, task_id, item_id, tool_name, at) VALUES ${tuples}`,
+      `INSERT INTO accesses (id, task_id, item_id, tool_name, at, why, applied_signal_ids) VALUES ${tuples}`,
       ...args,
     );
   }

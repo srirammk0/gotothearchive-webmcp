@@ -243,6 +243,10 @@ export interface AccessRecord {
   item_id: Id;
   tool_name: string;
   at: number;
+  /** Retrieval's plain-language reason this item came back (retrieve() only). */
+  why?: string | null;
+  /** Confirmed taste signal ids that lifted this item into the results. */
+  applied_signal_ids?: Id[];
 }
 
 export interface DenialRecord {
