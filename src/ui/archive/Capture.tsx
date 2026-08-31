@@ -81,7 +81,7 @@ export function Capture({ region, onCaptured }: CaptureProps) {
   }
 
   return (
-    <div className="flex flex-col gap-3">
+    <div className="flex flex-col gap-3 rounded-[var(--radius-md)] border border-line bg-surface p-3 shadow-2xl shadow-black/10">
       <div
         onDragOver={(e) => {
           e.preventDefault();

@@ -185,12 +185,14 @@ async function handleRegions(request: Request, q: Queries, humanId: string): Pro
     return json({ ok: true, regions: q.listRegions(spaceId) });
   }
   if (request.method === "POST") {
-    const { name } = (await request.json()) as { name?: string };
+    const { name, parent_id } = (await request.json()) as { name?: string; parent_id?: string | null };
     if (!name?.trim()) return badRequest("name required");
+    const parent = parent_id ? q.getRegion(parent_id) : null;
+    if (parent_id && (!parent || parent.space_id !== spaceId)) return badRequest("unknown parent folder");
     const region: Region = {
       id: crypto.randomUUID(),
       space_id: spaceId,
-      parent_id: null,
+      parent_id: parent?.id ?? null,
       name: name.trim().slice(0, 80),
       slug: uniqueRegionSlug(q, spaceId, name),
       created_at: Date.now(),
@@ -213,9 +215,14 @@ async function handleRegions(request: Request, q: Queries, humanId: string): Pro
     const region = id ? q.getRegion(id) : null;
     if (!region || region.space_id !== spaceId) return badRequest("unknown region");
     if (q.listRegions(spaceId).length <= 1) return badRequest("keep at least one folder");
-    // Cascade: the folder's items go with it.
-    for (const item of q.listItemsByRegion(region.id)) q.deleteItem(item.id);
-    q.deleteRegion(region.id);
+    // Cascade children first: region parentage is the canonical folder tree.
+    const descendants = (root: string): string[] => {
+      const direct = q.listRegions(spaceId).filter((candidate) => candidate.parent_id === root);
+      return direct.flatMap((child) => [child.id, ...descendants(child.id)]);
+    };
+    const ids = [...descendants(region.id), region.id];
+    for (const regionId of ids) for (const item of q.listItemsByRegion(regionId)) q.deleteItem(item.id);
+    for (const regionId of [...ids].reverse()) q.deleteRegion(regionId);
     return json({ ok: true, deleted: region.id });
   }
   return badRequest("unsupported method");
@@ -765,6 +772,35 @@ async function handleDecisions(request: Request, q: Queries, humanId: string): P
           ? "changes_requested"
           : "rejected";
   q.setArtifactVersionState(body.version_id, nextState);
+  // An agent artifact becomes Archive context only after a human approves it,
+  // and only when it records real Archive material as influence. This keeps
+  // Workbench drafts out of canonical context and prevents self-referential
+  // learning from ungrounded output.
+  if ((nextState === "approved" || nextState === "approved_with_notes") && version.agent_session_id) {
+    const influences = q.listInfluences(version.id);
+    const destination = influences.length > 0 ? q.getItem(influences[0].item_id) : null;
+    const alreadyPromoted = q
+      .listItemsBySpace(artifact.space_id)
+      .some((item) => item.metadata.artifact_version_id === version.id);
+    if (destination && !alreadyPromoted) {
+      q.insertItem({
+        id: crypto.randomUUID(),
+        space_id: artifact.space_id,
+        region_id: destination.region_id,
+        owner_id: humanId,
+        type: "document",
+        title: artifact.title,
+        source_url: null,
+        content_ref: null,
+        semantic_text: version.content_html.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim().slice(0, 12_000),
+        metadata: { artifact_id: artifact.id, artifact_version_id: version.id, promoted_from_workbench: true },
+        authority_class: "agent_artifact",
+        created_by: `agent:${version.agent_session_id}`,
+        created_at: now,
+        updated_at: now,
+      });
+    }
+  }
   deriveTasteSignals(q, spaceIdFor(humanId), now);
   return json({ ok: true, version: q.getArtifactVersion(body.version_id) });
 }

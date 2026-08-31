@@ -2,6 +2,7 @@ import type { CSSProperties } from "react";
 import {
   ArrowRight,
   ArrowUpLeft,
+  ArrowUpRight,
   Check,
   ChevronRight,
   File,
@@ -28,6 +29,7 @@ import {
 const ICONS = {
   arrowRight: ArrowRight,
   arrowUpLeft: ArrowUpLeft,
+  arrowUpRight: ArrowUpRight,
   chevronRight: ChevronRight,
   check: Check,
   close: X,

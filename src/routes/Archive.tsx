@@ -343,7 +343,7 @@ function RegionSection({
               onClick={() => onOpenFolder(view.region)}
               className="rounded-[var(--radius-sm)] p-1 text-muted transition-colors duration-[var(--duration-fast)] hover:bg-hover hover:text-text"
             >
-              <Icon name="arrowUpLeft" size={14} />
+              <Icon name="arrowUpRight" size={14} />
             </button>
           ) : null}
         </div>
@@ -384,6 +384,7 @@ export function Archive() {
   const [collapsedIds, setCollapsedIds] = useState<Set<string>>(new Set());
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [folderModal, setFolderModal] = useState(false);
+  const [folderParent, setFolderParent] = useState<Region | null>(null);
   const [folderDraft, setFolderDraft] = useState("");
   const [captureFor, setCaptureFor] = useState<Region | null>(null);
   const [folderToDelete, setFolderToDelete] = useState<Region | null>(null);
@@ -437,10 +438,11 @@ export function Archive() {
     guard(async () => {
       const name = folderDraft.trim();
       if (!name) return;
-      const { region } = await createRegion(name);
+      const { region } = await createRegion(name, folderParent?.id ?? null);
       setRegionList((prev) => [...(prev ?? spaceRegions), region]);
       setFolderModal(false);
       setFolderDraft("");
+      setFolderParent(null);
     });
 
   const renameFolder = (region: Region, name: string) =>
@@ -495,7 +497,15 @@ export function Archive() {
   };
 
   const visibleRegions = useMemo(
-    () => (activeFolder ? regions.filter((r) => r.id === activeFolder.id) : regions),
+    () =>
+      activeFolder
+        ? [activeFolder, ...regions.filter((r) => r.parent_id === activeFolder.id)]
+        : regions.filter((r) => r.parent_id === null),
+    [regions, activeFolder],
+  );
+
+  const moveTargets = useMemo(
+    () => (activeFolder ? regions.filter((r) => r.parent_id === activeFolder.id) : regions.filter((r) => r.parent_id === null)),
     [regions, activeFolder],
   );
 
@@ -582,12 +592,18 @@ export function Archive() {
                 />
               </label>
               {activeFolder ? (
-                <Button variant="primary" className="box-border h-10" onClick={() => setCaptureFor(activeFolder)}>
-                  <Icon name="plus" size={13} />
-                  Add
-                </Button>
+                <>
+                  <Button variant="secondary" className="box-border h-10" onClick={() => { setFolderParent(activeFolder); setFolderModal(true); }}>
+                    <Icon name="plus" size={13} />
+                    New folder
+                  </Button>
+                  <Button variant="primary" className="box-border h-10" onClick={() => setCaptureFor(activeFolder)}>
+                    <Icon name="plus" size={13} />
+                    Add
+                  </Button>
+                </>
               ) : (
-                <Button variant="primary" className="box-border h-10" onClick={() => setFolderModal(true)}>
+                <Button variant="primary" className="box-border h-10" onClick={() => { setFolderParent(null); setFolderModal(true); }}>
                   <Icon name="plus" size={13} />
                   New folder
                 </Button>
@@ -700,7 +716,7 @@ export function Archive() {
             <span aria-hidden="true" className="h-4 w-px bg-line" />
             <Menu
               side="top"
-              items={regions.map((r) => ({ label: r.name, onSelect: () => moveSelected(r.slug), disabled: busy }))}
+              items={moveTargets.map((r) => ({ label: r.name, onSelect: () => moveSelected(r.slug), disabled: busy }))}
               trigger={({ open, toggle }) => (
                 <Button variant="secondary" onClick={toggle} aria-expanded={open}>
                   Move to
@@ -728,7 +744,7 @@ export function Archive() {
       </AnimatePresence>
 
       {/* New folder modal */}
-      <Modal open={folderModal} onClose={() => setFolderModal(false)} title="New folder">
+      <Modal open={folderModal} onClose={() => setFolderModal(false)} title={folderParent ? `New folder in ${folderParent.name}` : "New folder"}>
         <form
           className="flex flex-col gap-4"
           onSubmit={(e) => {
@@ -754,23 +770,33 @@ export function Archive() {
         </form>
       </Modal>
 
-      {/* Capture modal, scoped to one folder */}
-      <Modal
-        open={captureFor !== null}
-        onClose={() => setCaptureFor(null)}
-        size="lg"
-        title={captureFor ? `Add to ${captureFor.name}` : "Add"}
-      >
+      <AnimatePresence>
         {captureFor ? (
-          <Capture
-            region={captureFor}
-            onCaptured={(item) => {
-              setItems((prev) => [item, ...(prev ?? [])]);
-              setCaptureFor(null);
-            }}
-          />
+          <motion.div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-canvas/55 p-5 backdrop-blur-sm"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onMouseDown={(event) => event.currentTarget === event.target && setCaptureFor(null)}
+          >
+            <motion.div
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 6 }}
+              transition={{ duration: duration.fast, ease }}
+              className="w-full max-w-xl"
+            >
+              <Capture
+                region={captureFor}
+                onCaptured={(item) => {
+                  setItems((prev) => [item, ...(prev ?? [])]);
+                  setCaptureFor(null);
+                }}
+              />
+            </motion.div>
+          </motion.div>
         ) : null}
-      </Modal>
+      </AnimatePresence>
 
       {/* Delete-folder confirm */}
       <Modal

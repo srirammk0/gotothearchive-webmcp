@@ -1228,7 +1228,11 @@ export class Queries {
          FROM annotations a
          JOIN artifact_versions av ON av.id = a.version_id
          JOIN artifacts ar ON ar.id = av.artifact_id
-         WHERE ar.space_id = ? AND a.status = 'open'`,
+         WHERE ar.space_id = ?
+           AND a.status = 'open'
+           AND av.state IN ('approved', 'approved_with_notes')
+           AND av.agent_session_id IS NOT NULL
+           AND EXISTS (SELECT 1 FROM influences i WHERE i.version_id = av.id)`,
         spaceId,
       )
       .toArray()

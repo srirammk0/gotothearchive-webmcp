@@ -88,8 +88,8 @@ export const bootstrap = () =>
 
 export const listRegions = () => req<{ regions: Region[] }>(API.regions);
 
-export const createRegion = (name: string) =>
-  req<{ region: Region }>(API.regions, { method: "POST", body: JSON.stringify({ name }) });
+export const createRegion = (name: string, parentId: string | null = null) =>
+  req<{ region: Region }>(API.regions, { method: "POST", body: JSON.stringify({ name, parent_id: parentId }) });
 
 export const renameRegion = (id: string, name: string) =>
   req<{ region: Region }>(API.regions, { method: "PATCH", body: JSON.stringify({ id, name }) });
