@@ -274,6 +274,7 @@ export async function handleToolCall(
       if (artifactId) {
         const existing = q.getArtifact(artifactId);
         if (!existing) artifactId = null;
+        else if (existing.task_id !== task.id) return denyResult(DENIAL_REASONS.EXCEEDS_HUMAN);
         else versionNo = (q.latestArtifactVersion(artifactId)?.version_no ?? 0) + 1;
       }
       if (!artifactId) {
@@ -358,6 +359,11 @@ export async function handleToolCall(
       if (!authResult.ok) return denyResult(authResult.reason);
 
       const versionId = typeof input.version_id === "string" ? input.version_id : "";
+      const version = q.getArtifactVersion(versionId);
+      const artifact = version ? q.getArtifact(version.artifact_id) : null;
+      if (!version || !artifact || artifact.task_id !== task.id) {
+        return denyResult(DENIAL_REASONS.EXCEEDS_HUMAN);
+      }
       const sentiment =
         input.sentiment === "positive" || input.sentiment === "negative" ? input.sentiment : "neutral";
       const comment = typeof input.comment === "string" ? input.comment : "";

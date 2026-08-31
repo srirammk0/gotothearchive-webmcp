@@ -35,7 +35,7 @@ function stubQ(items: ContextItem[]) {
   return {
     edges,
     // deno-lint-ignore no-explicit-any
-    listItemsBySpace: (_: string) => items,
+    listItemsBySpace: () => items,
     edgeExists: (a: string, b: string, rel: string) =>
       edges.some(
         (e) =>

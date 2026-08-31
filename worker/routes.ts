@@ -118,7 +118,7 @@ export async function handleRoute(
     case API.tasteEvidence:
       return handleTasteEvidence(request, q, human.human_id);
     case API.lens:
-      return handleLens(request, q);
+      return handleLens(request, q, human.human_id);
     case API.stats:
       return handleStats(request, q, human.human_id);
     case API.edges:
@@ -530,7 +530,7 @@ async function handleTask(request: Request, q: Queries, humanId: string): Promis
     const id = url.searchParams.get("id");
     if (id) {
       const task = q.getTask(id);
-      if (!task) return badRequest("not found");
+      if (!task || task.human_id !== humanId) return badRequest("not found");
       return json({ ok: true, task });
     }
     // Only the caller's own tasks. Without this
@@ -550,6 +550,8 @@ async function handleTask(request: Request, q: Queries, humanId: string): Promis
 async function handleGrants(request: Request, q: Queries, humanId: string): Promise<Response> {
   if (request.method === "POST") {
     const body = (await request.json()) as { task_id: string; region_slug: string; level: GrantLevel; expires_at?: number | null };
+    const task = q.getTask(body.task_id);
+    if (!task || task.human_id !== humanId) return badRequest("unknown task");
     const region = q.getRegionBySlug(spaceIdFor(humanId), body.region_slug);
     if (!region) return badRequest("unknown region");
 
@@ -593,13 +595,18 @@ async function handleGrants(request: Request, q: Queries, humanId: string): Prom
   }
   if (request.method === "PATCH") {
     const body = (await request.json()) as { grant_id: string; reason?: string };
-    q.revokeGrant(body.grant_id, humanId, body.reason ?? null, Date.now());
+    const grant = q.getGrant(body.grant_id);
+    const task = grant ? q.getTask(grant.task_id) : null;
+    if (!grant || !task || task.human_id !== humanId) return badRequest("unknown grant");
+    q.revokeGrant(grant.id, humanId, body.reason ?? null, Date.now());
     return json({ ok: true, grant: q.getGrant(body.grant_id) });
   }
   if (request.method === "GET") {
     const url = new URL(request.url);
     const taskId = url.searchParams.get("task_id");
     if (!taskId) return badRequest("task_id required");
+    const task = q.getTask(taskId);
+    if (!task || task.human_id !== humanId) return badRequest("unknown task");
     return json({ ok: true, grants: q.grantsForTask(taskId) });
   }
   return badRequest("unsupported method");
@@ -659,7 +666,7 @@ function handleArtifacts(request: Request, q: Queries, humanId: string): Respons
   const id = url.searchParams.get("id");
   if (id) {
     const artifact = q.getArtifact(id);
-    if (!artifact) return badRequest("not found");
+    if (!artifact || artifact.space_id !== spaceIdFor(humanId)) return badRequest("not found");
     return json({ ok: true, artifact, versions: q.listArtifactVersions(id) });
   }
   const spaceId = spaceIdFor(humanId);
@@ -691,6 +698,9 @@ async function handleAnnotations(request: Request, q: Queries, humanId: string):
     const url = new URL(request.url);
     const versionId = url.searchParams.get("version_id");
     if (!versionId) return badRequest("version_id required");
+    const version = q.getArtifactVersion(versionId);
+    const artifact = version ? q.getArtifact(version.artifact_id) : null;
+    if (!version || !artifact || artifact.space_id !== spaceIdFor(humanId)) return badRequest("unknown version");
     return json({ ok: true, annotations: q.listAnnotations(versionId) });
   }
   if (request.method === "POST") {
@@ -701,6 +711,9 @@ async function handleAnnotations(request: Request, q: Queries, humanId: string):
       dimension?: string | null;
       target?: { kind: "region"; x: number; y: number; w: number; h: number } | null;
     };
+    const version = q.getArtifactVersion(body.version_id);
+    const artifact = version ? q.getArtifact(version.artifact_id) : null;
+    if (!version || !artifact || artifact.space_id !== spaceIdFor(humanId)) return badRequest("unknown version");
     const id = crypto.randomUUID();
     q.insertAnnotation({
       id,
@@ -731,6 +744,8 @@ async function handleDecisions(request: Request, q: Queries, humanId: string): P
   const decision = body.decision as ReviewDecision;
   const version = q.getArtifactVersion(body.version_id);
   if (!version) return badRequest("unknown version");
+  const artifact = q.getArtifact(version.artifact_id);
+  if (!artifact || artifact.space_id !== spaceIdFor(humanId)) return badRequest("unknown version");
   const now = Date.now();
   q.insertDecision({
     id: crypto.randomUUID(),
@@ -1177,11 +1192,13 @@ function handleQuota(q: Queries, humanId: string): Response {
 
 /* ---------------- lens ---------------- */
 
-function handleLens(request: Request, q: Queries): Response {
+function handleLens(request: Request, q: Queries, humanId: string): Response {
   if (request.method !== "GET") return badRequest("GET required");
   const url = new URL(request.url);
   const taskId = url.searchParams.get("task_id");
   if (!taskId) return badRequest("task_id required");
+  const task = q.getTask(taskId);
+  if (!task || task.human_id !== humanId) return badRequest("unknown task");
   const limit = Number(url.searchParams.get("limit") ?? "50");
   return json({
     ok: true,
