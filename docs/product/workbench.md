@@ -55,6 +55,13 @@ optional revised version
 
 Every state transition records actor, time, previous state, and optional note. Low-risk actions such as adding a comment can be optimistic. Decisions and version replacement require confirmed persistence.
 
+An agent-authored artifact stays in the Workbench until a human approves it. On
+approval, and only when the agent recorded real Archive influences, the approved
+version is promoted into the influencing Archive region as agent-created
+context. Only those approved, grounded artifacts contribute annotations to
+future Taste proposals. Drafts, rejected work, and ungrounded agent output do
+not become Archive or Taste context.
+
 ## Review decisions
 
 ### Approve
