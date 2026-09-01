@@ -36,20 +36,28 @@ export function spotlight(s?: string | null): string {
   return s ? `«untrusted»${s.replace(/[«»]/g, "")}«/untrusted»` : "";
 }
 
-/** Keep tool outputs small — detail is a follow-up call away. */
+/**
+ * Keep tool outputs small — the Chrome WebMCP guidance caps individual tool
+ * output around 1.5K chars, and a big blob just crowds the agent's context.
+ * Detail is one inspect_context_item call away.
+ */
 export function clip(s: string, n: number): string {
   return s.length > n ? `${s.slice(0, n)}…` : s;
 }
 
-/** Trimmed, spotlighted view of an archive item for a tool result. */
+/** Max list entries / free-text chars in any one tool result. */
+const MAX_ROWS = 8;
+const MAX_TEXT = 240;
+
+/** Trimmed view of an archive item for a tool result; every free-text field is fenced. */
 function slimItem(it: ContextItem) {
   return {
     id: it.id,
     type: it.type,
     region_id: it.region_id,
-    source_url: it.source_url,
+    source_url: it.source_url ? spotlight(clip(it.source_url, 200)) : null,
     title: spotlight(clip(it.title, 120)),
-    semantic_text: it.semantic_text ? spotlight(clip(it.semantic_text, 300)) : null,
+    semantic_text: it.semantic_text ? spotlight(clip(it.semantic_text, MAX_TEXT)) : null,
   };
 }
 
@@ -182,11 +190,11 @@ export async function handleToolCall(
         }
       }
 
-      const compact = items.slice(0, 8).map((ret) => ({
+      const compact = items.slice(0, MAX_ROWS).map((ret) => ({
         id: ret.item.id,
         region: ret.region_slug,
         title: spotlight(clip(ret.item.title, 120)),
-        why: clip(ret.why, 200),
+        why: clip(ret.why, MAX_TEXT),
       }));
       return { ok: true, result: { items: compact } };
     }
@@ -244,8 +252,8 @@ export async function handleToolCall(
       return {
         ok: true,
         result: {
-          nodes: graphResult.nodes.slice(0, 12).map(slimItem),
-          edges: graphResult.edges.slice(0, 12),
+          nodes: graphResult.nodes.slice(0, MAX_ROWS).map(slimItem),
+          edges: graphResult.edges.slice(0, MAX_ROWS),
         },
       };
     }
@@ -269,7 +277,7 @@ export async function handleToolCall(
       const signals = q
         .listTasteSignals(task.space_id)
         .filter((s) => s.status === "confirmed" || s.status === "proposed")
-        .slice(0, 12)
+        .slice(0, MAX_ROWS)
         .map((s) => ({
           id: s.id,
           status: s.status,
@@ -279,7 +287,7 @@ export async function handleToolCall(
           // A confirmed signal has passed human review — it is a directive, not
           // untrusted input. A proposed one is still raw derived-from-annotation
           // text, so it stays spotlighted.
-          statement: s.status === "proposed" ? spotlight(clip(s.statement, 300)) : clip(s.statement, 300),
+          statement: s.status === "proposed" ? spotlight(clip(s.statement, MAX_TEXT)) : clip(s.statement, MAX_TEXT),
         }));
       return { ok: true, result: { signals } };
     }
@@ -315,14 +323,14 @@ export async function handleToolCall(
             parent_version_id: version.parent_version_id,
             state: version.state,
           },
-          annotations: q.listAnnotations(version.id).slice(0, 12).map((a) => ({
+          annotations: q.listAnnotations(version.id).slice(0, MAX_ROWS).map((a) => ({
             id: a.id,
             sentiment: a.sentiment,
             dimension: a.dimension,
             status: a.status,
-            comment: spotlight(clip(a.comment, 300)),
+            comment: spotlight(clip(a.comment, MAX_TEXT)),
           })),
-          influences: influences.slice(0, 12).map((inf) => ({
+          influences: influences.slice(0, MAX_ROWS).map((inf) => ({
             influence: inf.influence,
             item: inf.item ? slimItem(inf.item) : null,
           })),
