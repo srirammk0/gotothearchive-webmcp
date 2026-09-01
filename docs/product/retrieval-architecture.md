@@ -46,7 +46,10 @@ existing ones in the same space:
 | tweet → its extracted image | `derived_from` | 1.0 | approved |
 | tweet → link it references | `mentions` | 1.0 | approved |
 | shared salient words (jaccard ≥ .18, ≥ 3 words) | `related_to` | ≤ .5 | proposed |
-| same region, captured < 10 min apart | `related_to` | 0.3 | proposed |
+
+Every rule is grounded in the items' own text or source — co-location (same
+folder, captured close together) is deliberately **not** a rule, so a derived
+connection always reflects something the two items actually share.
 
 `rebuildSpaceEdges(q, spaceId, now)` backfills every space on DO boot (in
 `migrate.ts`), idempotent via `q.edgeExists`.

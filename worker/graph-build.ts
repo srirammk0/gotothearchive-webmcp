@@ -7,11 +7,12 @@
  *
  * All derived edges have created_by = "system". Approval state is per-rule:
  * strong structural facts land "approved"; fuzzy similarity lands "proposed"
- * for a human to confirm in the Connections panel.
+ * for a human to confirm in the Connections panel. Every rule is grounded in
+ * the items' own content or source — nothing is linked for co-location alone.
  *
- * ponytail: rules 3 and 4 are O(n) per capture over the space's items (token
- * sets + pairwise jaccard). Fine to low hundreds of items per space. The
- * upgrade beyond that is a blocked/indexed similarity pass (e.g. an FTS-driven
+ * ponytail: rule 3 is O(n) per capture over the space's items (token sets +
+ * pairwise jaccard). Fine to low hundreds of items per space. The upgrade
+ * beyond that is a blocked/indexed similarity pass (e.g. an FTS-driven
  * candidate shortlist) instead of scanning every sibling.
  */
 import type { ContextItem, Relationship } from "@shared/contract";
@@ -117,7 +118,9 @@ export function deriveEdgesForItem(q: Queries, item: ContextItem, now: number): 
   }
 
   // Rule 3: shared salient words -> related_to, weight min(0.5, jaccard), proposed.
-  // jaccard >= 0.18 AND >= 3 shared words. Cap at the 5 strongest.
+  // jaccard >= 0.18 AND >= 3 shared words. Cap at the 5 strongest. Every derived
+  // connection is grounded in the items' own text (or a shared source / tweet
+  // structure above) — nothing is linked just for landing in the same folder.
   const mine = contentWords(item);
   if (mine.size > 0) {
     const scored: { id: string; j: number }[] = [];
@@ -129,22 +132,6 @@ export function deriveEdgesForItem(q: Queries, item: ContextItem, now: number): 
     for (const s of scored.slice(0, 5)) {
       add(item.id, s.id, "related_to", Math.min(0.5, s.j), "proposed");
     }
-  }
-
-  // Rule 4: same region + captured within 10 min -> related_to, 0.3, proposed.
-  // Only when no stronger edge (rule 1-3, all "related_to"/"mentions"/"derived_from") links them.
-  const TEN_MIN = 10 * 60 * 1000;
-  for (const o of siblings) {
-    if (o.region_id !== item.region_id) continue;
-    if (Math.abs(o.created_at - item.created_at) > TEN_MIN) continue;
-    if (
-      q.edgeExists(item.id, o.id, "related_to") ||
-      q.edgeExists(item.id, o.id, "mentions") ||
-      q.edgeExists(item.id, o.id, "derived_from")
-    ) {
-      continue;
-    }
-    add(item.id, o.id, "related_to", 0.3, "proposed");
   }
 
   return inserted;

@@ -102,23 +102,20 @@ test("rule 2: tweet -> children (image=derived_from, link=mentions), both call o
   expect(q2.edges[0]).toMatchObject({ from_id: "t", to_id: "img", relationship: "derived_from" });
 });
 
-test("rule 4: same region + <=10min -> proposed 0.3, but not when a stronger edge exists", () => {
-  const a = item({ id: "a", created_at: 1_000_000 });
-  const near = item({ id: "near", created_at: 1_000_000 + 60_000 });
-  const far = item({ id: "far", created_at: 1_000_000 + 20 * 60_000 });
-  const q = stubQ([a, near, far]);
+test("co-capture alone does not link: connections need shared content or source", () => {
+  // Same region, seconds apart, but nothing in common in the text.
+  const a = item({ id: "a", title: "Quarterly travel receipts", semantic_text: "hotel and flight totals", created_at: 1_000_000 });
+  const near = item({ id: "near", title: "Colour palette reference", semantic_text: "terracotta and sienna swatches", created_at: 1_000_000 + 30_000 });
+  const q = stubQ([a, near]);
   deriveEdgesForItem(q, a, 5000);
-  const e = q.edges.find((x: Inserted) => x.to_id === "near");
-  expect(e).toMatchObject({ relationship: "related_to", weight: 0.3, approval_state: "proposed" });
-  expect(q.edges.find((x: Inserted) => x.to_id === "far")).toBeUndefined();
+  expect(q.edges).toHaveLength(0);
 
-  // with a rule-1 domain edge already, rule 4 must not add a second edge
-  const a2 = item({ id: "a", created_at: 1_000_000, source_url: "https://x.com/1" });
-  const near2 = item({ id: "near", created_at: 1_000_000 + 60_000, source_url: "https://x.com/2" });
-  const q2 = stubQ([a2, near2]);
-  deriveEdgesForItem(q2, a2, 5000);
-  expect(q2.edges).toHaveLength(1);
-  expect(q2.edges[0].weight).toBe(0.6);
+  // Shared salient words -> a proposed related_to edge, grounded in the text.
+  const b = item({ id: "b", title: "Terracotta palette swatches", semantic_text: "warm sienna clay tones", created_at: 2_000_000 });
+  const q2 = stubQ([near, b]);
+  deriveEdgesForItem(q2, b, 5000);
+  const e = q2.edges.find((x: Inserted) => x.to_id === "near");
+  expect(e).toMatchObject({ relationship: "related_to", approval_state: "proposed" });
 });
 
 test("idempotent: re-running derive / rebuild inserts nothing new", () => {

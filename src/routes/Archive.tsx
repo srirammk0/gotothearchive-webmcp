@@ -12,6 +12,7 @@ import { Menu } from "../ui/primitives/Menu";
 import { controlClass } from "../ui/primitives/Field";
 import { AgentAccess } from "../ui/AgentAccess";
 import { Capture } from "../ui/archive/Capture";
+import { CapturePreview } from "../ui/archive/CapturePreview";
 import { ItemLightbox } from "../ui/archive/ItemLightbox";
 import { Tweet } from "../ui/archive/Tweet";
 import { FileCard, kind, tweetId } from "../ui/archive/itemKind";
@@ -449,6 +450,7 @@ export function Archive() {
   const [folderDraft, setFolderDraft] = useState("");
   const [captureFor, setCaptureFor] = useState<Region | null>(null);
   const [folderToDelete, setFolderToDelete] = useState<Region | null>(null);
+  const [previewId, setPreviewId] = useState<string | null>(null);
   const [lightboxId, setLightboxId] = useState<string | null>(null);
   const [banner, setBanner] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -622,6 +624,7 @@ export function Archive() {
   const flatItems = useMemo(() => regionViews.flatMap((r) => r.items), [regionViews]);
   const lightboxIndex = lightboxId ? flatItems.findIndex((i) => i.id === lightboxId) : -1;
   const lightboxItem = lightboxIndex >= 0 ? flatItems[lightboxIndex] : null;
+  const previewItem = previewId ? (items ?? []).find((i) => i.id === previewId) ?? null : null;
 
   if (!spaceError && (spaceLoading || (items === null && !itemsError))) {
     return (
@@ -882,6 +885,7 @@ export function Archive() {
                 onCaptured={(item) => {
                   setItems((prev) => [item, ...(prev ?? [])]);
                   setCaptureFor(null);
+                  setPreviewId(item.id);
                 }}
               />
             </motion.div>
@@ -934,6 +938,16 @@ export function Archive() {
               setItems((prev) => (prev ?? []).filter((i) => i.id !== it.id));
             });
           }}
+        />
+      ) : null}
+
+      {previewItem ? (
+        <CapturePreview
+          item={previewItem}
+          region={regions.find((r) => r.id === previewItem.region_id) ?? null}
+          allItems={items ?? []}
+          onEdit={editItem}
+          onClose={() => setPreviewId(null)}
         />
       ) : null}
     </div>
