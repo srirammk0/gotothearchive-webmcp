@@ -50,6 +50,11 @@ export const AUTHORITY_CLASSES = [
 ] as const;
 export type AuthorityClass = (typeof AUTHORITY_CLASSES)[number];
 
+/** Whether an item/record was produced by an agent rather than the human. */
+export function isAgentAuthority(c: string): boolean {
+  return c === "agent_authored" || c === "agent_artifact" || c === "agent_proposal";
+}
+
 /* ------------------------------------------------------------------ *
  * Context graph
  * ------------------------------------------------------------------ */

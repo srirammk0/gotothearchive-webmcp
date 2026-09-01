@@ -1,13 +1,14 @@
 import { createPortal } from "react-dom";
 import { useEffect, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
-import type { ContextItem, Region } from "@shared/contract";
+import { isAgentAuthority, type ContextItem, type Region } from "@shared/contract";
 import { MetaList } from "../primitives/MetaList";
 import { Menu } from "../primitives/Menu";
 import { Icon } from "../primitives/Icon";
 import { Tweet } from "./Tweet";
 import { ConnectionsPanel } from "./ConnectionsPanel";
 import { FileCard, kind, tweetId } from "./itemKind";
+import { ArtifactThumb } from "../workbench/ArtifactThumb";
 import { blobUrl } from "../../api/client";
 import { duration, ease } from "../tokens";
 
@@ -16,7 +17,7 @@ function fullDate(ms: number): string {
 }
 
 function agentLabel(item: ContextItem): string {
-  return item.authority_class === "agent_artifact" || item.authority_class === "agent_proposal" ? "Agent" : "Human";
+  return isAgentAuthority(item.authority_class) ? "Agent" : "Human";
 }
 
 /**
@@ -154,6 +155,8 @@ export function ItemLightbox({
                 src={blobUrl(item.content_ref)}
                 className="h-full w-full rounded-[var(--radius-sm)] bg-white"
               />
+            ) : render === "artifact" ? (
+              <ArtifactThumb html={String(item.metadata?.preview_html ?? "")} className="h-full w-full" />
             ) : render === "office" ? (
               <FileCard item={item} big />
             ) : render === "tweet" && tw ? (
@@ -254,6 +257,14 @@ export function ItemLightbox({
             />
 
             <div className="flex items-center gap-2">
+              {item.metadata?.artifact_id ? (
+                <a
+                  href={`/workbench/${String(item.metadata.artifact_id)}`}
+                  className="inline-flex items-center gap-1.5 rounded-[var(--radius-md)] bg-text px-3 py-1.5 text-[length:var(--text-meta)] text-canvas transition-colors duration-[var(--duration-fast)] hover:bg-white"
+                >
+                  Open in Workbench <Icon name="arrowRight" size={14} />
+                </a>
+              ) : null}
               {item.source_url ? (
                 <a
                   href={item.source_url}

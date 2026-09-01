@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router";
 import { AnimatePresence, motion } from "motion/react";
-import type { ContextItem, ItemType, Region } from "@shared/contract";
+import { isAgentAuthority, type ContextItem, type ItemType, type Region } from "@shared/contract";
 import { EmptyState } from "../ui/primitives/EmptyState";
 import { EmptyRow } from "../ui/primitives/EmptyRow";
 import { Spinner } from "../ui/primitives/Spinner";
@@ -15,6 +15,7 @@ import { Capture } from "../ui/archive/Capture";
 import { ItemLightbox } from "../ui/archive/ItemLightbox";
 import { Tweet } from "../ui/archive/Tweet";
 import { FileCard, kind, tweetId } from "../ui/archive/itemKind";
+import { ArtifactThumb } from "../ui/workbench/ArtifactThumb";
 import { useTrail } from "../ui/Breadcrumbs";
 import { useSpace } from "../ui/hooks/useSpace";
 import {
@@ -41,7 +42,7 @@ const TYPE_FILTERS: { value: TypeFilter; label: string }[] = [
 ];
 
 function isAgentAdded(item: ContextItem): boolean {
-  return item.authority_class === "agent_artifact" || item.authority_class === "agent_proposal";
+  return isAgentAuthority(item.authority_class);
 }
 
 function isPinned(item: ContextItem): boolean {
@@ -98,6 +99,14 @@ function Preview({ item }: { item: ContextItem }) {
         src={blobUrl(item.content_ref)}
         tabIndex={-1}
         className="pointer-events-none absolute inset-0 h-full w-full bg-white text-black"
+      />
+    );
+  }
+  if (render === "artifact") {
+    return (
+      <ArtifactThumb
+        html={String(item.metadata?.preview_html ?? "")}
+        className="pointer-events-none absolute inset-0 h-full w-full"
       />
     );
   }

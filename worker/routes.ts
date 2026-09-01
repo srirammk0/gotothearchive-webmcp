@@ -815,7 +815,7 @@ async function handleDecisions(request: Request, q: Queries, humanId: string, en
   if ((nextState === "approved" || nextState === "approved_with_notes") && version.agent_session_id) {
     const influences = q.listInfluences(version.id);
     const influencedDestination = influences.length > 0 ? q.getItem(influences[0].item_id) : null;
-    const destinationRegion = influencedDestination?.region_id ?? submittedRegionId(version.content_html);
+    const destinationRegion = submittedRegionId(version.content_html) ?? influencedDestination?.region_id;
     const alreadyPromoted = q
       .listItemsBySpace(artifact.space_id)
       .some((item) => item.metadata.artifact_version_id === version.id);
@@ -830,7 +830,15 @@ async function handleDecisions(request: Request, q: Queries, humanId: string, en
         source_url: null,
         content_ref: null,
         semantic_text: version.content_html.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim().slice(0, 12_000),
-        metadata: { artifact_id: artifact.id, artifact_version_id: version.id, promoted_from_workbench: true },
+        metadata: {
+          artifact_id: artifact.id,
+          artifact_version_id: version.id,
+          promoted_from_workbench: true,
+          preview_html: version.content_html,
+          renderer: /<meta\s+name=["']gotothearchive-renderer["']\s+content=["']component["']/i.test(version.content_html)
+            ? "component"
+            : "static",
+        },
         authority_class: "agent_artifact",
         created_by: `agent:${version.agent_session_id}`,
         created_at: now,

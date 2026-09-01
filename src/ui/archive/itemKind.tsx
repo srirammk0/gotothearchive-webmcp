@@ -13,10 +13,11 @@ export function ext(item: ContextItem): string {
   return m ? m[1].toLowerCase() : "";
 }
 
-export type Renderable = "image" | "pdf" | "text" | "office" | "tweet" | "link" | "note";
+export type Renderable = "image" | "pdf" | "text" | "office" | "tweet" | "link" | "note" | "artifact";
 
 /** How a given item should be shown, and what to call its type. */
 export function kind(item: ContextItem): { label: string; render: Renderable } {
+  if (item.metadata?.artifact_id) return { label: "Artifact", render: "artifact" };
   if (item.type === "image" || item.type === "screenshot") return { label: "Image", render: "image" };
   if (item.type === "note") return { label: "Note", render: "note" };
   if (item.type === "link") return { label: "Link", render: tweetId(item.source_url) ? "tweet" : "link" };
