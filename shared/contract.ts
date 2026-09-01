@@ -300,6 +300,24 @@ export const TASTE_DIMENSIONS = [
 ] as const;
 export type TasteDimension = (typeof TASTE_DIMENSIONS)[number];
 
+/** Display labels for the taste dimensions. Stored values stay snake_case. */
+export const DIMENSION_LABELS: Record<TasteDimension, string> = {
+  typography: "Typography",
+  composition: "Composition",
+  layout_density: "Layout density",
+  color: "Color",
+  imagery: "Imagery",
+  motion: "Motion",
+  visual_hierarchy: "Visual hierarchy",
+  tone_voice: "Tone & voice",
+  structure_clarity: "Structure & clarity",
+};
+
+/** Humanize a dimension slug for display; unknown slugs fall back to spaced words. */
+export function dimensionLabel(d: string): string {
+  return DIMENSION_LABELS[d as TasteDimension] ?? d.replace(/_/g, " ").replace(/^\w/, (c) => c.toUpperCase());
+}
+
 export interface TasteSignal {
   id: Id;
   space_id: Id;

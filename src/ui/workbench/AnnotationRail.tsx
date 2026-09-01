@@ -1,5 +1,4 @@
-import type { Annotation } from "@shared/contract";
-import { DIMENSION_LABEL } from "./ArtifactViewer";
+import { dimensionLabel, type Annotation } from "@shared/contract";
 
 /**
  * Review feedback is intentionally quiet until needed. Creating a note lives
@@ -28,9 +27,7 @@ export function AnnotationRail({ annotations }: { annotations: Annotation[] }) {
                   Doesn't work
                 </span>
               ) : null}
-              {annotation.dimension ? (
-                <span>{DIMENSION_LABEL[annotation.dimension] ?? annotation.dimension}</span>
-              ) : null}
+              {annotation.dimension ? <span>{dimensionLabel(annotation.dimension)}</span> : null}
             </p>
             <p className="mt-1 leading-relaxed text-text">{annotation.comment}</p>
           </li>

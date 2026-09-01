@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { confidenceLabel, type ContextItem, type TasteSignal } from "@shared/contract";
+import { confidenceLabel, dimensionLabel, type ContextItem, type TasteSignal } from "@shared/contract";
 import {
   ApiError,
   blobUrl,
@@ -79,16 +79,6 @@ function EvidenceCard({ record }: { record: EvidenceRecord }) {
       )}
     </div>
   );
-}
-
-/**
- * Dimensions are stored as snake_case enum values. Ordinary UI copy must never
- * show an internal term, so they are humanized for display only — the stored
- * values are unchanged, since retrieval and evidence depend on them.
- */
-function dimensionLabel(dimension: string): string {
-  const words = dimension.replace(/_/g, " ");
-  return words.charAt(0).toUpperCase() + words.slice(1);
 }
 
 const VERB: Record<string, string> = {

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { AnimatePresence, motion } from "motion/react";
-import { TASTE_DIMENSIONS, type Annotation, type ArtifactVersion } from "@shared/contract";
+import { TASTE_DIMENSIONS, dimensionLabel, type Annotation, type ArtifactVersion } from "@shared/contract";
 import { Button } from "../primitives/Button";
 import { Icon } from "../primitives/Icon";
 import { duration, ease } from "../tokens";
@@ -10,19 +10,6 @@ import { isComponentPreview, previewSandbox, previewSrcDoc } from "./componentPr
 type Rect = { x: number; y: number; w: number; h: number };
 
 type FeedbackPayload = { comment: string; sentiment: Annotation["sentiment"]; dimension: string | null };
-
-/** Humanized labels for the taste dimensions, keyed by contract slug. */
-export const DIMENSION_LABEL: Record<string, string> = {
-  typography: "Typography",
-  composition: "Composition",
-  layout_density: "Layout density",
-  color: "Color",
-  imagery: "Imagery",
-  motion: "Motion",
-  visual_hierarchy: "Visual hierarchy",
-  tone_voice: "Tone & voice",
-  structure_clarity: "Structure & clarity",
-};
 
 const SENTIMENTS: { value: Annotation["sentiment"]; label: string; on: string }[] = [
   { value: "positive", label: "Works", on: "bg-good/15 text-good" },
@@ -63,7 +50,7 @@ function FeedbackControls({
         <option value="">General</option>
         {TASTE_DIMENSIONS.map((d) => (
           <option key={d} value={d}>
-            {DIMENSION_LABEL[d] ?? d}
+            {dimensionLabel(d)}
           </option>
         ))}
       </select>
