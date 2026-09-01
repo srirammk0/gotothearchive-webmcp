@@ -22,7 +22,6 @@ import { authorize, authorizedRegionIds, writeDenial } from "./permissions";
 import { retrieve } from "./retrieval";
 import { traverse } from "./graph";
 import { deriveEdgesForItem } from "./graph-build";
-import { deriveTasteSignals } from "./taste/derive";
 import type { ResolvedHuman } from "./auth";
 
 function denyResult(reason: string): ToolCallResponse {
@@ -69,7 +68,7 @@ export async function handleToolCall(
   q: Queries,
   human: ResolvedHuman,
   now: number,
-  env?: Env,
+  _env?: Env,
 ): Promise<ToolCallResponse> {
   // Re-resolve session, task, and their linkage. Never trust body.task_id / body.agent_session_id alone.
   const session = q.getAgentSession(body.agent_session_id);
@@ -504,14 +503,11 @@ export async function handleToolCall(
         created_at: now,
       });
 
-      // Agent-authored feedback feeds the same taste-derivation loop as human annotations.
-      await deriveTasteSignals(q, task.space_id, now, env);
-
       return {
         ok: true,
         result: {
           annotation_id: annotationId,
-          next: "Recorded. This may surface a proposed taste signal for the person to confirm.",
+          next: "Recorded for review. Personal taste only learns from the person's own feedback.",
         },
       };
     }
@@ -590,7 +586,7 @@ export async function handleToolCall(
 
       const type = input.type === "link" || input.type === "document" ? input.type : "note";
       const title = (typeof input.title === "string" ? input.title : "").trim().slice(0, 200) || "Untitled";
-      const body_ = typeof input.body === "string" ? input.body.slice(0, 20_000) : null;
+      const bodyText = typeof input.body === "string" ? input.body.slice(0, 20_000) : null;
       const sourceUrl =
         type === "link" && typeof input.source_url === "string" && /^https?:\/\//i.test(input.source_url)
           ? input.source_url.slice(0, 2000)
@@ -606,7 +602,7 @@ export async function handleToolCall(
         title,
         source_url: sourceUrl,
         content_ref: null,
-        semantic_text: body_,
+        semantic_text: bodyText,
         metadata: { added_by_agent: session.id },
         authority_class: "agent_authored",
         created_by: `agent:${session.id}`,

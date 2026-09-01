@@ -16,28 +16,61 @@ interface Signal {
   created_by: string;
   dimensions: string[];
   statement: string;
+  confidence: number;
+}
+
+interface Evidence {
+  id: string;
+  signal_id: string;
+  annotation_id: string | null;
+  kind: "supports" | "contradicts";
 }
 
 function stubQ(
   open: Ann[],
-  opts: { confirmed?: { dimensions: string[]; statement: string }[] } = {},
+  opts: { confirmed?: (Partial<Signal> & Pick<Signal, "dimensions" | "statement">)[] } = {},
 ) {
   const signals: Signal[] = [];
-  const evidence: { signal_id: string; annotation_id: string | null }[] = [];
+  const confirmed = (opts.confirmed ?? []).map((s, i) => ({
+    id: `confirmed-${i}`,
+    status: "confirmed",
+    created_by: "human",
+    confidence: 0.7,
+    ...s,
+  })) as Signal[];
+  const evidence: Evidence[] = [];
   const events: { signal_id: string; kind: string; actor_type: string }[] = [];
   const q = {
     signals,
+    confirmed,
     evidence,
     events,
     openAnnotationsForSpace: () => open,
-    confirmedTasteSignals: () => opts.confirmed ?? [],
+    confirmedTasteSignals: () => confirmed,
     listTasteSignals: () => signals,
     listTasteEvidence: (id: string) => evidence.filter((e) => e.signal_id === id),
+    getAnnotation: (id: string) => open.find((a) => a.id === id) ?? null,
     getArtifactVersion: () => ({ artifact_id: "art1" }),
-    getArtifact: () => ({ title: "Homepage" }),
+    getArtifact: () => ({ title: "Homepage", kind: "webpage" }),
     insertTasteSignal: (s: Signal) => signals.push(s),
-    insertTasteEvidence: (e: { signal_id: string; annotation_id: string | null }) => evidence.push(e),
+    insertTasteEvidence: (e: Evidence) => evidence.push(e),
+    setTasteEvidenceKind: (id: string, kind: Evidence["kind"]) => {
+      const row = evidence.find((e) => e.id === id);
+      if (row) row.kind = kind;
+    },
+    deleteTasteEvidence: (id: string) => {
+      const index = evidence.findIndex((e) => e.id === id);
+      if (index >= 0) evidence.splice(index, 1);
+    },
     insertTasteEvent: (e: { signal_id: string; kind: string; actor_type: string }) => events.push(e),
+    tasteEvidenceCounts: (id: string) => ({
+      supporting: evidence.filter((e) => e.signal_id === id && e.kind === "supports").length,
+      contradicting: evidence.filter((e) => e.signal_id === id && e.kind === "contradicts").length,
+    }),
+    setTasteSignalConfidence: (id: string, confidence: number) => {
+      const signal = [...signals, ...confirmed].find((s) => s.id === id);
+      if (signal) signal.confidence = confidence;
+    },
   };
   return q as unknown as Parameters<typeof deriveTasteSignals>[0] & typeof q;
 }
@@ -77,6 +110,35 @@ test("(b) idempotent - second run inserts nothing", async () => {
   expect(q.evidence).toHaveLength(2);
 });
 
+test("(b2) later matching evidence extends the proposal instead of duplicating it", async () => {
+  const rows = [
+    ann({ id: "a1", comment: "muted palette everywhere" }),
+    ann({ id: "a2", comment: "the palette feels too muted" }),
+  ];
+  const q = stubQ(rows);
+  await deriveTasteSignals(q, "s1", 1000);
+  rows.push(ann({ id: "a3", comment: "muted palette still feels flat" }));
+  await deriveTasteSignals(q, "s1", 2000);
+  expect(q.signals).toHaveLength(1);
+  expect(q.evidence).toHaveLength(3);
+});
+
+test("(b3) editing sentiment reconciles old evidence before deriving the new direction", async () => {
+  const rows = [
+    ann({ id: "a1", comment: "muted palette everywhere" }),
+    ann({ id: "a2", comment: "the palette feels too muted" }),
+  ];
+  const q = stubQ(rows);
+  await deriveTasteSignals(q, "s1", 1000);
+  const oldSignal = q.signals[0];
+  rows[0].sentiment = "positive";
+  rows[1].sentiment = "positive";
+  await deriveTasteSignals(q, "s1", 2000);
+  expect(q.evidence.filter((e) => e.signal_id === oldSignal.id).every((e) => e.kind === "contradicts")).toBe(true);
+  expect(q.signals).toHaveLength(2);
+  expect(oldSignal.confidence).toBe(0.05);
+});
+
 test("(c) neutral sentiment ignored", async () => {
   const q = stubQ([
     ann({ id: "a1", sentiment: "neutral", comment: "muted palette here" }),
@@ -112,7 +174,7 @@ test("(e) group of one ignored", async () => {
   expect(q.signals).toHaveLength(0);
 });
 
-test("(f) confirmed signal already covering dimension+direction -> skipped", async () => {
+test("(f) matching reviews strengthen an existing confirmed signal", async () => {
   const q = stubQ(
     [
       ann({ id: "a1", comment: "muted palette everywhere" }),
@@ -122,6 +184,32 @@ test("(f) confirmed signal already covering dimension+direction -> skipped", asy
   );
   await deriveTasteSignals(q, "s1", 1000);
   expect(q.signals).toHaveLength(0);
+  expect(q.evidence.filter((e) => e.kind === "supports")).toHaveLength(2);
+});
+
+test("(f2) opposing reviews become contradicting evidence and a reviewable proposal", async () => {
+  const q = stubQ(
+    [
+      ann({ id: "a1", comment: "the saturated palette feels overwhelming" }),
+      ann({ id: "a2", comment: "too much saturated color competes with the content" }),
+    ],
+    { confirmed: [{ dimensions: ["color"], statement: "Leans toward saturated color on webpages." }] },
+  );
+  const before = q.confirmed[0].confidence;
+  await deriveTasteSignals(q, "s1", 1000);
+  expect(q.evidence.filter((e) => e.kind === "contradicts")).toHaveLength(2);
+  expect(q.confirmed[0].confidence).toBeLessThan(before);
+  expect(q.signals).toHaveLength(1);
+});
+
+test("(f3) agent-authored annotations never become personal taste evidence", async () => {
+  const q = stubQ([
+    ann({ id: "a1", author_id: "agent:s1", comment: "muted palette everywhere" }),
+    ann({ id: "a2", author_id: "agent:s1", comment: "the palette feels too muted" }),
+  ]);
+  await deriveTasteSignals(q, "s1", 1000);
+  expect(q.signals).toHaveLength(0);
+  expect(q.evidence).toHaveLength(0);
 });
 
 test("(g) relaxed gate - two notes with no shared word still produce a signal", async () => {

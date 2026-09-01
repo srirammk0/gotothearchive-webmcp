@@ -31,10 +31,11 @@ export function Disclosure({ summary, children, defaultOpen = false, className =
       >
         <span>{summary}</span>
         <Icon
-          name="chevronRight"
+          name="chevronDown"
           size={14}
-          className="shrink-0 text-faint transition-transform duration-[var(--duration-base)]"
-          style={{ transform: open ? "rotate(90deg)" : "rotate(0deg)" }}
+          className={`shrink-0 text-faint transition-transform duration-[var(--duration-base)] ${
+            open ? "rotate-180" : "rotate-0"
+          }`}
         />
       </button>
       <div

@@ -12,7 +12,7 @@
  * (dimension, direction) with the same evidence.
  */
 import { confidenceFrom, TASTE_DIMENSIONS } from "@shared/contract";
-import type { TasteDimension } from "@shared/contract";
+import type { TasteDimension, TasteSignal } from "@shared/contract";
 import type { Queries } from "../db/queries";
 import { refineStatement, type AiLike } from "./statement";
 
@@ -54,7 +54,9 @@ export async function deriveTasteSignals(
   now: number,
   env?: AiLike | undefined,
 ): Promise<void> {
-  const open = q.openAnnotationsForSpace(spaceId);
+  // Defense in depth: the query already excludes agent annotations, but taste
+  // ownership is important enough to enforce again at the derivation boundary.
+  const open = q.openAnnotationsForSpace(spaceId).filter((a) => !a.author_id.startsWith("agent:"));
 
   // Group by (dimension, sentiment); a note tagged with several dimensions feeds
   // each of its groups. Untagged notes and neutral sentiment are skipped.
@@ -74,6 +76,37 @@ export async function deriveTasteSignals(
     .listTasteSignals(spaceId)
     .filter((s) => s.status === "proposed" && s.created_by === "system");
 
+  // An annotation is editable. Reconcile already-cited evidence before deriving
+  // anything new so changing sentiment, labels, or authorship cannot leave a
+  // stale support row influencing confidence forever.
+  for (const signal of [...confirmed, ...proposed]) {
+    let changed = false;
+    for (const evidence of q.listTasteEvidence(signal.id)) {
+      if (!evidence.annotation_id) continue;
+      const annotation = q.getAnnotation(evidence.annotation_id);
+      const stillRelevant =
+        annotation !== null &&
+        !annotation.author_id.startsWith("agent:") &&
+        annotation.sentiment !== "neutral" &&
+        annotation.dimensions.some((d) => signal.dimensions.includes(d));
+      if (!stillRelevant) {
+        q.deleteTasteEvidence(evidence.id);
+        changed = true;
+        continue;
+      }
+      const annotationDirection = annotation.sentiment === "positive" ? "toward" : "away";
+      const expectedKind = directionOf(signal.statement) === annotationDirection ? "supports" : "contradicts";
+      if (evidence.kind !== expectedKind) {
+        q.setTasteEvidenceKind(evidence.id, expectedKind);
+        changed = true;
+      }
+    }
+    if (changed) {
+      const counts = q.tasteEvidenceCounts(signal.id);
+      q.setTasteSignalConfidence(signal.id, confidenceFrom(counts.supporting, counts.contradicting));
+    }
+  }
+
   for (const [key, group] of groups) {
     if (group.length < 2) continue;
 
@@ -83,62 +116,120 @@ export async function deriveTasteSignals(
     // Top ~3 shared content words across the grouped comments.
     const freq = new Map<string, number>();
     for (const a of group) for (const w of new Set(words(a.comment))) freq.set(w, (freq.get(w) ?? 0) + 1);
-    const phrase = [...freq.entries()]
-      .filter(([, n]) => n >= 2) // "shared" — appears in ≥ 2 of the grouped notes
-      .sort((x, y) => y[1] - x[1])
+    const sharedWords = [...freq.entries()].filter(([, n]) => n >= 2);
+    // oxlint-disable-next-line unicorn/no-array-sort -- sharedWords is a fresh local array
+    sharedWords.sort((x, y) => y[1] - x[1]);
+    const phrase = sharedWords
       .slice(0, 3)
       .map(([w]) => w)
       .join(" ");
 
-    // Already stated by a confirmed signal? (dimension + direction + word overlap)
     const candidateText = `${prettyDimension(dimension)} ${phrase}`;
-    const clash = confirmed.some(
-      (s) =>
-        s.dimensions.includes(dimension as TasteDimension) &&
-        directionOf(s.statement) === direction &&
-        statementOverlap(s.statement, candidateText) >= 0.2,
-    );
-    if (clash) continue;
 
-    // Idempotency: an existing system proposal for this (dimension, direction)
-    // whose cited annotations already cover this group.
-    const annIds = new Set(group.map((a) => a.id));
-    const dup = proposed.some((s) => {
-      if (!s.dimensions.includes(dimension as TasteDimension)) return false;
-      if (directionOf(s.statement) !== direction) return false;
-      const cited = new Set(
-        q.listTasteEvidence(s.id).map((e) => e.annotation_id).filter((x): x is string => !!x),
+    const related = (signals: TasteSignal[], wantedDirection: "toward" | "away") => {
+      const matches = signals
+        .filter(
+          (s) =>
+            s.dimensions.includes(dimension as TasteDimension) &&
+            directionOf(s.statement) === wantedDirection,
+        )
+        .map((signal) => ({ signal, overlap: statementOverlap(signal.statement, candidateText) }))
+        .filter((x) => x.overlap >= 0.15);
+      // oxlint-disable-next-line unicorn/no-array-sort -- matches is a fresh local array
+      matches.sort((a, b) => b.overlap - a.overlap);
+      return matches[0]?.signal;
+    };
+
+    const addEvidence = (signal: TasteSignal, kind: "supports" | "contradicts"): number => {
+      const existing = new Map(
+        q.listTasteEvidence(signal.id)
+          .filter((e) => !!e.annotation_id)
+          .map((e) => [e.annotation_id as string, e]),
       );
-      for (const id of annIds) if (!cited.has(id)) return false; // group ⊆ cited
-      return true;
-    });
-    if (dup) continue;
+      let inserted = 0;
+      for (const a of group) {
+        const prior = existing.get(a.id);
+        if (prior) {
+          if (prior.kind !== kind) {
+            q.setTasteEvidenceKind(prior.id, kind);
+            inserted++;
+          }
+          continue;
+        }
+        q.insertTasteEvidence({
+          id: crypto.randomUUID(),
+          signal_id: signal.id,
+          kind,
+          annotation_id: a.id,
+          version_id: a.version_id,
+          item_id: null,
+        });
+        existing.set(a.id, {
+          id: "pending",
+          signal_id: signal.id,
+          kind,
+          annotation_id: a.id,
+          version_id: a.version_id,
+          item_id: null,
+        });
+        inserted++;
+      }
+      if (inserted > 0) {
+        const counts = q.tasteEvidenceCounts(signal.id);
+        q.setTasteSignalConfidence(signal.id, confidenceFrom(counts.supporting, counts.contradicting));
+      }
+      return inserted;
+    };
+
+    // Supporting reviews strengthen an existing confirmed claim instead of
+    // generating another proposal for the same preference.
+    const confirmedMatch = related(confirmed, direction);
+    if (confirmedMatch) {
+      addEvidence(confirmedMatch, "supports");
+      continue;
+    }
+
+    // Opposing reviews remain visible as contradicting evidence. They may also
+    // form a new proposal below, leaving the human—not the system—to reconcile it.
+    const opposite: "toward" | "away" = direction === "toward" ? "away" : "toward";
+    const contradicted = related(confirmed, opposite);
+    if (contradicted) addEvidence(contradicted, "contradicts");
+
+    // New evidence extends a matching open proposal. This keeps a continual
+    // stream of reviews from creating near-identical cards.
+    const openProposal = related(proposed, direction);
+    if (openProposal) {
+      addEvidence(openProposal, "supports");
+      continue;
+    }
 
     const supporting = group.length;
 
     // refineStatement no-ops without an AI binding, so the caller keeps the fallback.
-    const artifactTitles = [
+    const artifacts = [
       ...new Set(
         group
           .map((a) => {
             const v = q.getArtifactVersion(a.version_id);
-            return v ? q.getArtifact(v.artifact_id)?.title : undefined;
+            return v ? q.getArtifact(v.artifact_id) : undefined;
           })
-          .filter((x): x is string => !!x),
+          .filter((x) => x !== undefined && x !== null),
       ),
     ];
     const refined = await refineStatement(env, {
       dimension: prettyDimension(dimension),
       direction,
       comments: group.map((a) => a.comment),
-      artifactTitles,
+      artifactTitles: artifacts.map((a) => a.title),
     });
+    const artifactKinds = [...new Set(artifacts.map((a) => a.kind.replace(/_/g, " ")))];
+    const context = artifactKinds.length === 1 ? artifactKinds[0] : "artifacts";
     const leans = direction === "toward" ? "toward" : "away from";
     const statement =
       refined ??
       (phrase
-        ? `Leans ${leans} ${phrase} for ${prettyDimension(dimension)} on briefs.`
-        : `Leans ${leans} the current ${prettyDimension(dimension)} on briefs.`);
+        ? `Leans ${leans} ${phrase} for ${prettyDimension(dimension)} on ${context}.`
+        : `Leans ${leans} the current ${prettyDimension(dimension)} on ${context}.`);
 
     const signalId = crypto.randomUUID();
     q.insertTasteSignal({

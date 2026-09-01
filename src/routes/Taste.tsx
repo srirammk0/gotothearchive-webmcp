@@ -99,6 +99,10 @@ function relTime(at: number): string {
   return `${Math.floor(s / 86400)}d ago`;
 }
 
+function reversed<T>(values: T[]): T[] {
+  return Array.from({ length: values.length }, (_, i) => values[values.length - 1 - i]);
+}
+
 function SignalCard({
   signal,
   onAct,
@@ -224,10 +228,7 @@ function SignalCard({
 
       {signal.supersedes && revisions.length > 0 ? (
         <ol className="flex flex-col gap-1 border-l border-line-soft pl-3 text-[length:var(--text-micro)] text-faint">
-          {revisions
-            .slice()
-            .reverse()
-            .map((e) => (
+          {reversed(revisions).map((e) => (
               <li key={e.id}>
                 {e.kind === "edited" ? "Reworded" : "Replaced"}
                 {e.detail ? ` “${e.detail}”` : " an earlier statement"} · {relTime(e.at)}
@@ -259,10 +260,7 @@ function SignalCard({
           <p className="py-2 text-[length:var(--text-meta)] text-faint">No history recorded yet.</p>
         ) : (
           <ul className="flex flex-col gap-2 py-2">
-            {history
-              .slice()
-              .reverse()
-              .map((e) => (
+            {reversed(history).map((e) => (
                 <li key={e.id} className="flex items-baseline justify-between gap-4 text-[length:var(--text-meta)]">
                   <span className="min-w-0 text-muted">
                     <span

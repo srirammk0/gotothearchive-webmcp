@@ -54,18 +54,29 @@ export function retrieve(q: Queries, input: RetrieveInput, now: number): Retriev
   const ftsList = q.searchItems(input.query, candidateRegionIds, input.limit * 3);
   remember(ftsList);
 
-  // B — recency, most recently updated first.
-  const recencyList = q
+  // A non-empty lexical query must not be padded with unrelated recent items.
+  // Recency becomes the fallback candidate source only when text search has no
+  // hit (or the caller intentionally sends an empty query).
+  const recentFallback = q
     .listItemsByRegions(candidateRegionIds)
+    // oxlint-disable-next-line unicorn/no-array-sort -- query returns a fresh array
     .sort((a, b) => b.updated_at - a.updated_at)
     .slice(0, input.limit * 3);
-  remember(recencyList);
+  if (ftsList.length === 0) remember(recentFallback);
 
-  // C — graph neighbourhood seeded by the union of A and B, ordered by decayed edge weight.
-  const seedIds = [...new Set([...ftsList, ...recencyList].map((it) => it.id))];
+  // C — graph neighbourhood. Real text hits seed graph expansion when present;
+  // otherwise the recency fallback provides a useful browse-like result.
+  const seedIds = (ftsList.length > 0 ? ftsList : recentFallback).map((it) => it.id);
   const graph = traverse(q, seedIds, allowedIds);
   const graphList = orderGraphNodes(graph);
   remember(graphList);
+
+  // B — recency ranks only the candidates already justified by text/graph (or
+  // the explicit fallback set). It is a prior, never an independent source of
+  // unrelated results for a successful query.
+  const recencyList = [...items.values()];
+  // oxlint-disable-next-line unicorn/no-array-sort -- recencyList is a fresh local array
+  recencyList.sort((a, b) => b.updated_at - a.updated_at);
 
   const ftsRank = rankMap(ftsList);
   const recencyRank = rankMap(recencyList);
@@ -73,8 +84,6 @@ export function retrieve(q: Queries, input: RetrieveInput, now: number): Retriev
 
   // 3. Fuse with reciprocal rank fusion, then apply priors as multipliers.
   const confirmed = q.confirmedTasteSignals(task.space_id);
-  const queryTokens = input.query.toLowerCase().split(/\s+/).filter(Boolean);
-
   type Row = {
     entry: RetrievedItem;
     contributingSignalIds: Id[];
@@ -131,7 +140,7 @@ export function retrieve(q: Queries, input: RetrieveInput, now: number): Retriev
         region_slug: slugById.get(item.region_id) ?? "",
         signals,
         applied_signal_ids: [],
-        why: why(item, signals, queryTokens, taste, confirmed),
+        why: why(item, signals, taste, confirmed),
       },
     });
   }
@@ -179,9 +188,10 @@ function orderGraphNodes(graph: ReturnType<typeof traverse>): ContextItem[] {
     strongest.set(e.from_id, Math.max(strongest.get(e.from_id) ?? 0, e.decayed_weight));
     strongest.set(e.to_id, Math.max(strongest.get(e.to_id) ?? 0, e.decayed_weight));
   }
-  return [...graph.nodes].sort(
-    (a, b) => (strongest.get(b.id) ?? 0) - (strongest.get(a.id) ?? 0),
-  );
+  const nodes = [...graph.nodes];
+  // oxlint-disable-next-line unicorn/no-array-sort -- nodes is a fresh local array
+  nodes.sort((a, b) => (strongest.get(b.id) ?? 0) - (strongest.get(a.id) ?? 0));
+  return nodes;
 }
 
 /** Avg decayed weight of traversal edges whose endpoints are both candidates. Signal readout only. */
@@ -269,7 +279,6 @@ function tasteRelevanceFor(
 function why(
   item: ContextItem,
   s: RetrievalSignals,
-  queryTokens: string[],
   taste: { value: number; contributingSignalIds: Id[] },
   confirmed: TasteSignal[],
 ): string {

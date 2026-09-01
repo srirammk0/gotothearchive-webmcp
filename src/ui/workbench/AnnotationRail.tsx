@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { dimensionLabel, type Annotation } from "@shared/contract";
 import { Button } from "../primitives/Button";
+import { Disclosure } from "../primitives/Disclosure";
 import { Icon } from "../primitives/Icon";
 import { DimensionTags, SentimentButtons, toggleDimension } from "./ArtifactViewer";
 
@@ -10,79 +11,117 @@ interface EditChanges {
   dimensions?: string[];
 }
 
-function Row({ annotation, onEdit }: { annotation: Annotation; onEdit: (id: string, changes: EditChanges) => void }) {
+function Row({
+  annotation,
+  onEdit,
+}: {
+  annotation: Annotation;
+  onEdit: (id: string, changes: EditChanges) => Promise<void>;
+}) {
   const [editing, setEditing] = useState(false);
   const [comment, setComment] = useState(annotation.comment);
   const [sentiment, setSentiment] = useState<Annotation["sentiment"]>(annotation.sentiment);
   const [dimensions, setDimensions] = useState<string[]>(annotation.dimensions);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState("");
 
   const start = () => {
     setComment(annotation.comment);
     setSentiment(annotation.sentiment);
     setDimensions(annotation.dimensions);
+    setSaveError("");
     setEditing(true);
   };
-  const save = () => {
-    onEdit(annotation.id, { comment: comment.trim(), sentiment, dimensions });
-    setEditing(false);
+  const save = async () => {
+    setSaving(true);
+    setSaveError("");
+    try {
+      await onEdit(annotation.id, { comment: comment.trim(), sentiment, dimensions });
+      setEditing(false);
+    } catch {
+      setSaveError("Couldn't save this feedback. Try again.");
+    } finally {
+      setSaving(false);
+    }
   };
 
   if (editing) {
     return (
       <li className="border-b border-line-soft py-2.5 text-[length:var(--text-meta)] last:border-0">
+        <label
+          htmlFor={`annotation-${annotation.id}`}
+          className="mb-1 block text-[length:var(--text-micro)] font-medium text-faint"
+        >
+          Feedback
+        </label>
         <textarea
+          id={`annotation-${annotation.id}`}
           autoFocus
           rows={2}
           value={comment}
           onChange={(e) => setComment(e.target.value)}
           className="w-full resize-none bg-transparent text-[length:var(--text-body)] text-text placeholder:text-faint"
         />
-        <div className="mt-1.5 flex flex-col gap-1.5">
-          <div className="flex flex-wrap items-center gap-1.5">
-            <SentimentButtons sentiment={sentiment} onSentiment={setSentiment} />
+        <div className="mt-2.5 flex flex-col gap-2.5">
+          <div>
+            <p className="mb-1 text-[length:var(--text-micro)] font-medium text-faint">Reaction</p>
+            <div className="flex flex-wrap items-center gap-1.5">
+              <SentimentButtons sentiment={sentiment} onSentiment={setSentiment} />
+            </div>
           </div>
-          <DimensionTags
-            dimensions={dimensions}
-            onToggle={(d) => setDimensions((prev) => toggleDimension(prev, d))}
-          />
+          <div>
+            <p className="mb-1 text-[length:var(--text-micro)] font-medium text-faint">
+              Labels <span className="font-normal">· choose up to 6</span>
+            </p>
+            <DimensionTags
+              dimensions={dimensions}
+              onToggle={(d) => setDimensions((prev) => toggleDimension(prev, d))}
+            />
+          </div>
         </div>
+        {saveError ? (
+          <p role="alert" className="mt-2 text-[length:var(--text-micro)] text-bad">
+            {saveError}
+          </p>
+        ) : null}
         <div className="mt-1.5 flex justify-end gap-2">
-          <Button type="button" variant="ghost" onClick={() => setEditing(false)}>
+          <Button type="button" variant="ghost" disabled={saving} onClick={() => setEditing(false)}>
             Cancel
           </Button>
-          <Button type="button" variant="primary" disabled={!comment.trim()} onClick={save}>
-            Save
+          <Button type="button" variant="primary" disabled={!comment.trim() || saving} onClick={() => void save()}>
+            {saving ? "Saving…" : "Save feedback"}
           </Button>
         </div>
       </li>
     );
   }
 
+  const sentimentMeta =
+    annotation.sentiment === "positive"
+      ? { label: "Positive", className: "bg-good/15 text-good" }
+      : annotation.sentiment === "negative"
+        ? { label: "Negative", className: "bg-bad/15 text-bad" }
+        : { label: "Neutral", className: "bg-hover text-muted" };
+
   return (
     <li className="group border-b border-line-soft py-2.5 text-[length:var(--text-meta)] last:border-0">
       <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[length:var(--text-micro)] text-faint">
         <span>{annotation.target?.kind === "region" ? "Marked region" : "Version note"}</span>
-        {annotation.sentiment === "positive" ? (
-          <span className="inline-flex items-center gap-1 text-good">
-            <span className="h-1.5 w-1.5 rounded-full bg-good" />
-            Works
-          </span>
-        ) : annotation.sentiment === "negative" ? (
-          <span className="inline-flex items-center gap-1 text-bad">
-            <span className="h-1.5 w-1.5 rounded-full bg-bad" />
-            Doesn't work
-          </span>
-        ) : null}
+        <span className={`rounded-[var(--radius-sm)] px-1.5 py-0.5 ${sentimentMeta.className}`}>
+          {sentimentMeta.label}
+        </span>
         {annotation.dimensions.map((d) => (
-          <span key={d}>{dimensionLabel(d)}</span>
+          <span key={d} className="rounded-[var(--radius-sm)] bg-hover px-1.5 py-0.5 text-muted">
+            {dimensionLabel(d)}
+          </span>
         ))}
         <button
           type="button"
           onClick={start}
-          aria-label="Edit feedback"
-          className="ml-auto opacity-0 transition-opacity group-hover:opacity-100 text-faint hover:text-text"
+          className="ml-auto inline-flex items-center gap-1 rounded-[var(--radius-sm)] px-1.5 py-0.5 text-faint transition-colors hover:bg-hover hover:text-text"
         >
           <Icon name="pencil" size={12} />
+          Edit
         </button>
       </p>
       <p className="mt-1 leading-relaxed text-text">{annotation.comment}</p>
@@ -99,19 +138,16 @@ export function AnnotationRail({
   onEdit,
 }: {
   annotations: Annotation[];
-  onEdit: (id: string, changes: EditChanges) => void;
+  onEdit: (id: string, changes: EditChanges) => Promise<void>;
 }) {
   if (annotations.length === 0) return null;
   return (
-    <details className="border-t border-line-soft pt-3">
-      <summary className="cursor-pointer text-[length:var(--text-meta)] text-muted hover:text-text">
-        Feedback · {annotations.length}
-      </summary>
-      <ul className="mt-3 flex flex-col">
+    <Disclosure className="border-t border-line-soft pt-1" defaultOpen summary={`Feedback · ${annotations.length}`}>
+      <ul className="mt-2 flex flex-col">
         {annotations.map((annotation) => (
           <Row key={annotation.id} annotation={annotation} onEdit={onEdit} />
         ))}
       </ul>
-    </details>
+    </Disclosure>
   );
 }

@@ -603,10 +603,9 @@ export class Queries {
         const rank = rankByFold.get(rowidFor(row.id));
         if (rank !== undefined) scored.push({ item: toItem(row), rank });
       }
-      return scored
-        .sort((a, b) => a.rank - b.rank)
-        .slice(0, limit)
-        .map((s) => s.item);
+      // oxlint-disable-next-line unicorn/no-array-sort -- scored is a fresh local array
+      scored.sort((a, b) => a.rank - b.rank);
+      return scored.slice(0, limit).map((s) => s.item);
     };
 
     // Strict AND first; if it yields nothing, fall back once to the loose OR form
@@ -1196,6 +1195,14 @@ export class Queries {
       .map(toTasteEvidence);
   }
 
+  setTasteEvidenceKind(id: string, kind: TasteEvidence["kind"]): void {
+    this.sql.exec(`UPDATE taste_evidence SET kind = ? WHERE id = ?`, kind, id);
+  }
+
+  deleteTasteEvidence(id: string): void {
+    this.sql.exec(`DELETE FROM taste_evidence WHERE id = ?`, id);
+  }
+
   insertTasteEvent(e: TasteEvent): void {
     this.sql.exec(
       `INSERT INTO taste_events (id, signal_id, kind, actor_type, actor_label, agent_session_id, detail, version_id, at)
@@ -1284,6 +1291,7 @@ export class Queries {
          JOIN artifacts ar ON ar.id = av.artifact_id
          WHERE ar.space_id = ?
            AND a.status = 'open'
+           AND a.author_id NOT LIKE 'agent:%'
            AND av.state IN ('approved', 'approved_with_notes', 'changes_requested')
            AND av.agent_session_id IS NOT NULL
            AND EXISTS (SELECT 1 FROM influences i WHERE i.version_id = av.id)`,

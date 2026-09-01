@@ -3,6 +3,20 @@
 Status: proposed 2026-08-31. Supersedes the stub in `worker/retrieval.ts`.
 Companion to [taste-learning.md](./taste-learning.md).
 
+## 9. Hardening pass (2026-08-31, round 3)
+
+- A successful non-empty FTS query no longer gets padded with unrelated recent
+  items. Text hits seed graph expansion; recency ranks that justified candidate
+  set. Recent items become the candidate fallback only when FTS returns nothing
+  or the query is empty.
+- Personal taste derivation excludes agent-authored annotations at both the SQL
+  query and derivation boundaries.
+- New matching evidence extends existing proposals or confirmed signals.
+  Opposing evidence is recorded as `contradicts`, recomputes confidence, and may
+  still form a separate human-reviewable proposal.
+- Annotation edits reconcile previously derived evidence before new candidates
+  are evaluated, preventing stale sentiment or labels from shaping confidence.
+
 ## 8. Hardening pass (2026-08-31, round 2)
 
 Seven fixes to the round-1 pipeline, plus real graph construction and capture-time
@@ -120,8 +134,9 @@ authorizedRegionIds(task)  ──────────────►  HARD P
         ▼
 candidate generation  (all scoped to allowed regions)
    ├── FTS      : items_fts MATCH,  top K          ── rank list A
-   ├── recency  : updated_at desc,  top K          ── rank list B
-   └── graph    : traverse(seeds = A∪B, allowedIds) ── rank list C  (ordered by decayed edge weight)
+   ├── graph    : traverse(seeds = A, allowedIds)   ── rank list B  (ordered by decayed edge weight)
+   └── recency  : rank A∪B by updated_at            ── rank list C
+       (when A is empty, recent items become the fallback seeds/candidates)
         │
         ▼
 merge with reciprocal rank fusion:  fused(item) = Σ_lists 1 / (60 + rank_in_list)

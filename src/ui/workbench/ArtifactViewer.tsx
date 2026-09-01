@@ -4,7 +4,6 @@ import { AnimatePresence, motion } from "motion/react";
 import { TASTE_DIMENSIONS, dimensionLabel, type Annotation, type ArtifactVersion } from "@shared/contract";
 import { Button } from "../primitives/Button";
 import { Icon } from "../primitives/Icon";
-import { Menu } from "../primitives/Menu";
 import { duration, ease } from "../tokens";
 import { isComponentPreview, previewSandbox, previewSrcDoc } from "./componentPreview";
 
@@ -12,10 +11,10 @@ type Rect = { x: number; y: number; w: number; h: number };
 
 type FeedbackPayload = { comment: string; sentiment: Annotation["sentiment"]; dimensions: string[] };
 
-const SENTIMENTS: { value: Annotation["sentiment"]; label: string; on: string }[] = [
-  { value: "positive", label: "Works", on: "bg-good/15 text-good" },
-  { value: "neutral", label: "Neutral", on: "bg-hover text-muted" },
-  { value: "negative", label: "Doesn't work", on: "bg-bad/15 text-bad" },
+const SENTIMENTS: { value: Annotation["sentiment"]; label: string; dot: string; on: string }[] = [
+  { value: "positive", label: "Positive", dot: "bg-good", on: "bg-good/15 text-good" },
+  { value: "neutral", label: "Neutral", dot: "bg-faint", on: "bg-hover text-text" },
+  { value: "negative", label: "Negative", dot: "bg-bad", on: "bg-bad/15 text-bad" },
 ];
 
 /** Shared sentiment toggle row — reused by the rail's inline editor. */
@@ -33,10 +32,12 @@ export function SentimentButtons({
           key={s.value}
           type="button"
           onClick={() => onSentiment(s.value)}
-          className={`rounded-[var(--radius-sm)] px-2 py-1 text-[length:var(--text-micro)] transition-colors duration-[var(--duration-fast)] ${
-            sentiment === s.value ? s.on : "bg-hover text-muted"
+          aria-pressed={sentiment === s.value}
+          className={`inline-flex items-center gap-1.5 rounded-[var(--radius-sm)] border px-2 py-1 text-[length:var(--text-micro)] transition-colors duration-[var(--duration-fast)] ${
+            sentiment === s.value ? `${s.on} border-current/15` : "border-transparent bg-hover text-muted hover:text-text"
           }`}
         >
+          <span className={`h-1.5 w-1.5 rounded-full ${s.dot}`} />
           {s.label}
         </button>
       ))}
@@ -56,13 +57,19 @@ export function DimensionTags({
     <div className="flex flex-wrap gap-1.5">
       {TASTE_DIMENSIONS.map((d) => {
         const on = dimensions.includes(d);
+        const disabled = !on && dimensions.length >= 6;
         return (
           <button
             key={d}
             type="button"
             onClick={() => onToggle(d)}
-            className={`rounded-[var(--radius-sm)] px-2 py-1 text-[length:var(--text-micro)] transition-colors duration-[var(--duration-fast)] ${
-              on ? "bg-accent/15 text-accent" : "bg-hover text-muted hover:text-text"
+            disabled={disabled}
+            aria-pressed={on}
+            title={disabled ? "Remove a label before adding another" : undefined}
+            className={`rounded-[var(--radius-sm)] border px-2 py-1 text-[length:var(--text-micro)] transition-colors duration-[var(--duration-fast)] disabled:cursor-not-allowed disabled:opacity-40 ${
+              on
+                ? "border-accent/20 bg-accent/15 text-accent"
+                : "border-transparent bg-hover text-muted hover:text-text"
             }`}
           >
             {dimensionLabel(d)}
@@ -74,7 +81,7 @@ export function DimensionTags({
 }
 
 export const toggleDimension = (list: string[], d: string) =>
-  list.includes(d) ? list.filter((x) => x !== d) : [...list, d];
+  list.includes(d) ? list.filter((x) => x !== d) : list.length < 6 ? [...list, d] : list;
 
 function FeedbackControls({
   sentiment,
@@ -88,11 +95,19 @@ function FeedbackControls({
   onToggleDimension: (d: string) => void;
 }) {
   return (
-    <div className="flex flex-col gap-1.5">
-      <div className="flex flex-wrap items-center gap-1.5">
-        <SentimentButtons sentiment={sentiment} onSentiment={onSentiment} />
+    <div className="flex flex-col gap-2.5">
+      <div>
+        <p className="mb-1 text-[length:var(--text-micro)] font-medium text-faint">Reaction</p>
+        <div className="flex flex-wrap items-center gap-1.5">
+          <SentimentButtons sentiment={sentiment} onSentiment={onSentiment} />
+        </div>
       </div>
-      <DimensionTags dimensions={dimensions} onToggle={onToggleDimension} />
+      <div>
+        <p className="mb-1 text-[length:var(--text-micro)] font-medium text-faint">
+          Labels <span className="font-normal">· choose up to 6</span>
+        </p>
+        <DimensionTags dimensions={dimensions} onToggle={onToggleDimension} />
+      </div>
     </div>
   );
 }
@@ -173,6 +188,33 @@ export function ArtifactViewer({ version, annotations = [], onAddRegion, onAddCo
     setDimensions([]);
   };
 
+  const toggleMarking = () => {
+    const opening = !marking;
+    setMarking(opening);
+    setCommenting(false);
+    setDraft(null);
+    if (opening) resetFeedback();
+  };
+
+  const toggleCommenting = () => {
+    const opening = !commenting;
+    setCommenting(opening);
+    setMarking(false);
+    setDraft(null);
+    if (opening) resetFeedback();
+  };
+
+  const cancelRegion = () => {
+    setDraft(null);
+    setMarking(false);
+    resetFeedback();
+  };
+
+  const cancelWholeComment = () => {
+    setCommenting(false);
+    resetFeedback();
+  };
+
   const submit = () => {
     if (!draft || !comment.trim() || !onAddRegion) return;
     onAddRegion({ kind: "region", ...draft }, { comment: comment.trim(), sentiment, dimensions });
@@ -199,46 +241,47 @@ export function ArtifactViewer({ version, annotations = [], onAddRegion, onAddCo
               : "Preview"}
         </p>
         {onAddRegion || onAddComment ? (
-          <Menu
-            align="end"
-            items={[
-              ...(onAddRegion
-                ? [{ label: "Draw on preview", onSelect: () => { setMarking(true); setCommenting(false); } }]
-                : []),
-              ...(onAddComment
-                ? [{ label: "Comment on version", onSelect: () => { setCommenting(true); setMarking(false); } }]
-                : []),
-            ]}
-            trigger={({ open, toggle }) => (
+          <div className="flex items-center gap-1.5 text-[length:var(--text-micro)]">
+            {onAddRegion ? (
               <button
                 type="button"
-                onClick={() => { setCommenting(false); setDraft(null); toggle(); }}
-                aria-expanded={open}
-                className={`inline-flex items-center gap-1.5 rounded-[var(--radius-sm)] px-2 py-1 text-[length:var(--text-micro)] transition-colors duration-[var(--duration-fast)] ${
-                  marking || commenting || open ? "bg-accent/15 text-accent" : "text-muted hover:text-text"
+                onClick={toggleMarking}
+                aria-pressed={marking}
+                className={`inline-flex items-center gap-1 rounded-[var(--radius-sm)] px-2 py-1 transition-colors duration-[var(--duration-fast)] ${
+                  marking ? "bg-accent/15 text-accent" : "text-muted hover:text-text"
                 }`}
               >
-                <Icon name="pencil" size={12} />
-                {marking ? "Draw on preview" : "Annotate"}
-                <Icon
-                  name="chevronDown"
-                  size={10}
-                  className={`transition-transform duration-[var(--duration-fast)] ${open ? "rotate-180" : ""}`}
-                />
+                <Icon name="pencil" size={12} /> Mark region
               </button>
-            )}
-          />
+            ) : null}
+            {onAddComment ? (
+              <button
+                type="button"
+                onClick={toggleCommenting}
+                aria-pressed={commenting}
+                className={`inline-flex items-center gap-1 rounded-[var(--radius-sm)] px-2 py-1 transition-colors duration-[var(--duration-fast)] ${
+                  commenting ? "bg-accent/15 text-accent" : "text-muted hover:text-text"
+                }`}
+              >
+                <Icon name="pencil" size={12} /> Comment on version
+              </button>
+            ) : null}
+          </div>
         ) : null}
       </div>
 
       {commenting ? (
         <div className="flex flex-col gap-2 border-b border-line-soft pb-3">
+          <label htmlFor="version-feedback" className="text-[length:var(--text-micro)] font-medium text-faint">
+            Feedback on this version
+          </label>
           <textarea
+            id="version-feedback"
             autoFocus
             rows={2}
             value={comment}
             onChange={(e) => setComment(e.target.value)}
-            placeholder="What should change?"
+            placeholder="What worked, or what should change?"
             className="w-full resize-none bg-transparent text-[length:var(--text-body)] text-text placeholder:text-faint"
           />
           <FeedbackControls
@@ -248,11 +291,11 @@ export function ArtifactViewer({ version, annotations = [], onAddRegion, onAddCo
             onToggleDimension={(d) => setDimensions((prev) => toggleDimension(prev, d))}
           />
           <div className="flex justify-end gap-2">
-            <Button type="button" variant="ghost" onClick={() => setCommenting(false)}>
+            <Button type="button" variant="ghost" onClick={cancelWholeComment}>
               Cancel
             </Button>
             <Button type="button" variant="primary" disabled={!comment.trim()} onClick={submitWholeComment}>
-              Add note
+              Save feedback
             </Button>
           </div>
         </div>
@@ -326,12 +369,16 @@ export function ArtifactViewer({ version, annotations = [], onAddRegion, onAddCo
               top: `calc(${(draft.y + draft.h) * 100}% + 8px)`,
             }}
           >
+            <label htmlFor="region-feedback" className="mb-1 block text-[length:var(--text-micro)] font-medium text-faint">
+              Feedback on this region
+            </label>
             <textarea
+              id="region-feedback"
               autoFocus
               rows={2}
               value={comment}
               onChange={(e) => setComment(e.target.value)}
-              placeholder="What about this region?"
+              placeholder="What worked, or what should change?"
               className="w-full resize-none bg-transparent text-[length:var(--text-meta)] text-text placeholder:text-faint"
             />
             <div className="mt-1.5">
@@ -343,11 +390,11 @@ export function ArtifactViewer({ version, annotations = [], onAddRegion, onAddCo
               />
             </div>
             <div className="mt-1 flex justify-end gap-2">
-              <Button type="button" variant="ghost" onClick={() => setDraft(null)}>
+              <Button type="button" variant="ghost" onClick={cancelRegion}>
                 Cancel
               </Button>
               <Button type="button" variant="primary" disabled={!comment.trim()} onClick={submit}>
-                Comment
+                Save feedback
               </Button>
             </div>
           </div>

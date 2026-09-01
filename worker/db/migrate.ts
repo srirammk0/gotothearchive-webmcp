@@ -15,21 +15,19 @@ function addColumn(sql: SqlStorage, table: string, column: string, decl: string)
   }
 }
 
+const inMonth = (column: string) => `strftime('%Y-%m', ${column} / 1000, 'unixepoch') = ?`;
+
 export function migrate(sql: SqlStorage): void {
-  // A migration failure must NEVER stop the DO from booting — a half-applied
-  // schema is recoverable, a DO that throws in blockConcurrencyWhile looks
-  // exactly like total data loss. Each step is isolated and best-effort.
-  try {
-    // taste_signals.supersedes — bitemporal correction pointer (2026-08-31).
-    addColumn(sql, "taste_signals", "supersedes", "TEXT");
-    // accesses.why / .applied_signal_ids — retrieval provenance (2026-08-31).
-    addColumn(sql, "accesses", "why", "TEXT");
-    addColumn(sql, "accesses", "applied_signal_ids", "TEXT NOT NULL DEFAULT '[]'");
-    // annotations.dimensions — multi-tag taste dimensions (2026-08-31).
-    addColumn(sql, "annotations", "dimensions", "TEXT");
-  } catch (e) {
-    console.error("migrate: addColumn failed", e);
-  }
+  // Required columns are fail-closed. Serving requests against a partially
+  // migrated schema produces harder-to-diagnose data failures than a visible
+  // boot error, while duplicate-column errors remain safely idempotent.
+  addColumn(sql, "taste_signals", "supersedes", "TEXT");
+  addColumn(sql, "accesses", "why", "TEXT");
+  addColumn(sql, "accesses", "applied_signal_ids", "TEXT NOT NULL DEFAULT '[]'");
+  addColumn(sql, "annotations", "dimensions", "TEXT");
+
+  // Cleanup and metering reconstruction are non-critical maintenance. They may
+  // fail without making the canonical product schema unsafe to serve.
   try {
     purgeSeedData(sql);
   } catch (e) {
@@ -117,7 +115,6 @@ function purgeSeedData(sql: SqlStorage): void {
  */
 function backfillUsage(sql: SqlStorage): void {
   const period = new Date().toISOString().slice(0, 7); // YYYY-MM
-  const inMonth = (col: string) => `strftime('%Y-%m', ${col} / 1000, 'unixepoch') = ?`;
 
   const seed = (metric: string, selectExpr: string, ...bind: string[]) =>
     sql.exec(

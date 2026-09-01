@@ -574,10 +574,12 @@ export function Archive() {
       }
       return parts.join(" / ");
     };
-    return regions
+    const destinations = regions
       .filter((r) => r.id !== activeFolder?.id)
-      .map((r) => ({ slug: r.slug, label: pathOf(r) }))
-      .sort((a, b) => a.label.localeCompare(b.label));
+      .map((r) => ({ slug: r.slug, label: pathOf(r) }));
+    // oxlint-disable-next-line unicorn/no-array-sort -- destinations is a fresh local array
+    destinations.sort((a, b) => a.label.localeCompare(b.label));
+    return destinations;
   }, [regions, activeFolder]);
 
   const regionViews: ArchiveRegionView[] = useMemo(() => {

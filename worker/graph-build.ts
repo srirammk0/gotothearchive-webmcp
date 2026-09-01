@@ -52,6 +52,9 @@ function jaccard(a: Set<string>, b: Set<string>): { j: number; shared: number } 
   return { j: union === 0 ? 0 : inter / union, shared: inter };
 }
 
+const childRelationship = (item: ContextItem): Relationship =>
+  item.type === "image" ? "derived_from" : "mentions";
+
 /**
  * Derive + insert edges between `item` and existing items in the same space.
  * Returns the number of edges inserted. Idempotent via q.edgeExists.
@@ -88,14 +91,11 @@ export function deriveEdgesForItem(q: Queries, item: ContextItem, now: number): 
 
   // Rule 2: tweet parent/child structure. Handle both call orders.
   const extracted = (item.metadata as { extracted?: unknown }).extracted;
-  const childLink = (o: ContextItem): Relationship =>
-    o.type === "image" ? "derived_from" : "mentions";
-
   if (extracted && typeof extracted === "object") {
     // called for the tweet, after its children exist
     for (const o of siblings) {
       if ((o.metadata as { derived_from_item_id?: string }).derived_from_item_id === item.id) {
-        add(item.id, o.id, childLink(o), 1.0, "approved");
+        add(item.id, o.id, childRelationship(o), 1.0, "approved");
       }
     }
   }
@@ -103,7 +103,7 @@ export function deriveEdgesForItem(q: Queries, item: ContextItem, now: number): 
   if (parentId) {
     // called for a child, before/after the parent's own derive pass
     const parent = siblings.find((o) => o.id === parentId);
-    if (parent) add(parent.id, item.id, childLink(item), 1.0, "approved");
+    if (parent) add(parent.id, item.id, childRelationship(item), 1.0, "approved");
   }
 
   // Rule 1: same source domain -> related_to, 0.6, approved.

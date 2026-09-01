@@ -16,6 +16,7 @@ import { ArtifactViewer } from "../ui/workbench/ArtifactViewer";
 import { ArtifactThumb } from "../ui/workbench/ArtifactThumb";
 import { AnnotationRail } from "../ui/workbench/AnnotationRail";
 import { ProvenanceStrip } from "../ui/workbench/ProvenanceStrip";
+import { Disclosure } from "../ui/primitives/Disclosure";
 import { useWorkbench } from "../ui/workbench/useWorkbench";
 import { useCapabilities } from "../webmcp/useCapabilities";
 
@@ -145,7 +146,10 @@ function ArtifactList({ regions }: { regions: Region[] }) {
         bucket.get(slug)!.items.push(a);
       }
     }
-    return [...bucket.values()].sort((x, y) => x.name.localeCompare(y.name));
+    const regionGroups = [...bucket.values()];
+    // oxlint-disable-next-line unicorn/no-array-sort -- regionGroups is a fresh local array
+    regionGroups.sort((x, y) => x.name.localeCompare(y.name));
+    return regionGroups;
   }, [artifacts, regions]);
 
   if (status === "loading") return <Spinner label="Loading artifacts…" />;
@@ -305,14 +309,13 @@ export function Workbench() {
           }
         />
 
-        <AnnotationRail annotations={annotations} onEdit={(id, changes) => void editAnnotation(id, changes)} />
+        <AnnotationRail annotations={annotations} onEdit={editAnnotation} />
 
-        <details className="border-t border-line-soft pt-3">
-          <summary className="cursor-pointer text-[length:var(--text-meta)] text-muted hover:text-text">Context & access</summary>
-          <div className="pt-4">
+        <Disclosure className="border-t border-line-soft pt-1" summary="Context & access">
+          <div className="pt-3">
             <ProvenanceStrip provenance={provenance} />
           </div>
-        </details>
+        </Disclosure>
 
         {/* A compact decision strip keeps the artifact—not review chrome—primary. */}
         <div className="sticky bottom-4 z-10 flex w-fit max-w-full self-center rounded-[var(--radius-md)] border border-line bg-surface/90 p-1.5 shadow-lg shadow-black/5 backdrop-blur-xl">

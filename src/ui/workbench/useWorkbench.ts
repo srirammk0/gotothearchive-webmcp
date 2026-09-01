@@ -29,17 +29,19 @@ export function useWorkbench(artifactId: string | undefined) {
   const [selectedVersionId, setSelectedVersionId] = useState<string | null>(null);
 
   const load = useCallback(
-    async (versionOverride?: string) => {
+    async (versionOverride?: string, opts?: { silent?: boolean }) => {
       if (!artifactId) {
         setStatus("ready");
         setData(null);
         return;
       }
-      setStatus("loading");
-      setError(null);
+      if (!opts?.silent) setStatus("loading");
+        setError(null);
       try {
         const { artifact, versions } = await getArtifact(artifactId);
-        const sorted = versions.slice().sort((a, b) => a.version_no - b.version_no);
+        const sorted = versions.slice();
+        // oxlint-disable-next-line unicorn/no-array-sort -- sorted is a fresh copy
+        sorted.sort((a, b) => a.version_no - b.version_no);
         const target = versionOverride ? sorted.find((v) => v.id === versionOverride) : undefined;
         const current = target ?? sorted[sorted.length - 1];
         if (!current) throw new ApiError("This artifact has no versions", 404);
@@ -132,14 +134,19 @@ export function useWorkbench(artifactId: string | undefined) {
     [data],
   );
 
-  /** Decisions are never optimistic: wait for confirmed persistence, then reflect state. */
+  /**
+   * Decisions are never optimistic. After the state lands, silently re-pull the
+   * whole artifact so the version badges, provenance, and any promoted item all
+   * reflect the new state without a spinner or a manual refresh.
+   */
   const decide = useCallback(
     async (decision: ReviewDecision, note?: string) => {
       if (!data) return;
-      const { version } = await recordDecision(data.version.id, decision, note);
-      setData((prev) => (prev ? { ...prev, version } : prev));
+      const viewing = data.version.id;
+      await recordDecision(viewing, decision, note);
+      await load(viewing, { silent: true });
     },
-    [data],
+    [data, load],
   );
 
   return { status, error, data, selectedVersionId, selectVersion, addAnnotation, editAnnotation, decide, reload: load };

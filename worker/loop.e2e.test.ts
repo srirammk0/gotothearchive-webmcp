@@ -64,6 +64,7 @@ function seed(q: Queries) {
     });
   item("i_brief", "r_work", "Spring brief", "warm editorial campaign, saturated accent colour");
   item("i_ref", "r_insp", "Editorial colour reference", "dense serif typography, generous colour palette", ["color"]);
+  item("i_noise", "r_work", "Unrelated travel receipt", "hotel check-in and baggage claim details");
   item("i_secret", "r_pers", "Salary notes", "confidential personal compensation figures");
 
   q.insertTask({
@@ -105,10 +106,11 @@ test("the full collaboration loop runs against a real schema", async () => {
   seed(q);
 
   // 1. retrieval is permission pre-filtered — work + inspiration in, personal absent.
-  const scoped = retrieve(q, { taskId: "t1", query: "colour typography", regionSlugs: null, limit: 10 }, now + 1);
+  const scoped = retrieve(q, { taskId: "t1", query: "colour", regionSlugs: null, limit: 10 }, now + 1);
   const gotRegions = new Set(scoped.map((r) => r.region_slug));
   expect(gotRegions.has("work")).toBe(true);
   expect(gotRegions.has("inspiration")).toBe(true);
+  expect(scoped.some((r) => r.item.id === "i_noise")).toBe(false);
   expect(scoped.some((r) => r.item.id === "i_secret")).toBe(false);
 
   // naming the ungranted region is denied outright, not silently emptied.

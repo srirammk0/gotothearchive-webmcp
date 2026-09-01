@@ -223,7 +223,7 @@ async function handleRegions(request: Request, q: Queries, humanId: string): Pro
     };
     const ids = [...descendants(region.id), region.id];
     for (const regionId of ids) for (const item of q.listItemsByRegion(regionId)) q.deleteItem(item.id);
-    for (const regionId of [...ids].reverse()) q.deleteRegion(regionId);
+    for (let i = ids.length - 1; i >= 0; i--) q.deleteRegion(ids[i]);
     return json({ ok: true, deleted: region.id });
   }
   return badRequest("unsupported method");
@@ -374,13 +374,42 @@ async function handleItems(request: Request, q: Queries, humanId: string): Promi
 
 /* ---------------- upload ---------------- */
 
+async function readBodyCapped(request: Request, limit: number): Promise<ArrayBuffer | null> {
+  const declared = Number(request.headers.get("content-length"));
+  if (Number.isFinite(declared) && declared > limit) return null;
+  if (!request.body) return new ArrayBuffer(0);
+
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (!value) continue;
+    total += value.byteLength;
+    if (total > limit) {
+      await reader.cancel();
+      return null;
+    }
+    chunks.push(value);
+  }
+
+  const body = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    body.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return body.buffer;
+}
+
 async function handleUpload(request: Request, env: Env, q: Queries, humanId: string): Promise<Response> {
   if (request.method !== "POST") return badRequest("POST required");
   const contentType = request.headers.get("content-type") ?? "application/octet-stream";
-  const body = await request.arrayBuffer();
-  // Size check BEFORE metering — a rejected oversize upload must not burn a
-  // monthly quota unit.
-  if (body.byteLength > UPLOAD_MAX_BYTES) {
+  // Enforce the cap while streaming. A forged/missing Content-Length can no
+  // longer make the Worker buffer an arbitrarily large upload first.
+  const body = await readBodyCapped(request, UPLOAD_MAX_BYTES);
+  if (body === null) {
     return json(
       { ok: false, error: "file_too_large", message: `Files are capped at ${Math.round(UPLOAD_MAX_BYTES / 1048576)} MB in the beta.` },
       { status: 413 },
@@ -1050,10 +1079,18 @@ function handleTasteEvidence(request: Request, q: Queries, humanId: string): Res
 
 const bumpCount = (m: Record<string, number>, k: string, n = 1) => (m[k] = (m[k] ?? 0) + n);
 
+function sortedCopy<T>(values: Iterable<T>, compare: (a: T, b: T) => number): T[] {
+  const copy = [...values];
+  // oxlint-disable-next-line unicorn/no-array-sort -- copy is always fresh
+  copy.sort(compare);
+  return copy;
+}
+
 const sortedRows = (m: Record<string, number>) =>
-  Object.entries(m)
-    .map(([label, value]) => ({ label, value }))
-    .sort((a, b) => b.value - a.value);
+  sortedCopy(
+    Object.entries(m).map(([label, value]) => ({ label, value })),
+    (a, b) => b.value - a.value,
+  );
 
 /** "chatgpt-desktop" → "ChatGPT", "claude-code" → "Claude", etc. */
 function prettyClient(name: string): string {
@@ -1149,11 +1186,11 @@ function handleStats(request: Request, q: Queries, humanId: string): Response {
       totals: { items: items.length, artifacts: artifacts.length, actions: audit.length },
       activity_by_day,
       tools: sortedRows(toolCounts).slice(0, 8),
-      agents: [...agents.values()].sort((a, b) => b.actions - a.actions),
+      agents: sortedCopy(agents.values(), (a, b) => b.actions - a.actions),
       folders: sortedRows(folderCounts),
       sources: sortedRows(sourceCounts).slice(0, 8),
       outcomes: sortedRows(outcomeCounts),
-      latest: latest.sort((a, b) => b.updated_at - a.updated_at).slice(0, 6),
+      latest: sortedCopy(latest, (a, b) => b.updated_at - a.updated_at).slice(0, 6),
       taste: {
         total: signals.length,
         confirmed: signals.filter((s) => s.status === "confirmed").length,
@@ -1161,10 +1198,13 @@ function handleStats(request: Request, q: Queries, humanId: string): Response {
         applications: tasteApps.length,
         applied_by_day: appliedByDay,
         dimensions: sortedRows(dimensionCounts).slice(0, 8),
-        top_applied: Object.entries(appliedBySignal)
-          .map(([id, value]) => ({ label: statementById.get(id) ?? "Unknown signal", value }))
-          .sort((a, b) => b.value - a.value)
-          .slice(0, 5),
+        top_applied: sortedCopy(
+          Object.entries(appliedBySignal).map(([id, value]) => ({
+            label: statementById.get(id) ?? "Unknown signal",
+            value,
+          })),
+          (a, b) => b.value - a.value,
+        ).slice(0, 5),
       },
     },
   });

@@ -22,7 +22,8 @@ TASTE SIGNAL
 - Typography, layout, visual, and product examples.
 - Notes explaining why something works or fails.
 - Prior accepted and rejected artifacts.
-- Targeted Workbench annotations.
+- Human-authored targeted Workbench annotations. Agent-authored review notes may
+  assist collaboration, but never become personal taste evidence.
 - Explicitly written preferences.
 
 The first pass intentionally excludes voice ingestion and large taste-source integrations such as native Pinterest sync.
@@ -68,6 +69,13 @@ Contradiction: 1 note preferring more breathing room in long-form documentation
 7. Confirmed signals become eligible for later retrieval.
 
 No acceptance is inferred from silence. No profile is silently rewritten.
+New matching reviews extend the evidence on an existing proposal or confirmed
+signal instead of creating duplicates. Opposing reviews are retained as
+contradicting evidence and lower confidence; they may also produce a separate
+proposal for the human to reconcile.
+Editing an annotation reconciles any evidence already derived from it: changing
+sentiment changes support to contradiction (or vice versa), while removing its
+labels or making it neutral removes it from the affected signal.
 
 ## Proposal quality rules
 
