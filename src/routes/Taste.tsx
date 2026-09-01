@@ -71,7 +71,7 @@ function EvidenceCard({ record }: { record: EvidenceRecord }) {
         <div className="min-w-0 flex-1">
           <p className="text-[length:var(--text-meta)] leading-relaxed text-muted">“{record.annotation.comment}”</p>
           <p className="mt-1 text-[length:var(--text-micro)] text-faint">
-            {record.annotation.dimension ?? "general"} · review note
+            {record.annotation.dimensions.map(dimensionLabel).join(", ") || "general"} · review note
           </p>
         </div>
       ) : (

@@ -10,6 +10,7 @@
 import {
   GRANT_LEVELS,
   RELATIONSHIPS,
+  TASTE_DIMENSIONS,
   type CapabilityInput,
   type GrantLevel,
   type ToolSpec,
@@ -183,7 +184,7 @@ export function compile(input: CapabilityInput): ToolSpec[] {
         region: { type: "string", enum: slugs },
         version_id: { type: "string" },
         sentiment: { type: "string", enum: ["positive", "negative", "neutral"] },
-        dimension: { type: "string" },
+        dimensions: { type: "array", items: { type: "string", enum: TASTE_DIMENSIONS } },
         comment: { type: "string" },
       },
       required: ["region", "version_id", "comment"],

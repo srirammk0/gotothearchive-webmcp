@@ -10,7 +10,7 @@ import { isComponentPreview, previewSandbox, previewSrcDoc } from "./componentPr
 
 type Rect = { x: number; y: number; w: number; h: number };
 
-type FeedbackPayload = { comment: string; sentiment: Annotation["sentiment"]; dimension: string | null };
+type FeedbackPayload = { comment: string; sentiment: Annotation["sentiment"]; dimensions: string[] };
 
 const SENTIMENTS: { value: Annotation["sentiment"]; label: string; on: string }[] = [
   { value: "positive", label: "Works", on: "bg-good/15 text-good" },
@@ -18,19 +18,16 @@ const SENTIMENTS: { value: Annotation["sentiment"]; label: string; on: string }[
   { value: "negative", label: "Doesn't work", on: "bg-bad/15 text-bad" },
 ];
 
-function FeedbackControls({
+/** Shared sentiment toggle row — reused by the rail's inline editor. */
+export function SentimentButtons({
   sentiment,
-  dimension,
   onSentiment,
-  onDimension,
 }: {
   sentiment: Annotation["sentiment"];
-  dimension: string | null;
   onSentiment: (s: Annotation["sentiment"]) => void;
-  onDimension: (d: string | null) => void;
 }) {
   return (
-    <div className="flex flex-wrap items-center gap-1.5">
+    <>
       {SENTIMENTS.map((s) => (
         <button
           key={s.value}
@@ -43,29 +40,59 @@ function FeedbackControls({
           {s.label}
         </button>
       ))}
-      <Menu
-        align="start"
-        side="top"
-        items={[
-          { label: "General", onSelect: () => onDimension(null) },
-          ...TASTE_DIMENSIONS.map((d) => ({ label: dimensionLabel(d), onSelect: () => onDimension(d) })),
-        ]}
-        trigger={({ open, toggle }) => (
+    </>
+  );
+}
+
+/** Shared multi-select dimension chips — reused by the rail's inline editor. */
+export function DimensionTags({
+  dimensions,
+  onToggle,
+}: {
+  dimensions: string[];
+  onToggle: (d: string) => void;
+}) {
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {TASTE_DIMENSIONS.map((d) => {
+        const on = dimensions.includes(d);
+        return (
           <button
+            key={d}
             type="button"
-            onClick={toggle}
-            aria-expanded={open}
-            className="inline-flex items-center gap-1 rounded-[var(--radius-sm)] bg-hover px-2 py-1 text-[length:var(--text-micro)] text-muted transition-colors duration-[var(--duration-fast)] hover:bg-raised hover:text-text"
+            onClick={() => onToggle(d)}
+            className={`rounded-[var(--radius-sm)] px-2 py-1 text-[length:var(--text-micro)] transition-colors duration-[var(--duration-fast)] ${
+              on ? "bg-accent/15 text-accent" : "bg-hover text-muted hover:text-text"
+            }`}
           >
-            {dimension ? dimensionLabel(dimension) : "General"}
-            <Icon
-              name="chevronDown"
-              size={11}
-              className={`transition-transform duration-[var(--duration-fast)] ${open ? "rotate-180" : ""}`}
-            />
+            {dimensionLabel(d)}
           </button>
-        )}
-      />
+        );
+      })}
+    </div>
+  );
+}
+
+export const toggleDimension = (list: string[], d: string) =>
+  list.includes(d) ? list.filter((x) => x !== d) : [...list, d];
+
+function FeedbackControls({
+  sentiment,
+  dimensions,
+  onSentiment,
+  onToggleDimension,
+}: {
+  sentiment: Annotation["sentiment"];
+  dimensions: string[];
+  onSentiment: (s: Annotation["sentiment"]) => void;
+  onToggleDimension: (d: string) => void;
+}) {
+  return (
+    <div className="flex flex-col gap-1.5">
+      <div className="flex flex-wrap items-center gap-1.5">
+        <SentimentButtons sentiment={sentiment} onSentiment={onSentiment} />
+      </div>
+      <DimensionTags dimensions={dimensions} onToggle={onToggleDimension} />
     </div>
   );
 }
@@ -91,7 +118,7 @@ export function ArtifactViewer({ version, annotations = [], onAddRegion, onAddCo
   const [draft, setDraft] = useState<Rect | null>(null);
   const [comment, setComment] = useState("");
   const [sentiment, setSentiment] = useState<Annotation["sentiment"]>("neutral");
-  const [dimension, setDimension] = useState<string | null>(null);
+  const [dimensions, setDimensions] = useState<string[]>([]);
   const startRef = useRef<{ x: number; y: number } | null>(null);
   const layerRef = useRef<HTMLDivElement>(null);
 
@@ -143,12 +170,12 @@ export function ArtifactViewer({ version, annotations = [], onAddRegion, onAddCo
   const resetFeedback = () => {
     setComment("");
     setSentiment("neutral");
-    setDimension(null);
+    setDimensions([]);
   };
 
   const submit = () => {
     if (!draft || !comment.trim() || !onAddRegion) return;
-    onAddRegion({ kind: "region", ...draft }, { comment: comment.trim(), sentiment, dimension });
+    onAddRegion({ kind: "region", ...draft }, { comment: comment.trim(), sentiment, dimensions });
     setDraft(null);
     resetFeedback();
     setMarking(false);
@@ -156,7 +183,7 @@ export function ArtifactViewer({ version, annotations = [], onAddRegion, onAddCo
 
   const submitWholeComment = () => {
     if (!comment.trim() || !onAddComment) return;
-    onAddComment({ comment: comment.trim(), sentiment, dimension });
+    onAddComment({ comment: comment.trim(), sentiment, dimensions });
     resetFeedback();
     setCommenting(false);
   };
@@ -216,9 +243,9 @@ export function ArtifactViewer({ version, annotations = [], onAddRegion, onAddCo
           />
           <FeedbackControls
             sentiment={sentiment}
-            dimension={dimension}
+            dimensions={dimensions}
             onSentiment={setSentiment}
-            onDimension={setDimension}
+            onToggleDimension={(d) => setDimensions((prev) => toggleDimension(prev, d))}
           />
           <div className="flex justify-end gap-2">
             <Button type="button" variant="ghost" onClick={() => setCommenting(false)}>
@@ -310,9 +337,9 @@ export function ArtifactViewer({ version, annotations = [], onAddRegion, onAddCo
             <div className="mt-1.5">
               <FeedbackControls
                 sentiment={sentiment}
-                dimension={dimension}
+                dimensions={dimensions}
                 onSentiment={setSentiment}
-                onDimension={setDimension}
+                onToggleDimension={(d) => setDimensions((prev) => toggleDimension(prev, d))}
               />
             </div>
             <div className="mt-1 flex justify-end gap-2">

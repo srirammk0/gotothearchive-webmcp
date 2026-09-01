@@ -25,6 +25,8 @@ export function migrate(sql: SqlStorage): void {
     // accesses.why / .applied_signal_ids — retrieval provenance (2026-08-31).
     addColumn(sql, "accesses", "why", "TEXT");
     addColumn(sql, "accesses", "applied_signal_ids", "TEXT NOT NULL DEFAULT '[]'");
+    // annotations.dimensions — multi-tag taste dimensions (2026-08-31).
+    addColumn(sql, "annotations", "dimensions", "TEXT");
   } catch (e) {
     console.error("migrate: addColumn failed", e);
   }

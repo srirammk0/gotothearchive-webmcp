@@ -273,7 +273,8 @@ export interface Annotation {
   /** null target = whole-artifact comment. */
   target: { kind: "region"; x: number; y: number; w: number; h: number } | null;
   sentiment: "positive" | "negative" | "neutral";
-  dimension: string | null;
+  /** Taste dimensions this note is tagged with. Feeds taste derivation per tag. */
+  dimensions: TasteDimension[];
   comment: string;
   status: "open" | "resolved" | "superseded";
   created_at: number;

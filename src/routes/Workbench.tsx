@@ -198,7 +198,7 @@ export function Workbench() {
   const { artifactId } = useParams();
   const navigate = useNavigate();
   const { regions } = useSpace();
-  const { status, error, data, selectVersion, addAnnotation, decide } = useWorkbench(artifactId);
+  const { status, error, data, selectVersion, addAnnotation, editAnnotation, decide } = useWorkbench(artifactId);
   const [decisionPending, setDecisionPending] = useState(false);
   const [decisionError, setDecisionError] = useState<string | null>(null);
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -297,15 +297,15 @@ export function Workbench() {
         <ArtifactViewer
           version={version}
           annotations={annotations}
-          onAddRegion={(target, { comment, sentiment, dimension }) =>
-            void addAnnotation({ sentiment, comment, dimension, target })
+          onAddRegion={(target, { comment, sentiment, dimensions }) =>
+            void addAnnotation({ sentiment, comment, dimensions, target })
           }
-          onAddComment={({ comment, sentiment, dimension }) =>
-            void addAnnotation({ sentiment, comment, dimension })
+          onAddComment={({ comment, sentiment, dimensions }) =>
+            void addAnnotation({ sentiment, comment, dimensions })
           }
         />
 
-        <AnnotationRail annotations={annotations} />
+        <AnnotationRail annotations={annotations} onEdit={(id, changes) => void editAnnotation(id, changes)} />
 
         <details className="border-t border-line-soft pt-3">
           <summary className="cursor-pointer text-[length:var(--text-meta)] text-muted hover:text-text">Context & access</summary>

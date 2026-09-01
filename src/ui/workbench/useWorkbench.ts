@@ -7,6 +7,7 @@ import {
   getProvenance,
   listAnnotations,
   recordDecision,
+  updateAnnotation,
   type Provenance,
 } from "../../api/client";
 
@@ -78,7 +79,7 @@ export function useWorkbench(artifactId: string | undefined) {
     async (input: {
       sentiment: Annotation["sentiment"];
       comment: string;
-      dimension: string | null;
+      dimensions: string[];
       target?: Annotation["target"];
     }) => {
       if (!data) return;
@@ -89,7 +90,7 @@ export function useWorkbench(artifactId: string | undefined) {
         author_id: "me",
         target,
         sentiment: input.sentiment,
-        dimension: input.dimension,
+        dimensions: input.dimensions as Annotation["dimensions"],
         comment: input.comment,
         status: "open",
         created_at: Date.now(),
@@ -100,7 +101,7 @@ export function useWorkbench(artifactId: string | undefined) {
           version_id: data.version.id,
           sentiment: input.sentiment,
           comment: input.comment,
-          dimension: input.dimension,
+          dimensions: input.dimensions as Annotation["dimensions"],
           target,
         });
         const { annotations } = await listAnnotations(data.version.id);
@@ -115,6 +116,22 @@ export function useWorkbench(artifactId: string | undefined) {
     [data],
   );
 
+  const editAnnotation = useCallback(
+    async (
+      id: string,
+      changes: { comment?: string; sentiment?: Annotation["sentiment"]; dimensions?: string[] },
+    ) => {
+      if (!data) return;
+      await updateAnnotation(id, {
+        ...changes,
+        dimensions: changes.dimensions as Annotation["dimensions"] | undefined,
+      });
+      const { annotations } = await listAnnotations(data.version.id);
+      setData((prev) => (prev ? { ...prev, annotations } : prev));
+    },
+    [data],
+  );
+
   /** Decisions are never optimistic: wait for confirmed persistence, then reflect state. */
   const decide = useCallback(
     async (decision: ReviewDecision, note?: string) => {
@@ -125,5 +142,5 @@ export function useWorkbench(artifactId: string | undefined) {
     [data],
   );
 
-  return { status, error, data, selectedVersionId, selectVersion, addAnnotation, decide, reload: load };
+  return { status, error, data, selectedVersionId, selectVersion, addAnnotation, editAnnotation, decide, reload: load };
 }

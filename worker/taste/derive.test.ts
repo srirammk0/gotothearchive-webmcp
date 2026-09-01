@@ -4,7 +4,7 @@ import { deriveTasteSignals } from "./derive";
 interface Ann {
   id: string;
   version_id: string;
-  dimension: string | null;
+  dimensions: string[];
   sentiment: "positive" | "negative" | "neutral";
   comment: string;
   author_id: string;
@@ -44,7 +44,7 @@ function stubQ(
 
 const ann = (p: Partial<Ann> & { id: string }): Ann => ({
   version_id: "v1",
-  dimension: "color",
+  dimensions: ["color"],
   sentiment: "negative",
   comment: "",
   author_id: "u1",
@@ -86,13 +86,24 @@ test("(c) neutral sentiment ignored", async () => {
   expect(q.signals).toHaveLength(0);
 });
 
-test("(d) null dimension ignored", async () => {
+test("(d) untagged notes ignored", async () => {
   const q = stubQ([
-    ann({ id: "a1", dimension: null, comment: "muted palette here" }),
-    ann({ id: "a2", dimension: null, comment: "muted palette there" }),
+    ann({ id: "a1", dimensions: [], comment: "muted palette here" }),
+    ann({ id: "a2", dimensions: [], comment: "muted palette there" }),
   ]);
   await deriveTasteSignals(q, "s1", 1000);
   expect(q.signals).toHaveLength(0);
+});
+
+test("(d2) a note tagged with two dimensions feeds both groups", async () => {
+  const q = stubQ([
+    ann({ id: "a1", dimensions: ["color", "typography"], comment: "flat palette, weak headline" }),
+    ann({ id: "a2", dimensions: ["color", "typography"], comment: "flat palette, weak headline weight" }),
+  ]);
+  await deriveTasteSignals(q, "s1", 1000);
+  const dims = q.signals.flatMap((s) => s.dimensions);
+  expect(dims).toContain("color");
+  expect(dims).toContain("typography");
 });
 
 test("(e) group of one ignored", async () => {

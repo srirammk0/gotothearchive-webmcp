@@ -167,6 +167,8 @@ interface AnnotationRow {
   author_id: string;
   target: string | null;
   sentiment: string;
+  /** JSON array of taste dimensions. Legacy rows may have only the scalar `dimension`. */
+  dimensions: string | null;
   dimension: string | null;
   comment: string;
   status: string;
@@ -296,11 +298,21 @@ function toDenial(r: DenialRow): DenialRecord {
   };
 }
 function toAnnotation(r: AnnotationRow): Annotation {
+  const dimensions = r.dimensions
+    ? (JSON.parse(r.dimensions) as Annotation["dimensions"])
+    : r.dimension
+      ? ([r.dimension] as Annotation["dimensions"])
+      : [];
   return {
-    ...r,
+    id: r.id,
+    version_id: r.version_id,
+    author_id: r.author_id,
     target: r.target ? (JSON.parse(r.target) as Annotation["target"]) : null,
     sentiment: r.sentiment as Annotation["sentiment"],
+    dimensions,
+    comment: r.comment,
     status: r.status as Annotation["status"],
+    created_at: r.created_at,
   };
 }
 function toDecision(r: DecisionRow): DecisionRecord {
@@ -1036,18 +1048,37 @@ export class Queries {
 
   insertAnnotation(a: Annotation): void {
     this.sql.exec(
-      `INSERT INTO annotations (id, version_id, author_id, target, sentiment, dimension, comment, status, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO annotations (id, version_id, author_id, target, sentiment, dimension, dimensions, comment, status, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       a.id,
       a.version_id,
       a.author_id,
       a.target ? JSON.stringify(a.target) : null,
       a.sentiment,
-      a.dimension,
+      a.dimensions[0] ?? null,
+      JSON.stringify(a.dimensions),
       a.comment,
       a.status,
       a.created_at,
     );
+  }
+
+  /** Edit a person's own note. Only the passed fields change. */
+  updateAnnotation(
+    id: string,
+    changes: { comment?: string; sentiment?: Annotation["sentiment"]; dimensions?: Annotation["dimensions"] },
+  ): void {
+    const sets: string[] = [];
+    const args: SqlStorageValue[] = [];
+    if (changes.comment !== undefined) { sets.push("comment = ?"); args.push(changes.comment); }
+    if (changes.sentiment !== undefined) { sets.push("sentiment = ?"); args.push(changes.sentiment); }
+    if (changes.dimensions !== undefined) {
+      sets.push("dimension = ?", "dimensions = ?");
+      args.push(changes.dimensions[0] ?? null, JSON.stringify(changes.dimensions));
+    }
+    if (sets.length === 0) return;
+    args.push(id);
+    this.sql.exec(`UPDATE annotations SET ${sets.join(", ")} WHERE id = ?`, ...args);
   }
 
   listAnnotations(versionId: string): Annotation[] {

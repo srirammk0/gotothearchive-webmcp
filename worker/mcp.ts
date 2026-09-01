@@ -9,8 +9,10 @@ import {
   DENIAL_REASONS,
   GRANT_LEVELS,
   RELATIONSHIPS,
+  TASTE_DIMENSIONS,
   type ContextItem,
   type Relationship,
+  type TasteDimension,
   type ToolCallRequest,
   type ToolCallResponse,
 } from "@shared/contract";
@@ -327,7 +329,7 @@ export async function handleToolCall(
           annotations: q.listAnnotations(version.id).slice(0, MAX_ROWS).map((a) => ({
             id: a.id,
             sentiment: a.sentiment,
-            dimension: a.dimension,
+            dimensions: a.dimensions,
             status: a.status,
             comment: spotlight(clip(a.comment, MAX_TEXT)),
           })),
@@ -483,7 +485,11 @@ export async function handleToolCall(
       const sentiment =
         input.sentiment === "positive" || input.sentiment === "negative" ? input.sentiment : "neutral";
       const comment = typeof input.comment === "string" ? input.comment : "";
-      const dimension = typeof input.dimension === "string" ? input.dimension : null;
+      const dimensions = Array.isArray(input.dimensions)
+        ? (input.dimensions.filter((d): d is TasteDimension =>
+            typeof d === "string" && (TASTE_DIMENSIONS as readonly string[]).includes(d),
+          ) as TasteDimension[])
+        : [];
 
       const annotationId = crypto.randomUUID();
       q.insertAnnotation({
@@ -492,7 +498,7 @@ export async function handleToolCall(
         author_id: `agent:${session.id}`,
         target: null,
         sentiment,
-        dimension,
+        dimensions,
         comment,
         status: "open",
         created_at: now,

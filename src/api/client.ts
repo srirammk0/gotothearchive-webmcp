@@ -240,12 +240,21 @@ export const createAnnotation = (input: {
   version_id: string;
   sentiment: Annotation["sentiment"];
   comment: string;
-  dimension?: string | null;
+  dimensions?: TasteDimension[];
   target?: Annotation["target"];
 }) =>
   req<{ annotation: Annotation }>(API.annotations, {
     method: "POST",
     body: JSON.stringify(input),
+  });
+
+export const updateAnnotation = (
+  id: string,
+  changes: { comment?: string; sentiment?: Annotation["sentiment"]; dimensions?: TasteDimension[] },
+) =>
+  req<{ annotation: Annotation }>(API.annotations, {
+    method: "PATCH",
+    body: JSON.stringify({ id, ...changes }),
   });
 
 export const recordDecision = (versionId: string, decision: ReviewDecision, note?: string) =>

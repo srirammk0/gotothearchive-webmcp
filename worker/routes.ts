@@ -7,6 +7,7 @@ import {
   ITEM_TYPES,
   RELATIONSHIPS,
   REVIEW_DECISIONS,
+  TASTE_DIMENSIONS,
   confidenceFrom,
   type AccessRecord,
   type ArtifactState,
@@ -736,6 +737,16 @@ function handleArtifacts(request: Request, q: Queries, humanId: string): Respons
 
 /* ---------------- annotations ---------------- */
 
+/** Keep only real taste-dimension slugs, de-duplicated, capped. */
+function cleanDimensions(input: unknown): TasteDimension[] {
+  if (!Array.isArray(input)) return [];
+  const seen = new Set<string>();
+  for (const v of input) {
+    if (typeof v === "string" && (TASTE_DIMENSIONS as readonly string[]).includes(v)) seen.add(v);
+  }
+  return [...seen].slice(0, 6) as TasteDimension[];
+}
+
 async function handleAnnotations(request: Request, q: Queries, humanId: string, env: Env): Promise<Response> {
   if (request.method === "GET") {
     const url = new URL(request.url);
@@ -751,7 +762,7 @@ async function handleAnnotations(request: Request, q: Queries, humanId: string, 
       version_id: string;
       sentiment: "positive" | "negative" | "neutral";
       comment: string;
-      dimension?: string | null;
+      dimensions?: TasteDimension[];
       target?: { kind: "region"; x: number; y: number; w: number; h: number } | null;
     };
     const version = q.getArtifactVersion(body.version_id);
@@ -764,7 +775,7 @@ async function handleAnnotations(request: Request, q: Queries, humanId: string, 
       author_id: humanId,
       target: body.target ?? null,
       sentiment: body.sentiment,
-      dimension: body.dimension ?? null,
+      dimensions: cleanDimensions(body.dimensions),
       comment: body.comment,
       status: "open",
       created_at: Date.now(),
@@ -772,6 +783,25 @@ async function handleAnnotations(request: Request, q: Queries, humanId: string, 
     // Step 5 of the taste loop: this new note may complete a candidate signal.
     await deriveTasteSignals(q, spaceIdFor(humanId), Date.now(), env);
     return json({ ok: true, annotation: { id } });
+  }
+  if (request.method === "PATCH") {
+    const body = (await request.json()) as {
+      id: string;
+      comment?: string;
+      sentiment?: "positive" | "negative" | "neutral";
+      dimensions?: TasteDimension[];
+    };
+    const existing = q.getAnnotation(body.id);
+    if (!existing) return badRequest("unknown annotation");
+    // A person may only edit their own note.
+    if (existing.author_id !== humanId) return badRequest("not your note");
+    q.updateAnnotation(body.id, {
+      comment: typeof body.comment === "string" ? body.comment : undefined,
+      sentiment: body.sentiment,
+      dimensions: body.dimensions ? cleanDimensions(body.dimensions) : undefined,
+    });
+    await deriveTasteSignals(q, spaceIdFor(humanId), Date.now(), env);
+    return json({ ok: true, annotation: q.getAnnotation(body.id) });
   }
   return badRequest("unsupported method");
 }

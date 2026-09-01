@@ -137,7 +137,7 @@ test("the full collaboration loop runs against a real schema", async () => {
       author_id: HUMAN,
       target: null,
       sentiment: "negative",
-      dimension: "color",
+      dimensions: ["color"],
       comment,
       status: "open",
       created_at: now + 2,
@@ -154,13 +154,20 @@ test("the full collaboration loop runs against a real schema", async () => {
   });
   q.setArtifactVersionState(version_id, "changes_requested");
 
+  // 3b. the person edits their own note — a new tag and reworded text stick.
+  q.updateAnnotation("a1", { comment: "flat monochrome palette, no warmth", dimensions: ["color", "imagery"] });
+  const edited = q.getAnnotation("a1")!;
+  expect(edited.comment).toBe("flat monochrome palette, no warmth");
+  expect(edited.dimensions).toEqual(["color", "imagery"]);
+
   // 4. taste derivation turns the grouped notes into a proposed signal with cited evidence.
   await deriveTasteSignals(q, SPACE, now + 3);
   const proposed = q.listTasteSignals(SPACE).filter((s) => s.status === "proposed");
-  expect(proposed).toHaveLength(1);
-  expect(proposed[0].dimensions).toContain("color");
-  expect(proposed[0].created_by).toBe("system");
-  expect(q.listTasteEvidence(proposed[0].id).length).toBeGreaterThanOrEqual(2);
+  expect(proposed.length).toBeGreaterThanOrEqual(1);
+  expect(proposed.some((s) => s.dimensions.includes("color"))).toBe(true);
+  const colorSignal = proposed.find((s) => s.dimensions.includes("color"))!;
+  expect(colorSignal.created_by).toBe("system");
+  expect(q.listTasteEvidence(colorSignal.id).length).toBeGreaterThanOrEqual(2);
 
   // 5. the agent can read the feedback back through the tool.
   const trace = await call(q, "trace_artifact_influences", { version_id });
@@ -170,7 +177,7 @@ test("the full collaboration loop runs against a real schema", async () => {
   expect(traceRes.influences).toHaveLength(1);
 
   // 6. human confirms the signal.
-  q.setTasteSignalStatus(proposed[0].id, "confirmed", HUMAN);
+  q.setTasteSignalStatus(colorSignal.id, "confirmed", HUMAN);
   const forAgent = await call(q, "get_taste_for_task", {});
   expect(forAgent.ok).toBe(true);
   const signals = (forAgent as { result: { signals: { status: string }[] } }).result.signals;
@@ -178,7 +185,7 @@ test("the full collaboration loop runs against a real schema", async () => {
 
   // 7. retrieval now reflects the confirmed taste on a colour-relevant item.
   const withTaste = retrieve(q, { taskId: "t1", query: "colour", regionSlugs: null, limit: 10 }, now + 4);
-  expect(withTaste.some((r) => r.applied_signal_ids.includes(proposed[0].id))).toBe(true);
+  expect(withTaste.some((r) => r.applied_signal_ids.includes(colorSignal.id))).toBe(true);
 
   // 8. the agent submits a child revision chained to the reviewed version.
   const rev = await call(q, "record_artifact", {

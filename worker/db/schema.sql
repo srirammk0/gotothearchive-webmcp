@@ -171,7 +171,8 @@ CREATE TABLE IF NOT EXISTS annotations (
   author_id  TEXT NOT NULL,
   target     TEXT,
   sentiment  TEXT NOT NULL CHECK (sentiment IN ('positive','negative','neutral')),
-  dimension  TEXT,
+  dimension  TEXT,             -- legacy scalar; mirrors dimensions[0]
+  dimensions TEXT,             -- JSON array of taste dimensions
   comment    TEXT NOT NULL,
   status     TEXT NOT NULL DEFAULT 'open'
              CHECK (status IN ('open','resolved','superseded')),
