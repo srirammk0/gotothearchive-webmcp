@@ -71,6 +71,16 @@ test("propose grant exposes the propose tools scoped to propose-level regions", 
   expect(regionEnum(p, "record_artifact")).toEqual(["work"]);
 });
 
+test("add_context_item needs a write grant and is scoped to write-level regions", () => {
+  expect(names(input())).not.toContain("add_context_item"); // read grant
+  expect(names(input({ grants: [reg("work", "propose"), reg("inspiration", "read")] }))).not.toContain(
+    "add_context_item",
+  );
+  const w = input({ grants: [reg("work", "write"), reg("inspiration", "read")] });
+  expect(names(w)).toContain("add_context_item");
+  expect(regionEnum(w, "add_context_item")).toEqual(["work"]);
+});
+
 test("trace_artifact_influences is page-state gated", () => {
   expect(names(input())).not.toContain("trace_artifact_influences");
   expect(names(input({ pageState: { hasPendingProposals: false, activeArtifactId: "art_1" } }))).toContain(

@@ -307,6 +307,7 @@ const AUTHORITY_LABEL: Record<string, string> = {
   human_authored: "human-authored",
   imported_source_linked: "imported, source-linked",
   human_confirmed_preference: "human-confirmed preference",
+  agent_authored: "agent-authored",
   agent_artifact: "agent artifact",
   agent_proposal: "agent proposal",
   inferred_taste_signal: "inferred taste signal",

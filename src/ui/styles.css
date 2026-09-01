@@ -77,11 +77,19 @@ select option { background: var(--color-raised); color: var(--color-text); }
   }
 }
 
-/* No focus rings anywhere — hover/active colour shifts carry state instead. */
+/* No focus rings or outlines anywhere — hover/active colour shifts carry state instead. */
 *,
 *:focus,
 *:focus-visible,
 *:focus-within {
   outline: none !important;
   -webkit-tap-highlight-color: transparent;
+}
+
+/* Native form controls: kill any focus box-shadow ring the browser adds. */
+input:focus,
+textarea:focus,
+select:focus,
+button:focus {
+  box-shadow: none !important;
 }

@@ -230,6 +230,28 @@ export function compile(input: CapabilityInput): ToolSpec[] {
     why: `You can suggest changes on: ${slugs.join(", ")}.`,
   }));
 
+  // Write access is the human saying "this folder is yours to fill" — so the
+  // agent can add material straight into it, no review step. Workbench
+  // (record_artifact) stays for making something new; this is for filing.
+  push("write", (slugs) => ({
+    name: "add_context_item",
+    title: "Add context item",
+    description:
+      "Add a note, link, or document straight into a folder you have write access to. It becomes canonical context immediately — no human review. Use record_artifact instead when you're producing something new to be reviewed.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        region: { type: "string", enum: slugs },
+        type: { type: "string", enum: ["note", "link", "document"] },
+        title: { type: "string" },
+        body: { type: "string", description: "The note text or document body. Plain text." },
+        source_url: { type: "string", description: "For a link: the URL." },
+      },
+      required: ["region", "type", "title"],
+    },
+    why: `You have write access on: ${slugs.join(", ")}.`,
+  }));
+
   // `approve_proposed_changes` and `reject_proposed_changes` are deliberately
   // never compiled into the agent's tool surface, at any grant level.
   //

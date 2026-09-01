@@ -16,8 +16,8 @@ import { ArtifactViewer } from "../ui/workbench/ArtifactViewer";
 import { ArtifactThumb } from "../ui/workbench/ArtifactThumb";
 import { AnnotationRail } from "../ui/workbench/AnnotationRail";
 import { ProvenanceStrip } from "../ui/workbench/ProvenanceStrip";
-import { AgentAccess } from "../ui/AgentAccess";
 import { useWorkbench } from "../ui/workbench/useWorkbench";
+import { useCapabilities } from "../webmcp/useCapabilities";
 
 const DECISION_LABEL: Record<ReviewDecision, string> = {
   approve: "Approve",
@@ -70,6 +70,12 @@ function StateBadge({ state }: { state: string }) {
       {stateLabel(state)}
     </span>
   );
+}
+
+/** Invisible: keeps the open artifact's review tools (trace_artifact_influences) in the WebMCP surface. */
+function ArtifactCapabilitySync({ taskId, artifactId }: { taskId: string; artifactId: string }) {
+  useCapabilities(taskId, artifactId);
+  return null;
 }
 
 function ArtifactCard({ artifact, onOpen }: { artifact: WorkbenchArtifact; onOpen: () => void }) {
@@ -248,6 +254,7 @@ export function Workbench() {
 
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-7">
+        <ArtifactCapabilitySync taskId={artifact.task_id} artifactId={artifact.id} />
         <header className="flex flex-col gap-4">
           <div className="flex min-w-0 items-start justify-between gap-4">
             <div>
@@ -302,9 +309,8 @@ export function Workbench() {
 
         <details className="border-t border-line-soft pt-3">
           <summary className="cursor-pointer text-[length:var(--text-meta)] text-muted hover:text-text">Context & access</summary>
-          <div className="flex flex-col gap-4 pt-4">
+          <div className="pt-4">
             <ProvenanceStrip provenance={provenance} />
-            <AgentAccess taskId={artifact.task_id} regions={regions} activeArtifactId={artifact.id} />
           </div>
         </details>
 

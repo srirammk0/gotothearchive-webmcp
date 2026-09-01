@@ -19,6 +19,7 @@ import { consumeQuota } from "./quota";
 import { authorize, authorizedRegionIds, writeDenial } from "./permissions";
 import { retrieve } from "./retrieval";
 import { traverse } from "./graph";
+import { deriveEdgesForItem } from "./graph-build";
 import { deriveTasteSignals } from "./taste/derive";
 import type { ResolvedHuman } from "./auth";
 
@@ -562,6 +563,50 @@ export async function handleToolCall(
       });
 
       return { ok: true, result: { edge_id: edgeId } };
+    }
+
+    case "add_context_item": {
+      const regionSlug = typeof input.region === "string" ? input.region : "";
+      const authResult = authorize(
+        q,
+        { taskId: task.id, agentSessionId: session.id, regionSlug, need: "write", toolName: body.tool, requested: input },
+        now,
+      );
+      if (!authResult.ok) return denyResult(authResult.reason);
+
+      const type = input.type === "link" || input.type === "document" ? input.type : "note";
+      const title = (typeof input.title === "string" ? input.title : "").trim().slice(0, 200) || "Untitled";
+      const body_ = typeof input.body === "string" ? input.body.slice(0, 20_000) : null;
+      const sourceUrl =
+        type === "link" && typeof input.source_url === "string" && /^https?:\/\//i.test(input.source_url)
+          ? input.source_url.slice(0, 2000)
+          : null;
+
+      const itemId = crypto.randomUUID();
+      q.insertItem({
+        id: itemId,
+        space_id: task.space_id,
+        region_id: authResult.region.id,
+        owner_id: human.human_id,
+        type,
+        title,
+        source_url: sourceUrl,
+        content_ref: null,
+        semantic_text: body_,
+        metadata: { added_by_agent: session.id },
+        authority_class: "agent_authored",
+        created_by: `agent:${session.id}`,
+        created_at: now,
+        updated_at: now,
+      });
+      const created = q.getItem(itemId);
+      if (created) deriveEdgesForItem(q, created, now);
+
+      q.insertAccess({ id: crypto.randomUUID(), task_id: task.id, item_id: itemId, tool_name: body.tool, at: now });
+      return {
+        ok: true,
+        result: { item_id: itemId, region: authResult.region.slug, next: "Filed into the folder — it's canonical context now and visible in the Archive." },
+      };
     }
 
     case "identify_agent": {

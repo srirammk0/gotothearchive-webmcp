@@ -42,6 +42,8 @@ export const AUTHORITY_CLASSES = [
   "human_authored",
   "imported_source_linked",
   "human_confirmed_preference",
+  /** Added directly by an agent into a folder the human granted write access to. */
+  "agent_authored",
   "agent_artifact",
   "agent_proposal",
   "inferred_taste_signal",
@@ -451,6 +453,7 @@ export const TOOL_NAMES = [
   "record_artifact",
   "record_feedback",
   "propose_context_change",
+  "add_context_item",
   "approve_proposed_changes",
   "reject_proposed_changes",
 ] as const;
