@@ -290,9 +290,9 @@ export function ItemLightbox({
                   >
                     Actions
                     <Icon
-                      name="chevronRight"
+                      name="chevronDown"
                       size={12}
-                      className={`transition-transform duration-[var(--duration-fast)] ${open ? "-rotate-90" : "rotate-90"}`}
+                      className={`transition-transform duration-[var(--duration-base)] ${open ? "rotate-180" : ""}`}
                     />
                   </button>
                 )}

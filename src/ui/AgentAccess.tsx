@@ -61,7 +61,11 @@ function AccessRow({
             aria-expanded={open}
             className="-ml-1 shrink-0 text-faint transition-colors hover:text-text"
           >
-            <Icon name="chevronRight" size={13} style={{ transform: open ? "rotate(90deg)" : "none" }} />
+            <Icon
+              name="chevronDown"
+              size={13}
+              className={`transition-transform duration-[var(--duration-base)] ${open ? "rotate-180" : "rotate-0"}`}
+            />
           </button>
         ) : null}
         <span className={`truncate text-[length:var(--text-body)] ${child ? "text-muted" : "text-text"}`}>

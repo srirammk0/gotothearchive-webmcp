@@ -332,8 +332,8 @@ export function Taste() {
   const [signals, setSignals] = useState<TasteSignal[]>([]);
   const [feed, setFeed] = useState<TasteFeedEvent[]>([]);
 
-  const load = () => {
-    setStatus("loading");
+  const load = (opts?: { silent?: boolean }) => {
+    if (!opts?.silent) setStatus("loading");
     listTasteSignals()
       .then(({ signals: loaded, recent_events }) => {
         setSignals(loaded);
@@ -343,7 +343,7 @@ export function Taste() {
       .catch(() => setStatus("error"));
   };
 
-  useEffect(load, []);
+  useEffect(() => load(), []);
 
   const act = async (
     id: string,
@@ -351,6 +351,8 @@ export function Taste() {
   ) => {
     const { signal } = await updateTasteSignal(id, changes);
     setSignals((prev) => prev.map((s) => (s.id === id ? signal : s)));
+    // Confirming/editing/rescoping produces new evidence + activity — pull it in.
+    load({ silent: true });
   };
 
   useTrail([{ label: "Taste" }]);

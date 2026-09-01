@@ -304,10 +304,11 @@ function RegionSection({
               aria-expanded={!collapsed}
             >
               <Icon
-                name="chevronRight"
+                name="chevronDown"
                 size={13}
-                className="shrink-0 text-faint transition-transform duration-[var(--duration-fast)]"
-                style={{ transform: collapsed ? "rotate(0deg)" : "rotate(90deg)" }}
+                className={`shrink-0 text-faint transition-transform duration-[var(--duration-base)] ${
+                  collapsed ? "rotate-0" : "rotate-180"
+                }`}
               />
               <h2 className="truncate text-[length:var(--text-headline)] text-text">{view.region.name}</h2>
             </button>
@@ -776,9 +777,9 @@ export function Archive() {
                 <Button variant="secondary" onClick={toggle} aria-expanded={open}>
                   Move to
                   <Icon
-                    name="chevronRight"
+                    name="chevronDown"
                     size={12}
-                    className={`transition-transform duration-[var(--duration-fast)] ${open ? "-rotate-90" : "rotate-90"}`}
+                    className={`transition-transform duration-[var(--duration-base)] ${open ? "rotate-180" : ""}`}
                   />
                 </Button>
               )}
