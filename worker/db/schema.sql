@@ -1,6 +1,7 @@
 -- FROZEN BUILD CONTRACT — GoToTheArchive
 -- Durable Object SQLite schema. Applied once at DO init.
--- Mirrors shared/contract.ts exactly. Do not edit without adjudication.
+-- Mirrors shared/contract.ts exactly. The central integration track evolves both
+-- together when a product decision changes.
 
 CREATE TABLE IF NOT EXISTS spaces (
   id          TEXT PRIMARY KEY,
@@ -21,6 +22,20 @@ CREATE TABLE IF NOT EXISTS regions (
 );
 CREATE INDEX IF NOT EXISTS idx_regions_space ON regions(space_id);
 
+-- Cross-cutting working groupings. Projects never imply access by themselves;
+-- their explicit members are intersected with the task grant and human access.
+CREATE TABLE IF NOT EXISTS projects (
+  id          TEXT PRIMARY KEY,
+  space_id    TEXT NOT NULL REFERENCES spaces(id),
+  owner_id    TEXT NOT NULL,
+  name        TEXT NOT NULL,
+  description TEXT,
+  created_at  INTEGER NOT NULL,
+  updated_at  INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_projects_space ON projects(space_id);
+CREATE INDEX IF NOT EXISTS idx_projects_owner ON projects(owner_id);
+
 CREATE TABLE IF NOT EXISTS items (
   id              TEXT PRIMARY KEY,
   space_id        TEXT NOT NULL REFERENCES spaces(id),
@@ -39,6 +54,24 @@ CREATE TABLE IF NOT EXISTS items (
 );
 CREATE INDEX IF NOT EXISTS idx_items_region ON items(region_id);
 CREATE INDEX IF NOT EXISTS idx_items_space ON items(space_id);
+
+-- A project member is exactly one explicit region or one explicit item. A
+-- region member covers items stored in that region and its nested descendants;
+-- graph relationships never create project membership.
+CREATE TABLE IF NOT EXISTS project_members (
+  id         TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id),
+  region_id  TEXT REFERENCES regions(id),
+  item_id    TEXT REFERENCES items(id),
+  created_at INTEGER NOT NULL,
+  CHECK ((region_id IS NOT NULL AND item_id IS NULL)
+      OR (region_id IS NULL AND item_id IS NOT NULL)),
+  UNIQUE (project_id, region_id),
+  UNIQUE (project_id, item_id)
+);
+CREATE INDEX IF NOT EXISTS idx_project_members_project ON project_members(project_id);
+CREATE INDEX IF NOT EXISTS idx_project_members_region ON project_members(region_id);
+CREATE INDEX IF NOT EXISTS idx_project_members_item ON project_members(item_id);
 
 -- Full-text search over title + derived text. Contentless (content=''); rowid is
 -- rowidFor(item.id) (a fold of the TEXT id), set explicitly on every write. That
@@ -76,6 +109,7 @@ CREATE INDEX IF NOT EXISTS idx_item_notes_item ON item_notes(item_id);
 CREATE TABLE IF NOT EXISTS tasks (
   id           TEXT PRIMARY KEY,
   space_id     TEXT NOT NULL REFERENCES spaces(id),
+  project_id   TEXT REFERENCES projects(id),
   human_id     TEXT NOT NULL,
   title        TEXT NOT NULL,
   instruction  TEXT NOT NULL DEFAULT '',
@@ -84,6 +118,9 @@ CREATE TABLE IF NOT EXISTS tasks (
   created_at   INTEGER NOT NULL,
   expires_at   INTEGER
 );
+-- idx_tasks_project is created in migrate() — tasks predates project_id on
+-- existing DOs, so the index can't live here (CREATE TABLE IF NOT EXISTS skips
+-- the column, and this would run before migrate() adds it).
 
 CREATE TABLE IF NOT EXISTS grants (
   id          TEXT PRIMARY KEY,
@@ -193,6 +230,7 @@ CREATE TABLE IF NOT EXISTS decisions (
 CREATE TABLE IF NOT EXISTS taste_signals (
   id          TEXT PRIMARY KEY,
   space_id    TEXT NOT NULL REFERENCES spaces(id),
+  project_id  TEXT REFERENCES projects(id),
   owner_id    TEXT NOT NULL,
   statement   TEXT NOT NULL,
   dimensions  TEXT NOT NULL DEFAULT '[]',
@@ -209,6 +247,7 @@ CREATE TABLE IF NOT EXISTS taste_signals (
   -- walks this chain for the "how the judgement changed" timeline.
   supersedes  TEXT REFERENCES taste_signals(id)
 );
+-- idx_taste_signals_project is created in migrate() (see idx_tasks_project note).
 
 CREATE TABLE IF NOT EXISTS taste_evidence (
   id            TEXT PRIMARY KEY,
@@ -267,3 +306,26 @@ CREATE TABLE IF NOT EXISTS usage_counters (
   used     INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (human_id, period, metric)
 );
+
+-- Deferred mirror of item writes to the external memory index (Supermemory).
+-- Enqueued in the same request as the item mutation (a plain local insert, so
+-- capture latency is unchanged); drained by SpaceDO.alarm(). Supermemory is a
+-- retrieval *augmentation* only — the row here never gates access and a stuck
+-- job only means that item stays FTS-only until the next drain.
+CREATE TABLE IF NOT EXISTS memory_outbox (
+  id            TEXT PRIMARY KEY,
+  space_id      TEXT NOT NULL,
+  op            TEXT NOT NULL CHECK (op IN ('upsert','delete')),
+  item_id       TEXT NOT NULL,
+  custom_id     TEXT NOT NULL,              -- Supermemory customId; stable == item_id
+  container_tag TEXT NOT NULL,              -- == space_id; tenant isolation in Supermemory
+  payload       TEXT NOT NULL DEFAULT '{}', -- {title, semantic_text, region_id, authority_class}
+  status        TEXT NOT NULL DEFAULT 'pending'
+                CHECK (status IN ('pending','done','failed')),
+  attempts      INTEGER NOT NULL DEFAULT 0,
+  last_error    TEXT,
+  doc_id        TEXT,                       -- Supermemory document id, once known
+  created_at    INTEGER NOT NULL,
+  updated_at    INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_memory_outbox_pending ON memory_outbox(status, updated_at);

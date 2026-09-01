@@ -49,6 +49,22 @@ function isPinned(item: ContextItem): boolean {
   return item.metadata?.pinned === true;
 }
 
+function regionSubtreeIds(regions: Region[], rootId: string): Set<string> {
+  const ids = new Set<string>([rootId]);
+  const pending = [rootId];
+  while (pending.length > 0) {
+    const parentId = pending.pop();
+    if (!parentId) continue;
+    for (const region of regions) {
+      if (region.parent_id === parentId && !ids.has(region.id)) {
+        ids.add(region.id);
+        pending.push(region.id);
+      }
+    }
+  }
+  return ids;
+}
+
 function matchesType(item: ContextItem, filter: TypeFilter): boolean {
   if (filter === "all") return true;
   if (filter === "image") return item.type === "image" || item.type === "screenshot";
@@ -323,14 +339,16 @@ function RegionSection({
             >
               <Icon name="pencil" size={13} />
             </button>
-            <button
-              type="button"
-              aria-label={`Delete ${view.region.name}`}
-              onClick={() => onDelete(view.region)}
-              className="shrink-0 text-faint opacity-0 transition-opacity duration-[var(--duration-fast)] hover:text-bad group-hover/head:opacity-100"
-            >
-              <Icon name="trash" size={13} />
-            </button>
+            {showOpen && view.region.parent_id !== null ? (
+              <button
+                type="button"
+                aria-label={`Delete ${view.region.name}`}
+                onClick={() => onDelete(view.region)}
+                className="shrink-0 text-faint opacity-0 transition-opacity duration-[var(--duration-fast)] hover:text-bad group-hover/head:opacity-100"
+              >
+                <Icon name="trash" size={13} />
+              </button>
+            ) : null}
           </div>
         )}
 
@@ -512,11 +530,15 @@ export function Archive() {
 
   const removeFolder = (region: Region) =>
     guard(async () => {
+      const deletedRegionIds = regionSubtreeIds(regions, region.id);
+      const parent = region.parent_id ? regions.find((r) => r.id === region.parent_id) ?? null : null;
       await deleteRegion(region.id);
-      setRegionList((prev) => (prev ?? spaceRegions).filter((r) => r.id !== region.id));
-      setItems((prev) => (prev ?? []).filter((i) => i.region_id !== region.id));
+      setRegionList((prev) => (prev ?? spaceRegions).filter((r) => !deletedRegionIds.has(r.id)));
+      setItems((prev) => (prev ?? []).filter((i) => !deletedRegionIds.has(i.region_id)));
+      clearSelection();
+      setLightboxId(null);
       setFolderToDelete(null);
-      if (folderSlug === region.slug) setParams({}, { replace: true });
+      if (folderSlug === region.slug) setParams(parent ? { folder: parent.slug } : {}, { replace: true });
     });
 
   const editItem = (id: string, changes: { title?: string; semantic_text?: string }) =>
@@ -633,9 +655,22 @@ export function Archive() {
         <header className="flex flex-col gap-5">
           <div className="flex flex-wrap items-end justify-between gap-4">
             <div>
-              <h1 className="text-[length:var(--text-display)] leading-tight text-text">
-                {activeFolder ? activeFolder.name : "Archive"}
-              </h1>
+              <div className="flex items-center gap-2">
+                <h1 className="text-[length:var(--text-display)] leading-tight text-text">
+                  {activeFolder ? activeFolder.name : "Archive"}
+                </h1>
+                {activeFolder && activeFolder.parent_id !== null ? (
+                  <button
+                    type="button"
+                    aria-label={`Delete ${activeFolder.name}`}
+                    title={`Delete ${activeFolder.name}`}
+                    onClick={() => setFolderToDelete(activeFolder)}
+                    className="shrink-0 rounded-[var(--radius-sm)] p-1.5 text-faint transition-colors duration-[var(--duration-fast)] hover:bg-hover hover:text-bad"
+                  >
+                    <Icon name="trash" size={15} />
+                  </button>
+                ) : null}
+              </div>
               <p className="mt-1 text-[length:var(--text-meta)] text-faint">
                 {activeFolder ? `${total} ${total === 1 ? "item" : "items"}` : `${space?.name} · ${total} items`}
               </p>

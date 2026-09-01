@@ -7,7 +7,7 @@
  */
 import {
   DENIAL_REASONS,
-  GRANT_LEVELS,
+  grantAtLeast,
   RELATIONSHIPS,
   TASTE_DIMENSIONS,
   type ContextItem,
@@ -18,8 +18,18 @@ import {
 } from "@shared/contract";
 import type { Queries } from "./db/queries";
 import { consumeQuota } from "./quota";
-import { authorize, authorizedRegionIds, writeDenial } from "./permissions";
+import {
+  authorize,
+  authorizedRegionIds,
+  humanRegions,
+  liveGrants,
+  taskAllowsItem,
+  taskProject,
+  taskIsLive,
+  writeDenial,
+} from "./permissions";
 import { retrieve } from "./retrieval";
+import { memoryIndexFor } from "./memory-drain";
 import { traverse } from "./graph";
 import { deriveEdgesForItem } from "./graph-build";
 import type { ResolvedHuman } from "./auth";
@@ -50,6 +60,23 @@ export function clip(s: string, n: number): string {
 /** Max list entries / free-text chars in any one tool result. */
 const MAX_ROWS = 8;
 const MAX_TEXT = 240;
+export const MAX_RETRIEVAL_LIMIT = 20;
+
+export function clampRetrievalLimit(value: unknown): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) return 10;
+  return Math.min(MAX_RETRIEVAL_LIMIT, Math.max(1, Math.floor(value)));
+}
+
+function versionSessionBelongsToTask(
+  q: Queries,
+  sessionId: string | null,
+  taskId: string,
+  humanId: string,
+): boolean {
+  if (sessionId === null) return true;
+  const session = q.getAgentSession(sessionId);
+  return session !== null && session.task_id === taskId && session.human_id === humanId;
+}
 
 /** Trimmed view of an archive item for a tool result; every free-text field is fenced. */
 function slimItem(it: ContextItem) {
@@ -68,7 +95,7 @@ export async function handleToolCall(
   q: Queries,
   human: ResolvedHuman,
   now: number,
-  _env?: Env,
+  env?: Env,
 ): Promise<ToolCallResponse> {
   // Re-resolve session, task, and their linkage. Never trust body.task_id / body.agent_session_id alone.
   const session = q.getAgentSession(body.agent_session_id);
@@ -102,7 +129,7 @@ export async function handleToolCall(
   }
 
   const task = q.getTask(body.task_id);
-  if (!task || task.status !== "open") {
+  if (!taskIsLive(task, now)) {
     writeDenial(
       q,
       {
@@ -122,24 +149,51 @@ export async function handleToolCall(
   switch (body.tool) {
     case "get_current_context_scope": {
       const allowedIds = authorizedRegionIds(q, task.id, now);
-      const grants = q.grantsForTask(task.id);
+      const grants = liveGrants(q, task.id, now);
+      const project = taskProject(q, task);
+      const projectRegionIds = new Set(project ? q.projectRegionIds(project.id) : []);
+      const projectItemRegionIds = new Set(
+        project
+          ? q
+              .getItems(q.projectItemIds(project.id))
+              .map((item) => item.region_id)
+          : [],
+      );
+      const humanLevels = new Map(
+        humanRegions(q, task.space_id, human.human_id).map((r) => [r.region_id, r.level]),
+      );
       const regions = q
         .listRegions(task.space_id)
         .filter((r) => allowedIds.has(r.id))
+        .filter((r) => project === null || projectRegionIds.has(r.id) || projectItemRegionIds.has(r.id))
         .map((r) => {
           const grant = grants.find((g) => g.region_id === r.id);
-          const humanLevel = q.getSpace(task.space_id)?.owner_id === human.human_id ? "write" : "none";
+          const humanLevel = humanLevels.get(r.id) ?? "none";
           const grantLevel = grant?.level ?? "none";
-          const level = GRANT_LEVELS.indexOf(humanLevel) <= GRANT_LEVELS.indexOf(grantLevel) ? humanLevel : grantLevel;
+          const level = grantAtLeast(humanLevel, grantLevel) ? grantLevel : humanLevel;
           return { slug: r.slug, name: r.name, level };
         });
-      return { ok: true, result: { regions, task: { id: task.id, title: task.title } } };
+      return {
+        ok: true,
+        result: {
+          regions,
+          task: { id: task.id, title: task.title, project_id: task.project_id ?? null },
+          project: project
+            ? {
+                id: project.id,
+                name: project.name,
+                member_region_ids: [...projectRegionIds],
+                member_item_ids: q.projectItemIds(project.id),
+              }
+            : null,
+        },
+      };
     }
 
     case "get_context_for_task": {
       const query = typeof input.query === "string" ? input.query : "";
       const regionSlug = typeof input.region === "string" ? input.region : null;
-      const limit = typeof input.limit === "number" ? input.limit : 10;
+      const limit = clampRetrievalLimit(input.limit);
 
       // Naming a region and searching across everything are different acts and
       // get different answers.
@@ -168,10 +222,11 @@ export async function handleToolCall(
         if (!result.ok) return denyResult(result.reason);
       }
 
-      const items = retrieve(
+      const items = await retrieve(
         q,
         { taskId: task.id, query, regionSlugs: regionSlug ? [regionSlug] : null, limit },
         now,
+        env ? memoryIndexFor(env) : null,
       );
 
       // A confirmed signal that materially lifted a returned item is a real
@@ -206,7 +261,9 @@ export async function handleToolCall(
       const item = q.getItem(itemId);
       if (!item) return denyResult(DENIAL_REASONS.UNKNOWN_REGION);
       const region = q.getRegion(item.region_id);
-      if (!region) return denyResult(DENIAL_REASONS.UNKNOWN_REGION);
+      if (!region || region.space_id !== task.space_id || item.space_id !== task.space_id) {
+        return denyResult(DENIAL_REASONS.UNKNOWN_REGION);
+      }
       const result = authorize(
         q,
         {
@@ -220,6 +277,14 @@ export async function handleToolCall(
         now,
       );
       if (!result.ok) return denyResult(result.reason);
+      if (!taskAllowsItem(q, task, item)) {
+        writeDenial(
+          q,
+          { taskId: task.id, agentSessionId: session.id, toolName: body.tool, requested: input, reason: DENIAL_REASONS.OUT_OF_PROJECT_SCOPE },
+          now,
+        );
+        return denyResult(DENIAL_REASONS.OUT_OF_PROJECT_SCOPE);
+      }
       q.insertAccess({
         id: crypto.randomUUID(),
         task_id: task.id,
@@ -235,7 +300,9 @@ export async function handleToolCall(
       const item = q.getItem(itemId);
       if (!item) return denyResult(DENIAL_REASONS.UNKNOWN_REGION);
       const region = q.getRegion(item.region_id);
-      if (!region) return denyResult(DENIAL_REASONS.UNKNOWN_REGION);
+      if (!region || region.space_id !== task.space_id || item.space_id !== task.space_id) {
+        return denyResult(DENIAL_REASONS.UNKNOWN_REGION);
+      }
       const result = authorize(
         q,
         {
@@ -249,6 +316,14 @@ export async function handleToolCall(
         now,
       );
       if (!result.ok) return denyResult(result.reason);
+      if (!taskAllowsItem(q, task, item)) {
+        writeDenial(
+          q,
+          { taskId: task.id, agentSessionId: session.id, toolName: body.tool, requested: input, reason: DENIAL_REASONS.OUT_OF_PROJECT_SCOPE },
+          now,
+        );
+        return denyResult(DENIAL_REASONS.OUT_OF_PROJECT_SCOPE);
+      }
       const allowedIds = authorizedRegionIds(q, task.id, now);
       const graphResult = traverse(q, [itemId], allowedIds);
       return {
@@ -276,14 +351,21 @@ export async function handleToolCall(
         );
         return denyResult(DENIAL_REASONS.NO_GRANT);
       }
+      const project = taskProject(q, task);
       const signals = q
         .listTasteSignals(task.space_id)
+        .filter((s) => s.owner_id === task.human_id)
+        .filter((s) => {
+          if (s.scope === "personal") return (s.project_id ?? null) === null;
+          return project !== null && s.project_id === project.id;
+        })
         .filter((s) => s.status === "confirmed" || s.status === "proposed")
         .slice(0, MAX_ROWS)
         .map((s) => ({
           id: s.id,
           status: s.status,
           scope: s.scope,
+          project_id: s.project_id ?? null,
           dimensions: s.dimensions,
           confidence: s.confidence,
           // A confirmed signal has passed human review — it is a directive, not
@@ -297,19 +379,31 @@ export async function handleToolCall(
     case "trace_artifact_influences": {
       const versionId = typeof input.version_id === "string" ? input.version_id : "";
       const artifactId = typeof input.artifact_id === "string" ? input.artifact_id : "";
-      const version = versionId ? q.getArtifactVersion(versionId) : artifactId ? q.latestArtifactVersion(artifactId) : null;
+      const requestedArtifact = artifactId ? q.getArtifact(artifactId) : null;
+      if (artifactId && !requestedArtifact) return denyResult(DENIAL_REASONS.UNKNOWN_REGION);
+      const version = versionId
+        ? q.getArtifactVersion(versionId)
+        : requestedArtifact
+          ? q.latestArtifactVersion(requestedArtifact.id)
+          : null;
       if (!version) return denyResult(DENIAL_REASONS.UNKNOWN_REGION);
       const artifact = q.getArtifact(version.artifact_id);
-      if (!artifact || artifact.task_id !== task.id) {
+      if (
+        !artifact ||
+        artifact.task_id !== task.id ||
+        artifact.space_id !== task.space_id ||
+        (requestedArtifact !== null && requestedArtifact.id !== artifact.id) ||
+        !versionSessionBelongsToTask(q, version.agent_session_id, task.id, human.human_id)
+      ) {
         return denyResult(DENIAL_REASONS.EXCEEDS_HUMAN);
       }
       const allowedIds = authorizedRegionIds(q, task.id, now);
       if (allowedIds.size === 0) return denyResult(DENIAL_REASONS.NO_GRANT);
       const influences = q
-        .listInfluences(versionId)
+        .listInfluences(version.id)
         .filter((inf) => {
           const item = q.getItem(inf.item_id);
-          return item !== null && allowedIds.has(item.region_id);
+          return item !== null && item.space_id === task.space_id && allowedIds.has(item.region_id) && taskAllowsItem(q, task, item);
         })
         .map((inf) => ({ influence: inf, item: q.getItem(inf.item_id) }));
       // This is the revision handoff: the current artifact's immutable version,
@@ -356,9 +450,6 @@ export async function handleToolCall(
       );
       if (!authResult.ok) return denyResult(authResult.reason);
 
-      const budget = consumeQuota(q, human.human_id, "artifacts");
-      if (!budget.ok) return denyResult(budget.message);
-
       const title = typeof input.title === "string" ? input.title : "Untitled artifact";
       const rawContentHtml = typeof input.content_html === "string" ? input.content_html : "";
       // A component preview remains a review artifact, not a host-executed app.
@@ -375,18 +466,32 @@ export async function handleToolCall(
       let versionNo = 1;
       if (artifactId) {
         const existing = q.getArtifact(artifactId);
-        if (!existing) artifactId = null;
-        else if (existing.task_id !== task.id) return denyResult(DENIAL_REASONS.EXCEEDS_HUMAN);
-        else versionNo = (q.latestArtifactVersion(artifactId)?.version_no ?? 0) + 1;
+        if (!existing || existing.task_id !== task.id || existing.space_id !== task.space_id) {
+          return denyResult(DENIAL_REASONS.EXCEEDS_HUMAN);
+        }
+        const latest = q.latestArtifactVersion(artifactId);
+        if (!latest || parentVersionId !== latest.id) {
+          return denyResult(DENIAL_REASONS.INVALID_PARENT);
+        }
+        versionNo = latest.version_no + 1;
+      } else if (parentVersionId) {
+        return denyResult(DENIAL_REASONS.INVALID_PARENT);
       }
       // A revision must chain to a real version of this same artifact — never a
       // stray id or one from another artifact/task.
       if (parentVersionId) {
         const parent = q.getArtifactVersion(parentVersionId);
-        if (!parent || !artifactId || parent.artifact_id !== artifactId) {
+        if (
+          !parent ||
+          !artifactId ||
+          parent.artifact_id !== artifactId ||
+          !versionSessionBelongsToTask(q, parent.agent_session_id, task.id, human.human_id)
+        ) {
           return denyResult(DENIAL_REASONS.INVALID_PARENT);
         }
       }
+      const budget = consumeQuota(q, human.human_id, "artifacts");
+      if (!budget.ok) return denyResult(budget.message);
       if (!artifactId) {
         artifactId = crypto.randomUUID();
         q.insertArtifact({
@@ -425,7 +530,7 @@ export async function handleToolCall(
       const reachable = authorizedRegionIds(q, task.id, now);
       for (const itemId of claimed) {
         const item = q.getItem(itemId);
-        if (!item || !reachable.has(item.region_id)) {
+        if (!item || item.space_id !== task.space_id || !reachable.has(item.region_id) || !taskAllowsItem(q, task, item)) {
           writeDenial(
             q,
             {
@@ -433,7 +538,7 @@ export async function handleToolCall(
               agentSessionId: session.id,
               toolName: body.tool,
               requested: { claimed_influence: itemId },
-              reason: DENIAL_REASONS.NO_GRANT,
+              reason: item && !taskAllowsItem(q, task, item) ? DENIAL_REASONS.OUT_OF_PROJECT_SCOPE : DENIAL_REASONS.NO_GRANT,
             },
             now,
           );
@@ -478,7 +583,13 @@ export async function handleToolCall(
       const versionId = typeof input.version_id === "string" ? input.version_id : "";
       const version = q.getArtifactVersion(versionId);
       const artifact = version ? q.getArtifact(version.artifact_id) : null;
-      if (!version || !artifact || artifact.task_id !== task.id) {
+      if (
+        !version ||
+        !artifact ||
+        artifact.task_id !== task.id ||
+        artifact.space_id !== task.space_id ||
+        !versionSessionBelongsToTask(q, version.agent_session_id, task.id, human.human_id)
+      ) {
         return denyResult(DENIAL_REASONS.EXCEEDS_HUMAN);
       }
       const sentiment =
@@ -536,10 +647,14 @@ export async function handleToolCall(
       if (
         !from ||
         !to ||
+        from.space_id !== task.space_id ||
+        to.space_id !== task.space_id ||
         from.id === to.id ||
         from.region_id !== authResult.region.id ||
         !reachable.has(from.region_id) ||
-        !reachable.has(to.region_id)
+        !reachable.has(to.region_id) ||
+        !taskAllowsItem(q, task, from) ||
+        !taskAllowsItem(q, task, to)
       ) {
         writeDenial(
           q,
@@ -548,7 +663,10 @@ export async function handleToolCall(
             agentSessionId: session.id,
             toolName: body.tool,
             requested: input,
-            reason: DENIAL_REASONS.NO_GRANT,
+            reason:
+              (from && !taskAllowsItem(q, task, from)) || (to && !taskAllowsItem(q, task, to))
+                ? DENIAL_REASONS.OUT_OF_PROJECT_SCOPE
+                : DENIAL_REASONS.NO_GRANT,
           },
           now,
         );

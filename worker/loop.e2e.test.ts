@@ -106,7 +106,7 @@ test("the full collaboration loop runs against a real schema", async () => {
   seed(q);
 
   // 1. retrieval is permission pre-filtered — work + inspiration in, personal absent.
-  const scoped = retrieve(q, { taskId: "t1", query: "colour", regionSlugs: null, limit: 10 }, now + 1);
+  const scoped = await retrieve(q, { taskId: "t1", query: "colour", regionSlugs: null, limit: 10 }, now + 1);
   const gotRegions = new Set(scoped.map((r) => r.region_slug));
   expect(gotRegions.has("work")).toBe(true);
   expect(gotRegions.has("inspiration")).toBe(true);
@@ -186,7 +186,7 @@ test("the full collaboration loop runs against a real schema", async () => {
   expect(signals.some((s) => s.status === "confirmed")).toBe(true);
 
   // 7. retrieval now reflects the confirmed taste on a colour-relevant item.
-  const withTaste = retrieve(q, { taskId: "t1", query: "colour", regionSlugs: null, limit: 10 }, now + 4);
+  const withTaste = await retrieve(q, { taskId: "t1", query: "colour", regionSlugs: null, limit: 10 }, now + 4);
   expect(withTaste.some((r) => r.applied_signal_ids.includes(colorSignal.id))).toBe(true);
 
   // 8. the agent submits a child revision chained to the reviewed version.

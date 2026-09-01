@@ -5,6 +5,7 @@
  *
  * Forward-only, idempotent, cheap. Runs on every DO boot after schema.sql.
  */
+import { rowidFor } from "./queries";
 
 function addColumn(sql: SqlStorage, table: string, column: string, decl: string): void {
   try {
@@ -17,78 +18,62 @@ function addColumn(sql: SqlStorage, table: string, column: string, decl: string)
 
 const inMonth = (column: string) => `strftime('%Y-%m', ${column} / 1000, 'unixepoch') = ?`;
 
+/** Recreate the derived FTS index solely from canonical item rows. */
+export function rebuildFts(sql: SqlStorage): void {
+  sql.exec(`DROP TABLE IF EXISTS items_fts`);
+  sql.exec(`CREATE VIRTUAL TABLE items_fts USING fts5(title, semantic_text, content='')`);
+  const items = sql
+    .exec<{ id: string; title: string; semantic_text: string | null }>(
+      `SELECT id, title, semantic_text FROM items`,
+    )
+    .toArray();
+  for (const item of items) {
+    sql.exec(
+      `INSERT INTO items_fts (rowid, title, semantic_text) VALUES (?, ?, ?)`,
+      rowidFor(item.id),
+      item.title,
+      item.semantic_text ?? "",
+    );
+  }
+}
+
 export function migrate(sql: SqlStorage): void {
   // Required columns are fail-closed. Serving requests against a partially
   // migrated schema produces harder-to-diagnose data failures than a visible
   // boot error, while duplicate-column errors remain safely idempotent.
   addColumn(sql, "taste_signals", "supersedes", "TEXT");
+  addColumn(sql, "taste_signals", "project_id", "TEXT");
   addColumn(sql, "accesses", "why", "TEXT");
   addColumn(sql, "accesses", "applied_signal_ids", "TEXT NOT NULL DEFAULT '[]'");
   addColumn(sql, "annotations", "dimensions", "TEXT");
+  addColumn(sql, "tasks", "project_id", "TEXT");
 
-  // Cleanup and metering reconstruction are non-critical maintenance. They may
-  // fail without making the canonical product schema unsafe to serve.
-  try {
-    purgeSeedData(sql);
-  } catch (e) {
-    console.error("migrate: purgeSeedData failed", e);
-  }
+  // These indexes live here, not in schema.sql: they cover a column added above,
+  // and schema.sql runs before this on every boot. IF NOT EXISTS keeps them
+  // idempotent for DOs first created after project_id was in the CREATE TABLE.
+  sql.exec(`CREATE INDEX IF NOT EXISTS idx_tasks_project ON tasks(project_id)`);
+  sql.exec(`CREATE INDEX IF NOT EXISTS idx_taste_signals_project ON taste_signals(project_id)`);
+
+  // Before projects existed, project-scoped signals had no durable project to
+  // identify. Keep their evidence and history, but make them personal rather
+  // than pretending they belong to an unknown project. This is intentionally
+  // limited to rows without a resolved project id so it cannot undo new data.
+  sql.exec(
+    `UPDATE taste_signals SET scope = 'personal', project_id = NULL
+     WHERE scope = 'project' AND project_id IS NULL`,
+  );
+
+  // items_fts is derived state. A full DROP + reindex is a maintenance task, not
+  // a per-boot one — SpaceDO runs rebuildFts() once per FTS_REBUILD_VERSION,
+  // alongside the graph backfill. insertItem/updateItem/deleteItem keep the
+  // index correct on every write in between.
+
+  // Metering reconstruction is non-critical maintenance. It may fail without
+  // making the canonical product schema unsafe to serve.
   try {
     backfillUsage(sql);
   } catch (e) {
     console.error("migrate: backfillUsage failed", e);
-  }
-}
-
-/**
- * Older builds seeded every new space with a fake "Atlas rebrand" demo round
- * (items, edges, an artifact + review, agent sessions, taste signals). The
- * seeding is gone from the code; this removes what it already wrote so a space
- * comes back empty, the way a fresh sign-in now produces it.
- *
- * A space is "seeded" if it holds items titled both "Atlas rebrand — creative
- * brief" and "Terracotta palette reference" — a fingerprint a real archive
- * would never reproduce by accident. Such a space is wiped whole (its regions
- * and the space row included); bootstrap recreates it with empty folders. The
- * owner's beta slot is left alone. Idempotent: no seeded space, no-op.
- */
-function purgeSeedData(sql: SqlStorage): void {
-  const seeded = sql
-    .exec<{ space_id: string }>(
-      `SELECT space_id FROM items WHERE title = 'Atlas rebrand — creative brief'
-       INTERSECT
-       SELECT space_id FROM items WHERE title = 'Terracotta palette reference'`,
-    )
-    .toArray()
-    .map((r) => r.space_id);
-
-  for (const s of seeded) {
-    const d = (stmt: string) => sql.exec(stmt, s);
-    d(`DELETE FROM taste_events   WHERE signal_id IN (SELECT id FROM taste_signals WHERE space_id = ?)`);
-    d(`DELETE FROM taste_evidence WHERE signal_id IN (SELECT id FROM taste_signals WHERE space_id = ?)`);
-    d(`DELETE FROM taste_signals  WHERE space_id = ?`);
-    d(`DELETE FROM decisions   WHERE version_id IN (SELECT av.id FROM artifact_versions av JOIN artifacts a ON a.id = av.artifact_id WHERE a.space_id = ?)`);
-    d(`DELETE FROM annotations WHERE version_id IN (SELECT av.id FROM artifact_versions av JOIN artifacts a ON a.id = av.artifact_id WHERE a.space_id = ?)`);
-    d(`DELETE FROM influences  WHERE version_id IN (SELECT av.id FROM artifact_versions av JOIN artifacts a ON a.id = av.artifact_id WHERE a.space_id = ?)`);
-    d(`DELETE FROM artifact_versions WHERE artifact_id IN (SELECT id FROM artifacts WHERE space_id = ?)`);
-    d(`DELETE FROM artifacts   WHERE space_id = ?`);
-    d(`DELETE FROM accesses WHERE task_id IN (SELECT id FROM tasks WHERE space_id = ?)`);
-    d(`DELETE FROM denials  WHERE task_id IN (SELECT id FROM tasks WHERE space_id = ?)`);
-    d(`DELETE FROM grants   WHERE space_id = ?`);
-    d(`DELETE FROM audit_events   WHERE task_id IN (SELECT id FROM tasks WHERE space_id = ?)`);
-    d(`DELETE FROM agent_sessions WHERE task_id IN (SELECT id FROM tasks WHERE space_id = ?)`);
-    d(`DELETE FROM tasks    WHERE space_id = ?`);
-    sql.exec(
-      `DELETE FROM edges WHERE from_id IN (SELECT id FROM items WHERE space_id = ?) OR to_id IN (SELECT id FROM items WHERE space_id = ?)`,
-      s,
-      s,
-    );
-    d(`DELETE FROM item_notes WHERE space_id = ?`);
-    d(`DELETE FROM items    WHERE space_id = ?`);
-    d(`DELETE FROM regions  WHERE space_id = ?`);
-    d(`DELETE FROM usage_counters WHERE human_id IN (SELECT owner_id FROM spaces WHERE id = ?)`);
-    d(`DELETE FROM spaces   WHERE id = ?`);
-    console.log("migrate: purged seeded space", s);
   }
 }
 

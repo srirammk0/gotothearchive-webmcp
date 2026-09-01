@@ -14,8 +14,11 @@ import {
   type CapabilityInput,
   type GrantLevel,
   type ItemType,
+  type Project,
+  type ProjectMember,
   type Region,
   type ReviewDecision,
+  type Task,
   type TasteDimension,
   type TasteEvent,
   type ToolCallRequest,
@@ -31,11 +34,11 @@ import {
   quotaPeriod,
   type QuotaMetric,
 } from "./quota";
-import { authorizedRegionIds, humanRegions, liveGrants } from "./permissions";
+import { authorizedRegionIds, humanRegions, liveGrants, taskIsLive, taskProject } from "./permissions";
 import { traverse } from "./graph";
 import { handleToolCall } from "./mcp";
 import { deriveTasteSignals, statementOverlap } from "./taste/derive";
-import { extractUrl } from "./extract";
+import { extractUrl, isPublicHttpUrl } from "./extract";
 import { deriveEdgesForItem } from "./graph-build";
 
 /**
@@ -56,6 +59,12 @@ function json(data: unknown, init?: ResponseInit): Response {
 
 function badRequest(message: string): Response {
   return json({ ok: false, error: message }, { status: 400 });
+}
+
+function isOwnedBlobKey(key: string, humanId: string): boolean {
+  const prefix = `${spaceIdFor(humanId)}/`;
+  const suffix = key.startsWith(prefix) ? key.slice(prefix.length) : "";
+  return Boolean(suffix) && !suffix.includes("/") && !suffix.includes("\\") && !suffix.includes("..");
 }
 
 export async function handleRoute(
@@ -88,6 +97,10 @@ export async function handleRoute(
       return handleQuota(q, human.human_id);
     case API.regions:
       return await handleRegions(request, q, human.human_id);
+    case API.projects:
+      return await handleProjects(request, q, human.human_id);
+    case API.projectMembers:
+      return await handleProjectMembers(request, q, human.human_id);
     case API.items:
       return await handleItems(request, q, human.human_id);
     case API.upload:
@@ -229,6 +242,125 @@ async function handleRegions(request: Request, q: Queries, humanId: string): Pro
   return badRequest("unsupported method");
 }
 
+/* ---------------- projects ---------------- */
+
+function ownedProject(q: Queries, humanId: string, projectId: string): Project | null {
+  const project = q.getProject(projectId);
+  return project && project.space_id === spaceIdFor(humanId) && project.owner_id === humanId ? project : null;
+}
+
+function projectMemberView(q: Queries, member: ProjectMember): ProjectMember & {
+  region: Region | null;
+  item: ReturnType<Queries["getItem"]>;
+} {
+  return {
+    ...member,
+    region: member.region_id ? q.getRegion(member.region_id) : null,
+    item: member.item_id ? q.getItem(member.item_id) : null,
+  };
+}
+
+async function handleProjects(request: Request, q: Queries, humanId: string): Promise<Response> {
+  const spaceId = spaceIdFor(humanId);
+  if (request.method === "GET") {
+    const id = new URL(request.url).searchParams.get("id");
+    if (id) {
+      const project = ownedProject(q, humanId, id);
+      return project ? json({ ok: true, project }) : badRequest("not found");
+    }
+    return json({ ok: true, projects: q.listProjects(spaceId).filter((project) => project.owner_id === humanId) });
+  }
+  if (request.method === "POST") {
+    const body = (await request.json()) as { name?: string; description?: string | null };
+    const name = body.name?.trim();
+    if (!name) return badRequest("name required");
+    const now = Date.now();
+    const project: Project = {
+      id: crypto.randomUUID(),
+      space_id: spaceId,
+      owner_id: humanId,
+      name: name.slice(0, 120),
+      description: body.description?.trim().slice(0, 2000) || null,
+      created_at: now,
+      updated_at: now,
+    };
+    q.insertProject(project);
+    return json({ ok: true, project });
+  }
+  if (request.method === "PATCH") {
+    const body = (await request.json()) as { id?: string; name?: string; description?: string | null };
+    const project = body.id ? ownedProject(q, humanId, body.id) : null;
+    if (!project) return badRequest("unknown project");
+    const name = body.name === undefined ? project.name : body.name.trim();
+    if (!name) return badRequest("name required");
+    const description = body.description === undefined ? project.description : body.description?.trim().slice(0, 2000) || null;
+    q.updateProject(project.id, name.slice(0, 120), description, Date.now());
+    return json({ ok: true, project: q.getProject(project.id) });
+  }
+  return badRequest("unsupported method");
+}
+
+async function handleProjectMembers(request: Request, q: Queries, humanId: string): Promise<Response> {
+  const url = new URL(request.url);
+  if (request.method === "GET") {
+    const memberId = url.searchParams.get("id");
+    if (memberId) {
+      const member = q.getProjectMember(memberId);
+      if (!member || !ownedProject(q, humanId, member.project_id)) return badRequest("not found");
+      return json({ ok: true, member: projectMemberView(q, member) });
+    }
+    const projectId = url.searchParams.get("project_id");
+    const project = projectId ? ownedProject(q, humanId, projectId) : null;
+    if (!project) return badRequest("unknown project");
+    return json({ ok: true, members: q.listProjectMembers(project.id).map((member) => projectMemberView(q, member)) });
+  }
+  if (request.method === "POST") {
+    const body = (await request.json()) as {
+      project_id?: string;
+      region_id?: string;
+      region_slug?: string;
+      item_id?: string;
+    };
+    const project = body.project_id ? ownedProject(q, humanId, body.project_id) : null;
+    if (!project) return badRequest("unknown project");
+    const region = body.region_id
+      ? q.getRegion(body.region_id)
+      : body.region_slug
+        ? q.getRegionBySlug(project.space_id, body.region_slug)
+        : null;
+    const item = body.item_id ? q.getItem(body.item_id) : null;
+    const hasRegion = Boolean(region);
+    const hasItem = Boolean(item);
+    if (hasRegion === hasItem) return badRequest("provide exactly one region or item");
+    if (region && region.space_id !== project.space_id) return badRequest("unknown region");
+    if (item && item.space_id !== project.space_id) return badRequest("unknown item");
+    const regionId = region?.id ?? null;
+    const itemId = item?.id ?? null;
+    if (q.projectMemberForTarget(project.id, regionId, itemId)) return badRequest("already a project member");
+    const member: ProjectMember = {
+      id: crypto.randomUUID(),
+      project_id: project.id,
+      region_id: regionId,
+      item_id: itemId,
+      created_at: Date.now(),
+    };
+    q.insertProjectMember(member);
+    return json({ ok: true, member: projectMemberView(q, member) });
+  }
+  if (request.method === "DELETE") {
+    let memberId = url.searchParams.get("id");
+    if (!memberId) {
+      const body = (await request.json().catch(() => ({}))) as { id?: string };
+      memberId = body.id ?? null;
+    }
+    const member = memberId ? q.getProjectMember(memberId) : null;
+    if (!member || !ownedProject(q, humanId, member.project_id)) return badRequest("unknown membership");
+    q.deleteProjectMember(member.id);
+    return json({ ok: true, deleted: member.id });
+  }
+  return badRequest("unsupported method");
+}
+
 /* ---------------- items ---------------- */
 
 async function handleItems(request: Request, q: Queries, humanId: string): Promise<Response> {
@@ -254,6 +386,12 @@ async function handleItems(request: Request, q: Queries, humanId: string): Promi
     const region = q.getRegionBySlug(spaceIdFor(humanId), body.region_slug);
     if (!region) return badRequest("unknown region");
     if (!(ITEM_TYPES as readonly string[]).includes(body.type)) return badRequest("unknown item type");
+    if (body.source_url && !isPublicHttpUrl(body.source_url)) {
+      return badRequest("source_url must use a public http(s) host");
+    }
+    if (body.content_ref && !isOwnedBlobKey(body.content_ref, humanId)) {
+      return badRequest("invalid content_ref");
+    }
     const spaceId = spaceIdFor(humanId);
     const now = Date.now();
     const id = crypto.randomUUID();
@@ -366,7 +504,7 @@ async function handleItems(request: Request, q: Queries, humanId: string): Promi
         updated_at: now,
       });
     }
-    return json({ ok: true, items: q.getItems(ids) });
+    return json({ ok: true, items: q.getItems(owned.map((item) => item.id)) });
   }
   return badRequest("unsupported method");
 }
@@ -403,9 +541,117 @@ async function readBodyCapped(request: Request, limit: number): Promise<ArrayBuf
   return body.buffer;
 }
 
+const ZIP_MIMES = new Set([
+  "application/zip",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "application/vnd.oasis.opendocument.text",
+  "application/vnd.oasis.opendocument.presentation",
+  "application/vnd.oasis.opendocument.spreadsheet",
+  "application/vnd.apple.keynote",
+]);
+
+const KNOWN_BLOB_MIMES = new Set([
+  "image/png",
+  "image/jpeg",
+  "image/gif",
+  "image/webp",
+  "image/bmp",
+  "image/svg+xml",
+  "application/pdf",
+  "text/plain",
+  "text/markdown",
+  "text/csv",
+  "application/rtf",
+  ...ZIP_MIMES,
+]);
+
+const INLINE_BLOB_MIMES = new Set([
+  "image/png",
+  "image/jpeg",
+  "image/gif",
+  "image/webp",
+  "image/bmp",
+  "application/pdf",
+  "text/plain",
+  "text/markdown",
+  "text/csv",
+]);
+
+export function normalizeMime(contentType: string | null | undefined): string {
+  return (contentType ?? "").split(";", 1)[0].trim().toLowerCase();
+}
+
+function hasBytes(bytes: Uint8Array, expected: number[]): boolean {
+  return expected.every((byte, index) => bytes[index] === byte);
+}
+
+function isUtf8Text(bytes: Uint8Array): boolean {
+  try {
+    new TextDecoder("utf-8", { fatal: true, ignoreBOM: false }).decode(bytes);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function hasSvgSignature(bytes: Uint8Array): boolean {
+  const text = new TextDecoder().decode(bytes.subarray(0, 1024));
+  return /^\s*(?:<\?xml[^>]*>\s*)?<svg(?:\s|>)/i.test(text);
+}
+
+/** Returns a canonical MIME only when the declared type and file signature agree. */
+export function detectSafeUploadMime(contentType: string | null | undefined, body: ArrayBuffer): string | null {
+  const mime = normalizeMime(contentType);
+  const bytes = new Uint8Array(body);
+  if (!KNOWN_BLOB_MIMES.has(mime)) return null;
+
+  if (mime === "image/png") return hasBytes(bytes, [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]) ? mime : null;
+  if (mime === "image/jpeg") return hasBytes(bytes, [0xff, 0xd8, 0xff]) ? mime : null;
+  if (mime === "image/gif") {
+    const head = new TextDecoder().decode(bytes.subarray(0, 6));
+    return head === "GIF87a" || head === "GIF89a" ? mime : null;
+  }
+  if (mime === "image/webp") {
+    const head = new TextDecoder().decode(bytes.subarray(0, 12));
+    return head.slice(0, 4) === "RIFF" && head.slice(8, 12) === "WEBP" ? mime : null;
+  }
+  if (mime === "image/bmp") return hasBytes(bytes, [0x42, 0x4d]) ? mime : null;
+  if (mime === "image/svg+xml") return hasSvgSignature(bytes) && isUtf8Text(bytes) ? mime : null;
+  if (mime === "application/pdf") {
+    const head = new TextDecoder().decode(bytes.subarray(0, 5));
+    return head === "%PDF-" ? mime : null;
+  }
+  if (mime === "application/rtf") {
+    const head = new TextDecoder().decode(bytes.subarray(0, 5));
+    return head === "{\\rtf" && isUtf8Text(bytes) ? mime : null;
+  }
+  if (ZIP_MIMES.has(mime)) return hasBytes(bytes, [0x50, 0x4b, 0x03, 0x04]) ? mime : null;
+  return isUtf8Text(bytes) ? mime : null;
+}
+
+function blobMime(contentType: string | null | undefined): string {
+  const mime = normalizeMime(contentType);
+  return KNOWN_BLOB_MIMES.has(mime) ? mime : "application/octet-stream";
+}
+
+function blobHeaders(mime: string, etag?: string): Headers {
+  const headers = new Headers({
+    "content-type": mime,
+    "content-disposition": INLINE_BLOB_MIMES.has(mime) ? "inline" : "attachment",
+    "cache-control": "private, max-age=31536000, immutable",
+    "cross-origin-resource-policy": "same-origin",
+    "referrer-policy": "no-referrer",
+    "x-content-type-options": "nosniff",
+  });
+  if (etag) headers.set("etag", etag);
+  return headers;
+}
+
 async function handleUpload(request: Request, env: Env, q: Queries, humanId: string): Promise<Response> {
   if (request.method !== "POST") return badRequest("POST required");
-  const contentType = request.headers.get("content-type") ?? "application/octet-stream";
+  const contentType = request.headers.get("content-type");
   // Enforce the cap while streaming. A forged/missing Content-Length can no
   // longer make the Worker buffer an arbitrarily large upload first.
   const body = await readBodyCapped(request, UPLOAD_MAX_BYTES);
@@ -415,10 +661,19 @@ async function handleUpload(request: Request, env: Env, q: Queries, humanId: str
       { status: 413 },
     );
   }
+  const safeMime = detectSafeUploadMime(contentType, body);
+  if (!safeMime) {
+    return json({ ok: false, error: "unsupported_or_invalid_file", message: "The file type or signature is not supported." }, { status: 415 });
+  }
   const over = meter(q, humanId, "uploads");
   if (over) return over;
   const key = `${spaceIdFor(humanId)}/${crypto.randomUUID()}`;
-  await env.BLOBS.put(key, body, { httpMetadata: { contentType } });
+  await env.BLOBS.put(key, body, {
+    httpMetadata: {
+      contentType: safeMime,
+      contentDisposition: INLINE_BLOB_MIMES.has(safeMime) ? "inline" : "attachment",
+    },
+  });
   return json({ ok: true, key });
 }
 
@@ -438,18 +693,14 @@ async function handleBlob(request: Request, env: Env, humanId: string): Promise<
   }
   // Keys are content-addressed (random UUID, never reused), so a hit is safe to
   // cache hard. `onlyIf` lets R2 answer 304 when the browser already holds it.
-  const cacheControl = "private, max-age=31536000, immutable";
   const object = await env.BLOBS.get(key, { onlyIf: request.headers });
   if (!object) return new Response("Not found", { status: 404 });
+  const mime = blobMime(object.httpMetadata?.contentType);
   if (!("body" in object) || object.body === undefined) {
-    return new Response(null, { status: 304, headers: { etag: object.httpEtag, "cache-control": cacheControl } });
+    return new Response(null, { status: 304, headers: blobHeaders(mime, object.httpEtag) });
   }
   return new Response(object.body, {
-    headers: {
-      "content-type": object.httpMetadata?.contentType ?? "application/octet-stream",
-      "cache-control": cacheControl,
-      etag: object.httpEtag,
-    },
+    headers: blobHeaders(mime, object.httpEtag),
   });
 }
 
@@ -475,10 +726,10 @@ function handleProvenance(request: Request, q: Queries, humanId: string): Respon
   // Ids are guessable in principle; ownership is the actual boundary.
   if (artifact.space_id !== spaceIdFor(humanId)) return badRequest("unknown version");
 
-  const influences = q.listInfluences(versionId).map((inf) => ({
-    ...inf,
-    item: q.getItem(inf.item_id) ?? null,
-  }));
+  const influences = q
+    .listInfluences(versionId)
+    .map((inf) => ({ ...inf, item: q.getItem(inf.item_id) ?? null }))
+    .filter((inf) => inf.item?.space_id === artifact.space_id);
 
   // Accessed-but-not-influential: retrieved during the task, minus anything
   // already credited as an influence.
@@ -486,7 +737,8 @@ function handleProvenance(request: Request, q: Queries, humanId: string): Respon
   const accesses = q
     .recentAccesses(artifact.task_id, 200)
     .filter((a: AccessRecord) => !influenced.has(a.item_id))
-    .map((a: AccessRecord) => ({ ...a, item: q.getItem(a.item_id) ?? null }));
+    .map((a: AccessRecord) => ({ ...a, item: q.getItem(a.item_id) ?? null }))
+    .filter((access) => access.item?.space_id === artifact.space_id);
 
   return json({
     ok: true,
@@ -533,7 +785,7 @@ async function handleSession(request: Request, q: Queries, humanId: string): Pro
   const task = q.getTask(body.task_id);
   if (!task) return badRequest("unknown task");
   // A session may only be bound to a task the caller actually owns.
-  if (task.human_id !== humanId) return badRequest("unknown task");
+  if (task.human_id !== humanId || !taskIsLive(task, Date.now())) return badRequest("task is no longer active");
 
   const id = crypto.randomUUID();
   q.insertAgentSession({
@@ -546,13 +798,33 @@ async function handleSession(request: Request, q: Queries, humanId: string): Pro
   return json({ ok: true, agent_session_id: id });
 }
 
+function taskResponse(q: Queries, task: Task | null): unknown {
+  if (!task) return null;
+  const project = taskProject(q, task);
+  return {
+    ...task,
+    scope: {
+      project_id: task.project_id ?? null,
+      project_name: project?.name ?? null,
+    },
+  };
+}
+
 async function handleTask(request: Request, q: Queries, humanId: string): Promise<Response> {
   if (request.method === "POST") {
-    const body = (await request.json()) as { title: string; instruction?: string; expires_at?: number | null };
+    const body = (await request.json()) as {
+      title: string;
+      instruction?: string;
+      project_id?: string | null;
+      expires_at?: number | null;
+    };
+    const projectId = body.project_id ?? null;
+    if (projectId !== null && !ownedProject(q, humanId, projectId)) return badRequest("unknown project");
     const id = crypto.randomUUID();
     q.insertTask({
       id,
       space_id: spaceIdFor(humanId),
+      project_id: projectId,
       human_id: humanId,
       title: body.title,
       instruction: body.instruction ?? "",
@@ -560,7 +832,7 @@ async function handleTask(request: Request, q: Queries, humanId: string): Promis
       created_at: Date.now(),
       expires_at: body.expires_at ?? null,
     });
-    return json({ ok: true, task: q.getTask(id) });
+    return json({ ok: true, task: taskResponse(q, q.getTask(id)) });
   }
   if (request.method === "GET") {
     const url = new URL(request.url);
@@ -568,7 +840,7 @@ async function handleTask(request: Request, q: Queries, humanId: string): Promis
     if (id) {
       const task = q.getTask(id);
       if (!task || task.human_id !== humanId) return badRequest("not found");
-      return json({ ok: true, task });
+      return json({ ok: true, task: taskResponse(q, task) });
     }
     // Only the caller's own tasks. Without this
     // filter one visitor would see another's tasks and try to bind an agent
@@ -576,8 +848,32 @@ async function handleTask(request: Request, q: Queries, humanId: string): Promis
     // refuses, leaving the app wedged. Several judges will use this at once.
     return json({
       ok: true,
-      tasks: q.listTasks(spaceIdFor(humanId)).filter((t) => t.human_id === humanId),
+      tasks: q.listTasks(spaceIdFor(humanId)).filter((t) => t.human_id === humanId).map((task) => taskResponse(q, task)),
     });
+  }
+  if (request.method === "PATCH") {
+    const body = (await request.json()) as {
+      id?: string;
+      title?: string;
+      instruction?: string;
+      project_id?: string | null;
+      expires_at?: number | null;
+    };
+    const task = body.id ? q.getTask(body.id) : null;
+    if (!task || task.human_id !== humanId) return badRequest("unknown task");
+    const projectId = body.project_id === undefined ? undefined : body.project_id;
+    if (projectId !== undefined && projectId !== null && !ownedProject(q, humanId, projectId)) {
+      return badRequest("unknown project");
+    }
+    const title = body.title === undefined ? undefined : body.title.trim();
+    if (title !== undefined && !title) return badRequest("title required");
+    q.updateTask(task.id, {
+      title: title?.slice(0, 160),
+      instruction: body.instruction,
+      project_id: projectId,
+      expires_at: body.expires_at,
+    });
+    return json({ ok: true, task: taskResponse(q, q.getTask(task.id)) });
   }
   return badRequest("unsupported method");
 }
@@ -589,6 +885,7 @@ async function handleGrants(request: Request, q: Queries, humanId: string): Prom
     const body = (await request.json()) as { task_id: string; region_slug: string; level: GrantLevel; expires_at?: number | null };
     const task = q.getTask(body.task_id);
     if (!task || task.human_id !== humanId) return badRequest("unknown task");
+    if (!taskIsLive(task, Date.now())) return badRequest("task is no longer active");
     const region = q.getRegionBySlug(spaceIdFor(humanId), body.region_slug);
     if (!region) return badRequest("unknown region");
 
@@ -644,7 +941,7 @@ async function handleGrants(request: Request, q: Queries, humanId: string): Prom
     if (!taskId) return badRequest("task_id required");
     const task = q.getTask(taskId);
     if (!task || task.human_id !== humanId) return badRequest("unknown task");
-    return json({ ok: true, grants: q.grantsForTask(taskId) });
+    return json({ ok: true, grants: liveGrants(q, taskId, Date.now()) });
   }
   return badRequest("unsupported method");
 }
@@ -662,6 +959,7 @@ function handleCapabilities(request: Request, q: Queries, humanId: string): Resp
   if (task.human_id !== humanId) return badRequest("unknown task");
   const activeArtifact = activeArtifactId ? q.getArtifact(activeArtifactId) : null;
   const artifactIsInTask = activeArtifact?.task_id === task.id && activeArtifact.space_id === task.space_id;
+  const taskIsActive = taskIsLive(task, Date.now());
 
   const regions = q.listRegions(task.space_id);
   const slugById = new Map(regions.map((r) => [r.id, r.slug]));
@@ -673,12 +971,22 @@ function handleCapabilities(request: Request, q: Queries, humanId: string): Resp
     slug: slugById.get(g.region_id) ?? "",
     level: g.level,
   }));
+  const project = taskProject(q, task);
 
   const payload: CapabilityInput = {
     humanRegions: human,
     grants,
-    task: { id: task.id, title: task.title, expires_at: task.expires_at },
-    pageState: { hasPendingProposals: false, activeArtifactId: artifactIsInTask ? activeArtifactId : null },
+    task: taskIsActive
+      ? { id: task.id, title: task.title, expires_at: task.expires_at, project_id: task.project_id ?? null }
+      : null,
+    scope: {
+      project_id: task.project_id ?? null,
+      project_name: project?.name ?? null,
+    },
+    pageState: {
+      hasPendingProposals: false,
+      activeArtifactId: taskIsActive && artifactIsInTask ? activeArtifactId : null,
+    },
   };
   return json({ ok: true, capabilities: payload });
 }
@@ -936,35 +1244,49 @@ function logTasteEvent(
 async function handleTaste(request: Request, q: Queries, humanId: string): Promise<Response> {
   if (request.method === "GET") {
     const spaceId = spaceIdFor(humanId);
+    const signals = q.listTasteSignals(spaceId).filter((signal) => signal.owner_id === humanId);
+    const signalIds = new Set(signals.map((signal) => signal.id));
     // Hydrate each activity event with a thumbnail: the artifact it shaped
     // (preview HTML) or the first source item its signal cites (image / host).
-    const recent_events = q.recentTasteEvents(spaceId, 14).map((e) => {
+    const recent_events = q.recentTasteEvents(spaceId, 14).filter((event) => signalIds.has(event.signal_id)).map((e) => {
       let artifact: { title: string; preview_html: string } | null = null;
       if (e.version_id) {
         const v = q.getArtifactVersion(e.version_id);
         const a = v ? q.getArtifact(v.artifact_id) : null;
-        if (a && v) artifact = { title: a.title, preview_html: v.content_html };
+        if (a && a.space_id === spaceId && v) artifact = { title: a.title, preview_html: v.content_html };
       }
       const cited = q.listTasteEvidence(e.signal_id).find((ev) => ev.item_id);
-      const item = cited?.item_id ? (q.getItem(cited.item_id) ?? null) : null;
+      const candidate = cited?.item_id ? q.getItem(cited.item_id) : null;
+      const item = candidate?.space_id === spaceId ? candidate : null;
       return { ...e, artifact, item };
     });
-    return json({ ok: true, signals: q.listTasteSignals(spaceId), recent_events });
+    return json({ ok: true, signals, recent_events });
   }
   if (request.method === "POST") {
     const body = (await request.json()) as {
       statement: string;
       dimensions: TasteDimension[];
       scope: "personal" | "project";
+      project_id?: string | null;
     };
+    if (body.scope !== "personal" && body.scope !== "project") return badRequest("unknown taste scope");
+    if (!body.statement?.trim()) return badRequest("statement required");
+    if (body.scope === "personal" && body.project_id !== undefined && body.project_id !== null) {
+      return badRequest("personal taste cannot name a project");
+    }
+    const projectId = body.scope === "project" ? body.project_id ?? null : null;
+    if (body.scope === "project" && (!projectId || !ownedProject(q, humanId, projectId))) {
+      return badRequest("unknown project");
+    }
     const id = crypto.randomUUID();
     q.insertTasteSignal({
       id,
       space_id: spaceIdFor(humanId),
       owner_id: humanId,
-      statement: body.statement,
-      dimensions: body.dimensions,
+      statement: body.statement.trim(),
+      dimensions: cleanDimensions(body.dimensions),
       scope: body.scope,
+      project_id: projectId,
       status: "proposed",
       confidence: 0.5,
       created_by: "human",
@@ -981,9 +1303,23 @@ async function handleTaste(request: Request, q: Queries, humanId: string): Promi
       status?: "proposed" | "confirmed" | "rejected" | "superseded";
       statement?: string;
       scope?: "personal" | "project";
+      project_id?: string | null;
     };
     const existing = q.getTasteSignal(body.id);
-    if (!existing) return badRequest("unknown signal");
+    if (!existing || existing.space_id !== spaceIdFor(humanId) || existing.owner_id !== humanId) {
+      return badRequest("unknown signal");
+    }
+    if (body.scope !== undefined && body.scope !== "personal" && body.scope !== "project") {
+      return badRequest("unknown taste scope");
+    }
+    const desiredScope = body.scope ?? existing.scope;
+    const desiredProjectId = desiredScope === "personal" ? null : body.project_id !== undefined ? body.project_id : existing.project_id ?? null;
+    if (desiredScope === "personal" && body.project_id !== undefined && body.project_id !== null) {
+      return badRequest("personal taste cannot name a project");
+    }
+    if (desiredScope === "project" && (!desiredProjectId || !ownedProject(q, humanId, desiredProjectId))) {
+      return badRequest("unknown project");
+    }
 
     // Editing and rescoping are first-class review actions, not just status
     // changes: the doc's actions are accept, edit, rescope, reject. Dropping the
@@ -1003,7 +1339,8 @@ async function handleTaste(request: Request, q: Queries, humanId: string): Promi
           owner_id: existing.owner_id,
           statement: next,
           dimensions: existing.dimensions,
-          scope: existing.scope,
+          scope: desiredScope,
+          project_id: desiredProjectId,
           status: "confirmed",
           confidence: existing.confidence,
           created_by: "human",
@@ -1011,6 +1348,7 @@ async function handleTaste(request: Request, q: Queries, humanId: string): Promi
           created_at: Date.now(),
           supersedes: existing.id,
         });
+        q.copyTasteEvidence(existing.id, newId);
         q.supersedeTasteSignal(existing.id, newId);
         logTasteEvent(q, existing.id, "superseded", "human", "Replaced by a materially different statement");
         logTasteEvent(q, newId, "edited", "human", "Rewrote as a new claim");
@@ -1021,9 +1359,10 @@ async function handleTaste(request: Request, q: Queries, humanId: string): Promi
       q.setTasteSignalStatement(body.id, next);
       logTasteEvent(q, body.id, "edited", "human", "Reworded the statement");
     }
-    if ((body.scope === "personal" || body.scope === "project") && body.scope !== existing.scope) {
-      q.setTasteSignalScope(body.id, body.scope);
-      logTasteEvent(q, body.id, "rescoped", "human", `Moved to ${body.scope}`);
+    if (desiredScope !== existing.scope || desiredProjectId !== (existing.project_id ?? null)) {
+      if (desiredScope === "personal") q.setTasteSignalScope(body.id, "personal");
+      else q.setTasteSignalProject(body.id, desiredProjectId);
+      logTasteEvent(q, body.id, "rescoped", "human", `Moved to ${desiredScope}`);
     }
     if (body.status && body.status !== existing.status) {
       q.setTasteSignalStatus(body.id, body.status, humanId);
@@ -1219,7 +1558,7 @@ async function handleEdges(request: Request, q: Queries, humanId: string): Promi
   if (request.method === "GET") {
     const itemId = new URL(request.url).searchParams.get("item_id");
     if (!itemId || !owns(itemId)) return badRequest("unknown item");
-    const links = q.allEdgesForItem(itemId).map((e) => {
+    const links = q.allEdgesForItem(itemId).filter((e) => owns(e.from_id) && owns(e.to_id)).map((e) => {
       const otherId = e.from_id === itemId ? e.to_id : e.from_id;
       return {
         ...e,
@@ -1256,7 +1595,7 @@ async function handleEdges(request: Request, q: Queries, humanId: string): Promi
   if (request.method === "PATCH") {
     const body = (await request.json()) as { id?: string; approval_state?: "approved" | "rejected" };
     const edge = body.id ? q.getEdge(body.id) : null;
-    if (!edge || !owns(edge.from_id)) return badRequest("unknown edge");
+    if (!edge || !owns(edge.from_id) || !owns(edge.to_id)) return badRequest("unknown edge");
     if (body.approval_state !== "approved" && body.approval_state !== "rejected") return badRequest("bad state");
     q.setEdgeApproval(edge.id, body.approval_state);
     return json({ ok: true, edge: q.getEdge(edge.id) });
@@ -1265,7 +1604,7 @@ async function handleEdges(request: Request, q: Queries, humanId: string): Promi
   if (request.method === "DELETE") {
     const id = new URL(request.url).searchParams.get("id");
     const edge = id ? q.getEdge(id) : null;
-    if (!edge || !owns(edge.from_id)) return badRequest("unknown edge");
+    if (!edge || !owns(edge.from_id) || !owns(edge.to_id)) return badRequest("unknown edge");
     q.deleteEdge(edge.id);
     return json({ ok: true, deleted: edge.id });
   }

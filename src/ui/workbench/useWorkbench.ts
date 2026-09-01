@@ -81,7 +81,6 @@ export function useWorkbench(artifactId: string | undefined) {
     async (input: {
       sentiment: Annotation["sentiment"];
       comment: string;
-      dimensions: string[];
       target?: Annotation["target"];
     }) => {
       if (!data) return;
@@ -92,7 +91,7 @@ export function useWorkbench(artifactId: string | undefined) {
         author_id: "me",
         target,
         sentiment: input.sentiment,
-        dimensions: input.dimensions as Annotation["dimensions"],
+        dimensions: [],
         comment: input.comment,
         status: "open",
         created_at: Date.now(),
@@ -103,7 +102,6 @@ export function useWorkbench(artifactId: string | undefined) {
           version_id: data.version.id,
           sentiment: input.sentiment,
           comment: input.comment,
-          dimensions: input.dimensions as Annotation["dimensions"],
           target,
         });
         const { annotations } = await listAnnotations(data.version.id);
@@ -121,13 +119,10 @@ export function useWorkbench(artifactId: string | undefined) {
   const editAnnotation = useCallback(
     async (
       id: string,
-      changes: { comment?: string; sentiment?: Annotation["sentiment"]; dimensions?: string[] },
+      changes: { comment?: string; sentiment?: Annotation["sentiment"] },
     ) => {
       if (!data) return;
-      await updateAnnotation(id, {
-        ...changes,
-        dimensions: changes.dimensions as Annotation["dimensions"] | undefined,
-      });
+      await updateAnnotation(id, changes);
       const { annotations } = await listAnnotations(data.version.id);
       setData((prev) => (prev ? { ...prev, annotations } : prev));
     },
