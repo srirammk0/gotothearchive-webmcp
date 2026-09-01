@@ -521,6 +521,7 @@ export const DENIAL_REASONS = {
   EXCEEDS_HUMAN: "The invoking person does not have this access themselves",
   INSUFFICIENT_LEVEL: "This operation needs a higher access level than granted",
   UNKNOWN_REGION: "That region does not exist or is not visible",
+  INVALID_PARENT: "parent_version_id must be an existing version of the same artifact",
 } as const;
 
 /* ------------------------------------------------------------------ *

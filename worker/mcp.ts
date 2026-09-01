@@ -378,6 +378,14 @@ export async function handleToolCall(
         else if (existing.task_id !== task.id) return denyResult(DENIAL_REASONS.EXCEEDS_HUMAN);
         else versionNo = (q.latestArtifactVersion(artifactId)?.version_no ?? 0) + 1;
       }
+      // A revision must chain to a real version of this same artifact — never a
+      // stray id or one from another artifact/task.
+      if (parentVersionId) {
+        const parent = q.getArtifactVersion(parentVersionId);
+        if (!parent || !artifactId || parent.artifact_id !== artifactId) {
+          return denyResult(DENIAL_REASONS.INVALID_PARENT);
+        }
+      }
       if (!artifactId) {
         artifactId = crypto.randomUUID();
         q.insertArtifact({

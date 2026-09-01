@@ -4,6 +4,7 @@ import { AnimatePresence, motion } from "motion/react";
 import { TASTE_DIMENSIONS, dimensionLabel, type Annotation, type ArtifactVersion } from "@shared/contract";
 import { Button } from "../primitives/Button";
 import { Icon } from "../primitives/Icon";
+import { Menu } from "../primitives/Menu";
 import { duration, ease } from "../tokens";
 import { isComponentPreview, previewSandbox, previewSrcDoc } from "./componentPreview";
 
@@ -42,18 +43,29 @@ function FeedbackControls({
           {s.label}
         </button>
       ))}
-      <select
-        value={dimension ?? ""}
-        onChange={(e) => onDimension(e.target.value || null)}
-        className="rounded-[var(--radius-sm)] bg-hover px-2 py-1 text-[length:var(--text-micro)] text-muted"
-      >
-        <option value="">General</option>
-        {TASTE_DIMENSIONS.map((d) => (
-          <option key={d} value={d}>
-            {dimensionLabel(d)}
-          </option>
-        ))}
-      </select>
+      <Menu
+        align="start"
+        side="top"
+        items={[
+          { label: "General", onSelect: () => onDimension(null) },
+          ...TASTE_DIMENSIONS.map((d) => ({ label: dimensionLabel(d), onSelect: () => onDimension(d) })),
+        ]}
+        trigger={({ open, toggle }) => (
+          <button
+            type="button"
+            onClick={toggle}
+            aria-expanded={open}
+            className="inline-flex items-center gap-1 rounded-[var(--radius-sm)] bg-hover px-2 py-1 text-[length:var(--text-micro)] text-muted transition-colors duration-[var(--duration-fast)] hover:bg-raised hover:text-text"
+          >
+            {dimension ? dimensionLabel(dimension) : "General"}
+            <Icon
+              name="chevronRight"
+              size={11}
+              className={`transition-transform duration-[var(--duration-fast)] ${open ? "-rotate-90" : "rotate-90"}`}
+            />
+          </button>
+        )}
+      />
     </div>
   );
 }
@@ -75,7 +87,6 @@ export interface ArtifactViewerProps {
 export function ArtifactViewer({ version, annotations = [], onAddRegion, onAddComment }: ArtifactViewerProps) {
   const [full, setFull] = useState(false);
   const [marking, setMarking] = useState(false);
-  const [annotationMenu, setAnnotationMenu] = useState(false);
   const [commenting, setCommenting] = useState(false);
   const [draft, setDraft] = useState<Rect | null>(null);
   const [comment, setComment] = useState("");
@@ -161,51 +172,30 @@ export function ArtifactViewer({ version, annotations = [], onAddRegion, onAddCo
               : "Preview"}
         </p>
         {onAddRegion || onAddComment ? (
-          <button
-            type="button"
-            onClick={() => {
-              setAnnotationMenu((v) => !v);
-              setCommenting(false);
-              setDraft(null);
-            }}
-            aria-expanded={annotationMenu}
-            className={`inline-flex items-center gap-1.5 rounded-[var(--radius-sm)] px-2 py-1 text-[length:var(--text-micro)] transition-colors duration-[var(--duration-fast)] ${
-              marking || commenting || annotationMenu ? "bg-accent/15 text-accent" : "text-muted hover:text-text"
-            }`}
-          >
-            <Icon name="pencil" size={12} />
-            {marking ? "Draw on preview" : "Annotate"}
-          </button>
-        ) : null}
-        {annotationMenu ? (
-          <div className="absolute right-0 top-full z-20 mt-2 flex w-48 flex-col rounded-[var(--radius-md)] border border-line bg-surface p-1 shadow-xl">
-            {onAddRegion ? (
+          <Menu
+            align="end"
+            items={[
+              ...(onAddRegion
+                ? [{ label: "Draw on preview", onSelect: () => { setMarking(true); setCommenting(false); } }]
+                : []),
+              ...(onAddComment
+                ? [{ label: "Comment on version", onSelect: () => { setCommenting(true); setMarking(false); } }]
+                : []),
+            ]}
+            trigger={({ open, toggle }) => (
               <button
                 type="button"
-                onClick={() => {
-                  setMarking(true);
-                  setCommenting(false);
-                  setAnnotationMenu(false);
-                }}
-                className="rounded-[var(--radius-sm)] px-2.5 py-2 text-left text-[length:var(--text-meta)] text-text hover:bg-hover"
+                onClick={() => { setCommenting(false); setDraft(null); toggle(); }}
+                aria-expanded={open}
+                className={`inline-flex items-center gap-1.5 rounded-[var(--radius-sm)] px-2 py-1 text-[length:var(--text-micro)] transition-colors duration-[var(--duration-fast)] ${
+                  marking || commenting || open ? "bg-accent/15 text-accent" : "text-muted hover:text-text"
+                }`}
               >
-                Draw on preview
+                <Icon name="pencil" size={12} />
+                {marking ? "Draw on preview" : "Annotate"}
               </button>
-            ) : null}
-            {onAddComment ? (
-              <button
-                type="button"
-                onClick={() => {
-                  setCommenting(true);
-                  setMarking(false);
-                  setAnnotationMenu(false);
-                }}
-                className="rounded-[var(--radius-sm)] px-2.5 py-2 text-left text-[length:var(--text-meta)] text-text hover:bg-hover"
-              >
-                Comment on version
-              </button>
-            ) : null}
-          </div>
+            )}
+          />
         ) : null}
       </div>
 
