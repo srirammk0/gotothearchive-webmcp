@@ -59,9 +59,9 @@ function FeedbackControls({
           >
             {dimension ? dimensionLabel(dimension) : "General"}
             <Icon
-              name="chevronRight"
+              name="chevronDown"
               size={11}
-              className={`transition-transform duration-[var(--duration-fast)] ${open ? "-rotate-90" : "rotate-90"}`}
+              className={`transition-transform duration-[var(--duration-fast)] ${open ? "rotate-180" : ""}`}
             />
           </button>
         )}
@@ -193,6 +193,11 @@ export function ArtifactViewer({ version, annotations = [], onAddRegion, onAddCo
               >
                 <Icon name="pencil" size={12} />
                 {marking ? "Draw on preview" : "Annotate"}
+                <Icon
+                  name="chevronDown"
+                  size={10}
+                  className={`transition-transform duration-[var(--duration-fast)] ${open ? "rotate-180" : ""}`}
+                />
               </button>
             )}
           />

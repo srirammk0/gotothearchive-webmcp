@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { motion } from "motion/react";
+import { AnimatePresence, motion } from "motion/react";
 import { duration, ease } from "../tokens";
 
 export interface MenuItem {
@@ -79,15 +79,17 @@ export function Menu({
   return (
     <div ref={anchorRef} className={className || "inline-flex"}>
       {trigger({ open, toggle: () => setOpen((v) => !v) })}
-      {open &&
-        createPortal(
+      {createPortal(
+        <AnimatePresence>
+          {open && (
           <motion.div
             ref={panelRef}
-            initial={{ opacity: 0, y: -4, scale: 0.97 }}
+            initial={{ opacity: 0, y: -8, scale: 0.94 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
-            transition={{ duration: duration.fast, ease }}
+            exit={{ opacity: 0, y: -6, scale: 0.96, transition: { duration: duration.fast, ease } }}
+            transition={{ duration: duration.base, ease }}
             role="menu"
-            style={{ position: "fixed", top: pos?.top ?? -9999, left: pos?.left ?? -9999 }}
+            style={{ position: "fixed", top: pos?.top ?? -9999, left: pos?.left ?? -9999, transformOrigin: side === "top" ? "bottom left" : "top left" }}
             className="z-[70] min-w-44 overflow-hidden rounded-[var(--radius-md)] border border-line bg-raised p-1 shadow-xl shadow-black/40"
           >
             {items.map((item, i) => (
@@ -107,9 +109,11 @@ export function Menu({
                 {item.label}
               </button>
             ))}
-          </motion.div>,
-          document.body,
-        )}
+          </motion.div>
+          )}
+        </AnimatePresence>,
+        document.body,
+      )}
     </div>
   );
 }
