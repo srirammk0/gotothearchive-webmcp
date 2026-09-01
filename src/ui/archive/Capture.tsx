@@ -35,6 +35,7 @@ export function Capture({ region, onCaptured }: CaptureProps) {
   const [text, setText] = useState("");
   const [status, setStatus] = useState<Status>({ kind: "idle" });
   const [dragging, setDragging] = useState(false);
+  const [fileCue, setFileCue] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   async function submitNote() {
@@ -93,7 +94,7 @@ export function Capture({ region, onCaptured }: CaptureProps) {
           setDragging(false);
           if (e.dataTransfer.files.length) void submitFiles(e.dataTransfer.files);
         }}
-        className={`rounded-[var(--radius-md)] border transition-colors duration-[var(--duration-fast)] ${
+        className={`rounded-[var(--radius-md)] border shadow-sm transition-all duration-[var(--duration-fast)] focus-within:shadow-md ${
           dragging ? "border-muted bg-raised" : "border-line-soft bg-canvas"
         }`}
       >
@@ -115,15 +116,26 @@ export function Capture({ region, onCaptured }: CaptureProps) {
           }}
           className="w-full resize-none bg-transparent px-3.5 py-3 text-[length:var(--text-body)] leading-relaxed text-text placeholder:text-faint"
         />
-        <div className="flex items-center justify-between gap-3 border-t border-line-soft px-3 py-2">
+        <div className="flex items-center justify-between gap-3 px-3 py-2">
           <button
             type="button"
-            onClick={() => fileInputRef.current?.click()}
-            className="inline-flex items-center gap-1.5 text-[length:var(--text-micro)] text-muted transition-colors duration-[var(--duration-fast)] hover:text-text"
+            onClick={() => {
+              setFileCue((active) => !active);
+              fileInputRef.current?.click();
+            }}
+            className="group inline-flex items-center gap-1.5 rounded-[var(--radius-sm)] px-1.5 py-1 text-[length:var(--text-micro)] text-muted transition-all duration-[var(--duration-fast)] hover:bg-raised hover:text-text active:scale-95"
           >
-            <Icon name="plus" size={12} /> Add a file
+            <span className={`inline-flex transition-transform duration-200 ${fileCue ? "rotate-45 scale-110" : "group-hover:rotate-90"}`}>
+              <Icon name="plus" size={12} />
+            </span>
+            {fileCue ? "Ready to add" : "Add a file"}
           </button>
-          <Button variant="primary" onClick={() => void submitNote()} disabled={!text.trim()}>
+          <Button
+            variant="primary"
+            onClick={() => void submitNote()}
+            disabled={!text.trim()}
+            className="transition-all duration-[var(--duration-fast)] hover:-translate-y-px hover:bg-text hover:shadow-[0_0_16px_rgba(255,255,255,0.18)] active:translate-y-0 active:scale-95"
+          >
             Save to {region.name}
           </Button>
         </div>
@@ -136,6 +148,7 @@ export function Capture({ region, onCaptured }: CaptureProps) {
           onChange={(e) => {
             if (e.target.files?.length) void submitFiles(e.target.files);
             e.target.value = "";
+            setFileCue(false);
           }}
         />
       </div>

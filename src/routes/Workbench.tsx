@@ -16,8 +16,8 @@ import { ArtifactViewer } from "../ui/workbench/ArtifactViewer";
 import { ArtifactThumb } from "../ui/workbench/ArtifactThumb";
 import { AnnotationRail } from "../ui/workbench/AnnotationRail";
 import { ProvenanceStrip } from "../ui/workbench/ProvenanceStrip";
+import { AgentAccess } from "../ui/AgentAccess";
 import { useWorkbench } from "../ui/workbench/useWorkbench";
-import { useCapabilities } from "../webmcp/useCapabilities";
 
 const DECISION_LABEL: Record<ReviewDecision, string> = {
   approve: "Approve",
@@ -70,15 +70,6 @@ function StateBadge({ state }: { state: string }) {
       {stateLabel(state)}
     </span>
   );
-}
-
-/** Registers page-specific review context only while an artifact is open. */
-function ArtifactCapabilitySync({ taskId, artifactId, agentSessionId }: { taskId: string; artifactId: string; agentSessionId: string | null }) {
-  const { refresh } = useCapabilities(taskId, artifactId);
-  useEffect(() => {
-    if (agentSessionId) void refresh();
-  }, [agentSessionId, refresh]);
-  return null;
 }
 
 function ArtifactCard({ artifact, onOpen }: { artifact: WorkbenchArtifact; onOpen: () => void }) {
@@ -200,7 +191,7 @@ function ArtifactList({ regions }: { regions: Region[] }) {
 export function Workbench() {
   const { artifactId } = useParams();
   const navigate = useNavigate();
-  const { regions, agentSessionId } = useSpace();
+  const { regions } = useSpace();
   const { status, error, data, selectVersion, addAnnotation, decide } = useWorkbench(artifactId);
   const [decisionPending, setDecisionPending] = useState(false);
   const [decisionError, setDecisionError] = useState<string | null>(null);
@@ -257,7 +248,6 @@ export function Workbench() {
 
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-7">
-      <ArtifactCapabilitySync taskId={artifact.task_id} artifactId={artifact.id} agentSessionId={agentSessionId} />
         <header className="flex flex-col gap-4">
           <div className="flex min-w-0 items-start justify-between gap-4">
             <div>
@@ -300,18 +290,21 @@ export function Workbench() {
         <ArtifactViewer
           version={version}
           annotations={annotations}
-          onAddRegion={(target, comment) =>
-            void addAnnotation({ sentiment: "neutral", comment, dimension: null, target })
+          onAddRegion={(target, { comment, sentiment, dimension }) =>
+            void addAnnotation({ sentiment, comment, dimension, target })
           }
-          onAddComment={(comment) => void addAnnotation({ sentiment: "neutral", comment, dimension: null })}
+          onAddComment={({ comment, sentiment, dimension }) =>
+            void addAnnotation({ sentiment, comment, dimension })
+          }
         />
 
         <AnnotationRail annotations={annotations} />
 
         <details className="border-t border-line-soft pt-3">
           <summary className="cursor-pointer text-[length:var(--text-meta)] text-muted hover:text-text">Context & access</summary>
-          <div className="pt-4">
+          <div className="flex flex-col gap-4 pt-4">
             <ProvenanceStrip provenance={provenance} />
+            <AgentAccess taskId={artifact.task_id} regions={regions} activeArtifactId={artifact.id} />
           </div>
         </details>
 
@@ -340,6 +333,12 @@ export function Workbench() {
             </span>
           ) : null}
         </div>
+        {version.state === "changes_requested" ? (
+          <p className="self-center text-[length:var(--text-meta)] text-muted">
+            Changes requested — the agent can read these notes via trace_artifact_influences and submit v
+            {version.version_no + 1}.
+          </p>
+        ) : null}
         <Modal open={deleteOpen} onClose={() => !deletePending && setDeleteOpen(false)} title="Delete artifact">
           <div className="flex flex-col gap-4">
             <p className="text-[length:var(--text-body)] leading-relaxed text-muted">Delete “{artifact.title}” and its version history? This cannot be undone.</p>

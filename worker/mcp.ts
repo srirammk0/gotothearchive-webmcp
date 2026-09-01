@@ -9,6 +9,7 @@ import {
   DENIAL_REASONS,
   GRANT_LEVELS,
   RELATIONSHIPS,
+  type ContextItem,
   type Relationship,
   type ToolCallRequest,
   type ToolCallResponse,
@@ -25,11 +26,39 @@ function denyResult(reason: string): ToolCallResponse {
   return { ok: false, error: reason, denial: true, reason };
 }
 
+/**
+ * WebMCP hygiene: fence untrusted archive text so an agent can't read it as
+ * instructions (developer.chrome.com/docs/agents/security §spotlighting).
+ * The guillemets are stripped from the value first, so content can't forge or
+ * close the fence — a note containing "«/untrusted»" cannot break out.
+ */
+export function spotlight(s?: string | null): string {
+  return s ? `«untrusted»${s.replace(/[«»]/g, "")}«/untrusted»` : "";
+}
+
+/** Keep tool outputs small — detail is a follow-up call away. */
+export function clip(s: string, n: number): string {
+  return s.length > n ? `${s.slice(0, n)}…` : s;
+}
+
+/** Trimmed, spotlighted view of an archive item for a tool result. */
+function slimItem(it: ContextItem) {
+  return {
+    id: it.id,
+    type: it.type,
+    region_id: it.region_id,
+    source_url: it.source_url,
+    title: spotlight(clip(it.title, 120)),
+    semantic_text: it.semantic_text ? spotlight(clip(it.semantic_text, 300)) : null,
+  };
+}
+
 export async function handleToolCall(
   body: ToolCallRequest,
   q: Queries,
   human: ResolvedHuman,
   now: number,
+  env?: Env,
 ): Promise<ToolCallResponse> {
   // Re-resolve session, task, and their linkage. Never trust body.task_id / body.agent_session_id alone.
   const session = q.getAgentSession(body.agent_session_id);
@@ -153,7 +182,13 @@ export async function handleToolCall(
         }
       }
 
-      return { ok: true, result: { items } };
+      const compact = items.slice(0, 8).map((ret) => ({
+        id: ret.item.id,
+        region: ret.region_slug,
+        title: spotlight(clip(ret.item.title, 120)),
+        why: clip(ret.why, 200),
+      }));
+      return { ok: true, result: { items: compact } };
     }
 
     case "inspect_context_item": {
@@ -182,7 +217,7 @@ export async function handleToolCall(
         tool_name: body.tool,
         at: now,
       });
-      return { ok: true, result: { item } };
+      return { ok: true, result: { item: slimItem(item) } };
     }
 
     case "inspect_relationships": {
@@ -206,7 +241,13 @@ export async function handleToolCall(
       if (!result.ok) return denyResult(result.reason);
       const allowedIds = authorizedRegionIds(q, task.id, now);
       const graphResult = traverse(q, [itemId], allowedIds);
-      return { ok: true, result: graphResult };
+      return {
+        ok: true,
+        result: {
+          nodes: graphResult.nodes.slice(0, 12).map(slimItem),
+          edges: graphResult.edges.slice(0, 12),
+        },
+      };
     }
 
     case "get_taste_for_task": {
@@ -227,7 +268,19 @@ export async function handleToolCall(
       }
       const signals = q
         .listTasteSignals(task.space_id)
-        .filter((s) => s.status === "confirmed" || s.status === "proposed");
+        .filter((s) => s.status === "confirmed" || s.status === "proposed")
+        .slice(0, 12)
+        .map((s) => ({
+          id: s.id,
+          status: s.status,
+          scope: s.scope,
+          dimensions: s.dimensions,
+          confidence: s.confidence,
+          // A confirmed signal has passed human review — it is a directive, not
+          // untrusted input. A proposed one is still raw derived-from-annotation
+          // text, so it stays spotlighted.
+          statement: s.status === "proposed" ? spotlight(clip(s.statement, 300)) : clip(s.statement, 300),
+        }));
       return { ok: true, result: { signals } };
     }
 
@@ -262,8 +315,17 @@ export async function handleToolCall(
             parent_version_id: version.parent_version_id,
             state: version.state,
           },
-          annotations: q.listAnnotations(version.id),
-          influences,
+          annotations: q.listAnnotations(version.id).slice(0, 12).map((a) => ({
+            id: a.id,
+            sentiment: a.sentiment,
+            dimension: a.dimension,
+            status: a.status,
+            comment: spotlight(clip(a.comment, 300)),
+          })),
+          influences: influences.slice(0, 12).map((inf) => ({
+            influence: inf.influence,
+            item: inf.item ? slimItem(inf.item) : null,
+          })),
         },
       };
     }
@@ -369,7 +431,14 @@ export async function handleToolCall(
         });
       }
 
-      return { ok: true, result: { artifact_id: artifactId, version_id: versionId } };
+      return {
+        ok: true,
+        result: {
+          artifact_id: artifactId,
+          version_id: versionId,
+          next: "Awaiting human review in the Workbench. Call trace_artifact_influences to read annotations before submitting a revision.",
+        },
+      };
     }
 
     case "record_feedback": {
@@ -413,9 +482,15 @@ export async function handleToolCall(
       });
 
       // Agent-authored feedback feeds the same taste-derivation loop as human annotations.
-      deriveTasteSignals(q, task.space_id, now);
+      await deriveTasteSignals(q, task.space_id, now, env);
 
-      return { ok: true, result: { annotation_id: annotationId } };
+      return {
+        ok: true,
+        result: {
+          annotation_id: annotationId,
+          next: "Recorded. This may surface a proposed taste signal for the person to confirm.",
+        },
+      };
     }
 
     case "propose_context_change": {

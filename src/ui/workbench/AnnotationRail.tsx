@@ -1,4 +1,5 @@
 import type { Annotation } from "@shared/contract";
+import { DIMENSION_LABEL } from "./ArtifactViewer";
 
 /**
  * Review feedback is intentionally quiet until needed. Creating a note lives
@@ -14,8 +15,22 @@ export function AnnotationRail({ annotations }: { annotations: Annotation[] }) {
       <ul className="mt-3 flex flex-col">
         {annotations.map((annotation) => (
           <li key={annotation.id} className="border-b border-line-soft py-2.5 text-[length:var(--text-meta)] last:border-0">
-            <p className="text-[length:var(--text-micro)] text-faint">
-              {annotation.target?.kind === "region" ? "Marked region" : "Version note"}
+            <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[length:var(--text-micro)] text-faint">
+              <span>{annotation.target?.kind === "region" ? "Marked region" : "Version note"}</span>
+              {annotation.sentiment === "positive" ? (
+                <span className="inline-flex items-center gap-1 text-good">
+                  <span className="h-1.5 w-1.5 rounded-full bg-good" />
+                  Works
+                </span>
+              ) : annotation.sentiment === "negative" ? (
+                <span className="inline-flex items-center gap-1 text-bad">
+                  <span className="h-1.5 w-1.5 rounded-full bg-bad" />
+                  Doesn't work
+                </span>
+              ) : null}
+              {annotation.dimension ? (
+                <span>{DIMENSION_LABEL[annotation.dimension] ?? annotation.dimension}</span>
+              ) : null}
             </p>
             <p className="mt-1 leading-relaxed text-text">{annotation.comment}</p>
           </li>

@@ -106,13 +106,13 @@ export async function handleRoute(
     case API.capabilities:
       return handleCapabilities(request, q, human.human_id);
     case API.toolCall:
-      return await handleMcpCall(request, q, human);
+      return await handleMcpCall(request, q, human, env);
     case API.artifacts:
       return handleArtifacts(request, q, human.human_id);
     case API.annotations:
-      return await handleAnnotations(request, q, human.human_id);
+      return await handleAnnotations(request, q, human.human_id, env);
     case API.decisions:
-      return await handleDecisions(request, q, human.human_id);
+      return await handleDecisions(request, q, human.human_id, env);
     case API.taste:
       return await handleTaste(request, q, human.human_id);
     case API.tasteEvidence:
@@ -659,12 +659,13 @@ async function handleMcpCall(
   request: Request,
   q: Queries,
   human: { human_id: string },
+  env: Env,
 ): Promise<Response> {
   if (request.method !== "POST") return badRequest("POST required");
   const over = meter(q, human.human_id, "agent_calls");
   if (over) return over;
   const body = (await request.json()) as ToolCallRequest;
-  const result = await handleToolCall(body, q, human, Date.now());
+  const result = await handleToolCall(body, q, human, Date.now(), env);
   if (result.ok) {
     const session = q.getAgentSession(body.agent_session_id);
     q.insertAuditEvent({
@@ -735,7 +736,7 @@ function handleArtifacts(request: Request, q: Queries, humanId: string): Respons
 
 /* ---------------- annotations ---------------- */
 
-async function handleAnnotations(request: Request, q: Queries, humanId: string): Promise<Response> {
+async function handleAnnotations(request: Request, q: Queries, humanId: string, env: Env): Promise<Response> {
   if (request.method === "GET") {
     const url = new URL(request.url);
     const versionId = url.searchParams.get("version_id");
@@ -769,7 +770,7 @@ async function handleAnnotations(request: Request, q: Queries, humanId: string):
       created_at: Date.now(),
     });
     // Step 5 of the taste loop: this new note may complete a candidate signal.
-    deriveTasteSignals(q, spaceIdFor(humanId), Date.now());
+    await deriveTasteSignals(q, spaceIdFor(humanId), Date.now(), env);
     return json({ ok: true, annotation: { id } });
   }
   return badRequest("unsupported method");
@@ -777,7 +778,7 @@ async function handleAnnotations(request: Request, q: Queries, humanId: string):
 
 /* ---------------- decisions ---------------- */
 
-async function handleDecisions(request: Request, q: Queries, humanId: string): Promise<Response> {
+async function handleDecisions(request: Request, q: Queries, humanId: string, env: Env): Promise<Response> {
   if (request.method !== "POST") return badRequest("POST required");
   const body = (await request.json()) as { version_id: string; decision: string; note?: string | null };
   if (!(REVIEW_DECISIONS as readonly string[]).includes(body.decision)) {
@@ -837,7 +838,7 @@ async function handleDecisions(request: Request, q: Queries, humanId: string): P
       });
     }
   }
-  deriveTasteSignals(q, spaceIdFor(humanId), now);
+  await deriveTasteSignals(q, spaceIdFor(humanId), now, env);
   return json({ ok: true, version: q.getArtifactVersion(body.version_id) });
 }
 

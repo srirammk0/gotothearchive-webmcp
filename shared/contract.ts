@@ -448,6 +448,10 @@ export interface ToolSpec {
   };
   /** Minimum grant level on at least one region for this tool to exist at all. */
   requires: GrantLevel;
+  /** Human-readable label shown in the Chrome DevTools WebMCP panel. */
+  title?: string;
+  /** Chrome WebMCP hints: readOnlyHint lets the agent skip confirmation; untrustedContentHint marks output as user-generated / externally-sourced. */
+  annotations?: { readOnlyHint?: boolean; untrustedContentHint?: boolean };
   /**
    * Plain-language reason this tool is currently registered.
    * Rendered verbatim in Agent Lens.

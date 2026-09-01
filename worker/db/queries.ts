@@ -1234,7 +1234,16 @@ export class Queries {
       .map(toTasteSignal);
   }
 
-  /** Every open annotation in a space, with the version's task, for taste derivation. */
+  /**
+   * Every open annotation in a space that taste derivation may learn from.
+   *
+   * The version must be agent-authored and grounded in real Archive material
+   * (an influence row) — we never learn taste from ungrounded output. It must
+   * also carry a human decision: `changes_requested` is included alongside the
+   * approved states because "annotate → request changes → a taste signal is
+   * proposed → confirm it → the agent revises" is the core learning loop, and
+   * `handleDecisions` derives immediately after setting that state.
+   */
   openAnnotationsForSpace(spaceId: string): (Annotation & { space_id: string })[] {
     return this.sql
       .exec<AnnotationRow & { space_id: string }>(
@@ -1244,7 +1253,7 @@ export class Queries {
          JOIN artifacts ar ON ar.id = av.artifact_id
          WHERE ar.space_id = ?
            AND a.status = 'open'
-           AND av.state IN ('approved', 'approved_with_notes')
+           AND av.state IN ('approved', 'approved_with_notes', 'changes_requested')
            AND av.agent_session_id IS NOT NULL
            AND EXISTS (SELECT 1 FROM influences i WHERE i.version_id = av.id)`,
         spaceId,

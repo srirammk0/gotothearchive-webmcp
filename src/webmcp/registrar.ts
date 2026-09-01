@@ -12,8 +12,10 @@ import type { ToolSpec } from "@shared/contract";
 interface ModelContextTool {
   name: string;
   description: string;
+  title?: string;
+  annotations?: ToolSpec["annotations"];
   inputSchema: ToolSpec["inputSchema"];
-  execute: (input: unknown, ctx: { signal: AbortSignal }) => Promise<string>;
+  execute: (input: unknown, ctx: { signal: AbortSignal }) => Promise<{ content: { type: "text"; text: string }[] }>;
 }
 
 interface ModelContextLike {
@@ -65,8 +67,17 @@ export class Registrar {
   }
 
   /** Diff `specs` against what's live and register/unregister/re-register the delta. */
+  private subscribed = false;
+
   async sync(specs: ToolSpec[], execute: Executor): Promise<void> {
     const mc = getModelContext();
+
+    // Chrome fires `toolchange` on the model-context object whenever the live
+    // tool set shifts (including changes we didn't make). Subscribe once.
+    if (mc?.addEventListener && !this.subscribed) {
+      this.subscribed = true;
+      mc.addEventListener("toolchange", () => this.emit());
+    }
     const nextByName = new Map<string, ToolSpec>(specs.map((s) => [s.name, s]));
 
     // removed or changed → abort
@@ -87,8 +98,10 @@ export class Registrar {
           {
             name: spec.name,
             description: spec.description,
+            title: spec.title,
+            annotations: spec.annotations,
             inputSchema: spec.inputSchema,
-            execute: (input) => execute(spec, input),
+            execute: async (input) => ({ content: [{ type: "text", text: await execute(spec, input) }] }),
           },
           { signal: controller.signal },
         );

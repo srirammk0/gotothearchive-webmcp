@@ -244,6 +244,8 @@ function RegionSection({
   onRename,
   onDelete,
   onOpenFolder,
+  onAdd,
+  childFolders,
   showOpen,
 }: {
   view: ArchiveRegionView;
@@ -257,13 +259,15 @@ function RegionSection({
   onRename: (region: Region, name: string) => void;
   onDelete: (region: Region) => void;
   onOpenFolder: (region: Region) => void;
+  onAdd: (region: Region) => void;
+  childFolders: Region[];
   showOpen: boolean;
 }) {
   const [renaming, setRenaming] = useState(false);
   const [draft, setDraft] = useState(view.region.name);
 
   return (
-    <section className="flex flex-col gap-4">
+    <section className="flex flex-col">
       <div className="flex items-center justify-between gap-4 border-b border-line-soft pb-2.5">
         {renaming ? (
           <form
@@ -326,6 +330,14 @@ function RegionSection({
               {view.items.length} {view.items.length === 1 ? "item" : "items"}
             </span>
           ) : null}
+          <button
+            type="button"
+            aria-label={`Add to ${view.region.name}`}
+            onClick={() => onAdd(view.region)}
+            className="rounded-[var(--radius-sm)] p-1 text-muted transition-colors duration-[var(--duration-fast)] hover:bg-hover hover:text-text"
+          >
+            <Icon name="plus" size={14} />
+          </button>
           {showOpen ? (
             <button
               type="button"
@@ -339,24 +351,55 @@ function RegionSection({
         </div>
       </div>
 
-      {collapsed ? null : view.items.length === 0 ? (
-        <EmptyRow />
-      ) : (
-        <ul className="grid grid-flow-dense grid-cols-2 gap-x-4 gap-y-14 pb-10 [grid-auto-rows:minmax(8rem,auto)] sm:grid-cols-4 lg:grid-cols-4 xl:grid-cols-6">
-          {view.items.map((item, i) => (
-            <Tile
-              key={item.id}
-              item={item}
-              index={i}
-              anySelected={anySelected}
-              selected={selectedIds.has(item.id)}
-              onToggle={onToggle}
-              onOpen={onOpenItem}
-              onTogglePin={onTogglePin}
-            />
-          ))}
-        </ul>
-      )}
+      <AnimatePresence initial={false}>
+        {collapsed ? null : (
+          <motion.div
+            key="body"
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: duration.base, ease }}
+            className="overflow-hidden"
+          >
+          <div className="pt-4">
+            {childFolders.length > 0 ? (
+              <ul className="mb-6 flex flex-wrap gap-2">
+                {childFolders.map((f) => (
+                  <li key={f.id}>
+                    <button
+                      type="button"
+                      onClick={() => onOpenFolder(f)}
+                      className="inline-flex items-center gap-2 rounded-[var(--radius-md)] border border-line-soft bg-surface px-3 py-2 text-[length:var(--text-meta)] text-text transition-colors duration-[var(--duration-fast)] hover:border-line hover:bg-hover"
+                    >
+                      <Icon name="folder" size={14} className="text-faint" />
+                      {f.name}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+            {view.items.length === 0 ? (
+              childFolders.length > 0 ? null : <EmptyRow />
+            ) : (
+              <ul className="grid grid-flow-dense grid-cols-2 gap-x-4 gap-y-14 pb-10 [grid-auto-rows:minmax(8rem,auto)] sm:grid-cols-4 lg:grid-cols-4 xl:grid-cols-6">
+                {view.items.map((item, i) => (
+                  <Tile
+                    key={item.id}
+                    item={item}
+                    index={i}
+                    anySelected={anySelected}
+                    selected={selectedIds.has(item.id)}
+                    onToggle={onToggle}
+                    onOpen={onOpenItem}
+                    onTogglePin={onTogglePin}
+                  />
+                ))}
+              </ul>
+            )}
+          </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </section>
   );
 }
@@ -385,7 +428,23 @@ export function Archive() {
   const regions = regionList ?? spaceRegions;
   const activeFolder = folderSlug ? regions.find((r) => r.slug === folderSlug) ?? null : null;
 
-  useTrail(activeFolder ? [{ label: "Archive", to: "/" }, { label: activeFolder.name }] : [{ label: "Archive" }]);
+  // Full parent chain, root → current, so nested folders read as a real path.
+  const folderPath = useMemo(() => {
+    const chain: Region[] = [];
+    for (let cur = activeFolder; cur; cur = cur.parent_id ? regions.find((r) => r.id === cur!.parent_id) ?? null : null) {
+      chain.unshift(cur);
+    }
+    return chain;
+  }, [activeFolder, regions]);
+
+  useTrail(
+    folderPath.length
+      ? [
+          { label: "Archive", to: "/" },
+          ...folderPath.map((r, i) => (i === folderPath.length - 1 ? { label: r.name } : { label: r.name, to: `/?folder=${r.slug}` })),
+        ]
+      : [{ label: "Archive" }],
+  );
 
   useEffect(() => {
     if (spaceRegions.length && !regionList) setRegionList(spaceRegions);
@@ -487,17 +546,30 @@ export function Archive() {
   };
 
   const visibleRegions = useMemo(
-    () =>
-      activeFolder
-        ? [activeFolder, ...regions.filter((r) => r.parent_id === activeFolder.id)]
-        : regions.filter((r) => r.parent_id === null),
+    () => (activeFolder ? [activeFolder] : regions.filter((r) => r.parent_id === null)),
     [regions, activeFolder],
   );
 
-  const moveTargets = useMemo(
-    () => (activeFolder ? regions.filter((r) => r.parent_id === activeFolder.id) : regions.filter((r) => r.parent_id === null)),
-    [regions, activeFolder],
-  );
+  const childFoldersOf = (regionId: string) => regions.filter((r) => r.parent_id === regionId);
+
+  // Every folder is a move target, parents and children alike, labelled by its
+  // full path. Only the folder currently open is excluded (nothing to do).
+  const moveTargets = useMemo(() => {
+    const pathOf = (r: Region): string => {
+      const parts = [r.name];
+      for (let p = r.parent_id; p; ) {
+        const parent = regions.find((x) => x.id === p);
+        if (!parent) break;
+        parts.unshift(parent.name);
+        p = parent.parent_id;
+      }
+      return parts.join(" / ");
+    };
+    return regions
+      .filter((r) => r.id !== activeFolder?.id)
+      .map((r) => ({ slug: r.slug, label: pathOf(r) }))
+      .sort((a, b) => a.label.localeCompare(b.label));
+  }, [regions, activeFolder]);
 
   const regionViews: ArchiveRegionView[] = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -553,21 +625,11 @@ export function Archive() {
                 {activeFolder ? activeFolder.name : "Archive"}
               </h1>
               <p className="mt-1 text-[length:var(--text-meta)] text-faint">
-                {activeFolder ? (
-                  <button
-                    type="button"
-                    onClick={() => setParams({}, { replace: true })}
-                    className="transition-colors duration-[var(--duration-fast)] hover:text-text"
-                  >
-                    ← All folders
-                  </button>
-                ) : (
-                  `${space?.name} · ${total} items`
-                )}
+                {activeFolder ? `${total} ${total === 1 ? "item" : "items"}` : `${space?.name} · ${total} items`}
               </p>
             </div>
             <div className="flex items-center gap-2">
-              <label className="relative w-40 sm:w-52">
+              <label className="relative w-48 sm:w-64">
                 <Icon
                   name="search"
                   size={14}
@@ -578,30 +640,17 @@ export function Archive() {
                   placeholder="Search"
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
-                  className={`${controlClass} box-border h-10 py-0 pl-8 leading-none`}
+                  className={`${controlClass} box-border h-9 py-0 pl-8 leading-none focus:outline-none focus:ring-0`}
                 />
               </label>
-              {activeFolder ? (
-                <>
-                  <Button variant="secondary" className="box-border h-10" onClick={() => { setFolderParent(activeFolder); setFolderModal(true); }}>
-                    <Icon name="plus" size={13} />
-                    New folder
-                  </Button>
-                  <button
-                    type="button"
-                    aria-label={`Add to ${activeFolder.name}`}
-                    onClick={() => setCaptureFor(activeFolder)}
-                    className="inline-flex h-10 w-10 items-center justify-center rounded-[var(--radius-sm)] bg-text text-canvas transition-colors hover:bg-text/85"
-                  >
-                    <Icon name="plus" size={14} />
-                  </button>
-                </>
-              ) : (
-                <Button variant="primary" className="box-border h-10" onClick={() => { setFolderParent(null); setFolderModal(true); }}>
-                  <Icon name="plus" size={13} />
-                  New folder
-                </Button>
-              )}
+              <button
+                type="button"
+                onClick={() => { setFolderParent(activeFolder); setFolderModal(true); }}
+                className="box-border inline-flex h-9 items-center gap-1.5 rounded-[var(--radius-md)] border border-line bg-raised px-3 text-[length:var(--text-meta)] text-text transition-colors duration-[var(--duration-fast)] hover:bg-hover focus:outline-none focus:ring-0"
+              >
+                <Icon name="plus" size={13} />
+                New folder
+              </button>
             </div>
           </div>
 
@@ -634,7 +683,7 @@ export function Archive() {
           ) : null}
         </header>
 
-        {activeFolder && total === 0 && !filtered ? (
+        {activeFolder && total === 0 && !filtered && childFoldersOf(activeFolder.id).length === 0 ? (
           <EmptyState
             title={activeFolder ? "This folder is empty" : "Your archive is empty"}
             body="Add a note, link, image, or PDF to start building this space's context."
@@ -687,6 +736,8 @@ export function Archive() {
               onRename={renameFolder}
               onDelete={setFolderToDelete}
               onOpenFolder={(r) => setParams({ folder: r.slug })}
+              onAdd={setCaptureFor}
+              childFolders={childFoldersOf(view.region.id)}
               showOpen={!activeFolder}
             />
           ))
@@ -709,7 +760,7 @@ export function Archive() {
             <span aria-hidden="true" className="h-4 w-px bg-line" />
             <Menu
               side="top"
-              items={moveTargets.map((r) => ({ label: r.name, onSelect: () => moveSelected(r.slug), disabled: busy }))}
+              items={moveTargets.map((r) => ({ label: r.label, onSelect: () => moveSelected(r.slug), disabled: busy }))}
               trigger={({ open, toggle }) => (
                 <Button variant="secondary" onClick={toggle} aria-expanded={open}>
                   Move to

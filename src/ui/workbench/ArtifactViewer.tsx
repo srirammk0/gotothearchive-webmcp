@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { AnimatePresence, motion } from "motion/react";
-import type { Annotation, ArtifactVersion } from "@shared/contract";
+import { TASTE_DIMENSIONS, type Annotation, type ArtifactVersion } from "@shared/contract";
 import { Button } from "../primitives/Button";
 import { Icon } from "../primitives/Icon";
 import { duration, ease } from "../tokens";
@@ -9,13 +9,75 @@ import { isComponentPreview, previewSandbox, previewSrcDoc } from "./componentPr
 
 type Rect = { x: number; y: number; w: number; h: number };
 
+type FeedbackPayload = { comment: string; sentiment: Annotation["sentiment"]; dimension: string | null };
+
+/** Humanized labels for the taste dimensions, keyed by contract slug. */
+export const DIMENSION_LABEL: Record<string, string> = {
+  typography: "Typography",
+  composition: "Composition",
+  layout_density: "Layout density",
+  color: "Color",
+  imagery: "Imagery",
+  motion: "Motion",
+  visual_hierarchy: "Visual hierarchy",
+  tone_voice: "Tone & voice",
+  structure_clarity: "Structure & clarity",
+};
+
+const SENTIMENTS: { value: Annotation["sentiment"]; label: string; on: string }[] = [
+  { value: "positive", label: "Works", on: "bg-good/15 text-good" },
+  { value: "neutral", label: "Neutral", on: "bg-hover text-muted" },
+  { value: "negative", label: "Doesn't work", on: "bg-bad/15 text-bad" },
+];
+
+function FeedbackControls({
+  sentiment,
+  dimension,
+  onSentiment,
+  onDimension,
+}: {
+  sentiment: Annotation["sentiment"];
+  dimension: string | null;
+  onSentiment: (s: Annotation["sentiment"]) => void;
+  onDimension: (d: string | null) => void;
+}) {
+  return (
+    <div className="flex flex-wrap items-center gap-1.5">
+      {SENTIMENTS.map((s) => (
+        <button
+          key={s.value}
+          type="button"
+          onClick={() => onSentiment(s.value)}
+          className={`rounded-[var(--radius-sm)] px-2 py-1 text-[length:var(--text-micro)] transition-colors duration-[var(--duration-fast)] ${
+            sentiment === s.value ? s.on : "bg-hover text-muted"
+          }`}
+        >
+          {s.label}
+        </button>
+      ))}
+      <select
+        value={dimension ?? ""}
+        onChange={(e) => onDimension(e.target.value || null)}
+        className="rounded-[var(--radius-sm)] bg-hover px-2 py-1 text-[length:var(--text-micro)] text-muted"
+      >
+        <option value="">General</option>
+        {TASTE_DIMENSIONS.map((d) => (
+          <option key={d} value={d}>
+            {DIMENSION_LABEL[d] ?? d}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
 export interface ArtifactViewerProps {
   version: ArtifactVersion;
   annotations?: Annotation[];
   /** Fired when the reviewer draws a region and writes a comment on it. */
-  onAddRegion?: (target: { kind: "region" } & Rect, comment: string) => void;
+  onAddRegion?: (target: { kind: "region" } & Rect, payload: FeedbackPayload) => void;
   /** Fired from the same compact annotation control for a whole-artifact note. */
-  onAddComment?: (comment: string) => void;
+  onAddComment?: (payload: FeedbackPayload) => void;
 }
 
 /**
@@ -30,6 +92,8 @@ export function ArtifactViewer({ version, annotations = [], onAddRegion, onAddCo
   const [commenting, setCommenting] = useState(false);
   const [draft, setDraft] = useState<Rect | null>(null);
   const [comment, setComment] = useState("");
+  const [sentiment, setSentiment] = useState<Annotation["sentiment"]>("neutral");
+  const [dimension, setDimension] = useState<string | null>(null);
   const startRef = useRef<{ x: number; y: number } | null>(null);
   const layerRef = useRef<HTMLDivElement>(null);
 
@@ -78,18 +142,24 @@ export function ArtifactViewer({ version, annotations = [], onAddRegion, onAddCo
     if (draft && (draft.w < 0.02 || draft.h < 0.02)) setDraft(null);
   };
 
+  const resetFeedback = () => {
+    setComment("");
+    setSentiment("neutral");
+    setDimension(null);
+  };
+
   const submit = () => {
     if (!draft || !comment.trim() || !onAddRegion) return;
-    onAddRegion({ kind: "region", ...draft }, comment.trim());
+    onAddRegion({ kind: "region", ...draft }, { comment: comment.trim(), sentiment, dimension });
     setDraft(null);
-    setComment("");
+    resetFeedback();
     setMarking(false);
   };
 
   const submitWholeComment = () => {
     if (!comment.trim() || !onAddComment) return;
-    onAddComment(comment.trim());
-    setComment("");
+    onAddComment({ comment: comment.trim(), sentiment, dimension });
+    resetFeedback();
     setCommenting(false);
   };
 
@@ -161,6 +231,12 @@ export function ArtifactViewer({ version, annotations = [], onAddRegion, onAddCo
             onChange={(e) => setComment(e.target.value)}
             placeholder="What should change?"
             className="w-full resize-none bg-transparent text-[length:var(--text-body)] text-text placeholder:text-faint"
+          />
+          <FeedbackControls
+            sentiment={sentiment}
+            dimension={dimension}
+            onSentiment={setSentiment}
+            onDimension={setDimension}
           />
           <div className="flex justify-end gap-2">
             <Button type="button" variant="ghost" onClick={() => setCommenting(false)}>
@@ -249,6 +325,14 @@ export function ArtifactViewer({ version, annotations = [], onAddRegion, onAddCo
               placeholder="What about this region?"
               className="w-full resize-none bg-transparent text-[length:var(--text-meta)] text-text placeholder:text-faint"
             />
+            <div className="mt-1.5">
+              <FeedbackControls
+                sentiment={sentiment}
+                dimension={dimension}
+                onSentiment={setSentiment}
+                onDimension={setDimension}
+              />
+            </div>
             <div className="mt-1 flex justify-end gap-2">
               <Button type="button" variant="ghost" onClick={() => setDraft(null)}>
                 Cancel

@@ -50,6 +50,7 @@ export function compile(input: CapabilityInput): ToolSpec[] {
     {
       name: "identify_agent",
       requires: "read",
+      title: "Identify agent",
       description:
         "Identify which agent product you are so your contributions are attributed correctly. Call this once at the start of the session. Example: { client: \"Cursor\", provider: \"anthropic\", model: \"claude-sonnet-4\" }.",
       inputSchema: {
@@ -75,6 +76,8 @@ export function compile(input: CapabilityInput): ToolSpec[] {
 
   push("read", (slugs) => ({
     name: "get_current_context_scope",
+    title: "Context scope",
+    annotations: { readOnlyHint: true },
     description: input.pageState.hasPendingProposals
       ? "List the regions currently accessible for this task, with their access level. Something you submitted is currently awaiting human review; it is not yet canonical, and there is no tool to approve it yourself."
       : "List the regions currently accessible for this task, with their access level.",
@@ -84,6 +87,8 @@ export function compile(input: CapabilityInput): ToolSpec[] {
 
   push("read", (slugs) => ({
     name: "get_context_for_task",
+    title: "Get context for task",
+    annotations: { readOnlyHint: true, untrustedContentHint: true },
     description: "Retrieve context items relevant to the current task, scoped to accessible regions. Omit region to search every accessible region.",
     inputSchema: {
       type: "object",
@@ -98,6 +103,8 @@ export function compile(input: CapabilityInput): ToolSpec[] {
 
   push("read", (slugs) => ({
     name: "inspect_context_item",
+    title: "Inspect context item",
+    annotations: { readOnlyHint: true, untrustedContentHint: true },
     description: "Look up the full detail of a single context item you already have access to.",
     inputSchema: {
       type: "object",
@@ -109,6 +116,8 @@ export function compile(input: CapabilityInput): ToolSpec[] {
 
   push("read", (slugs) => ({
     name: "inspect_relationships",
+    title: "Inspect relationships",
+    annotations: { readOnlyHint: true, untrustedContentHint: true },
     description: "Traverse the context graph around an item, within accessible regions only.",
     inputSchema: {
       type: "object",
@@ -120,6 +129,8 @@ export function compile(input: CapabilityInput): ToolSpec[] {
 
   push("read", (slugs) => ({
     name: "get_taste_for_task",
+    title: "Get taste for task",
+    annotations: { readOnlyHint: true, untrustedContentHint: true },
     description: "Retrieve confirmed and proposed taste signals relevant to this task.",
     inputSchema: { type: "object", properties: {} },
     why: `Read access is live on: ${slugs.join(", ")}.`,
@@ -129,6 +140,8 @@ export function compile(input: CapabilityInput): ToolSpec[] {
     input.pageState.activeArtifactId
       ? {
           name: "trace_artifact_influences",
+          title: "Trace artifact influences",
+          annotations: { readOnlyHint: true, untrustedContentHint: true },
           description:
             "Get the active artifact's current version, human annotations (including marked regions), and the context that influenced it. Use this before submitting a revision.",
           inputSchema: {
@@ -145,6 +158,7 @@ export function compile(input: CapabilityInput): ToolSpec[] {
 
   push("propose", (slugs) => ({
     name: "propose_context_change",
+    title: "Propose context change",
     description: "Suggest a new or changed context item or relationship. Stays proposed until a human accepts it.",
     inputSchema: {
       type: "object",
@@ -161,6 +175,7 @@ export function compile(input: CapabilityInput): ToolSpec[] {
 
   push("propose", (slugs) => ({
     name: "record_feedback",
+    title: "Record feedback",
     description: "Attach feedback or an annotation to an artifact under review.",
     inputSchema: {
       type: "object",
@@ -182,6 +197,7 @@ export function compile(input: CapabilityInput): ToolSpec[] {
   // gated at "propose", not "write". Approving it remains a human act.
   push("propose", (slugs) => ({
     name: "record_artifact",
+    title: "Record artifact",
     description:
       "Submit a new artifact version for human review in an accessible region. It does not become canonical until a person approves it. List the items that shaped the work in used_item_ids so the person reviewing can see what informed it.",
     inputSchema: {
