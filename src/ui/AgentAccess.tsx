@@ -94,34 +94,24 @@ function toolRegions(inputSchema: { properties: Record<string, unknown> }): stri
 export interface AgentAccessProps {
   taskId?: string;
   regions?: Region[];
-  /** When shown beside an open artifact, keep that artifact's review tools in the surface. */
-  activeArtifactId?: string | null;
 }
 
 /** A persistent contextual panel, not a destination. */
-export function AgentAccess({ taskId, regions, activeArtifactId = null }: AgentAccessProps) {
+export function AgentAccess({ taskId, regions }: AgentAccessProps) {
   // No mock fallback on purpose. A panel that can render made-up permission
   // state is a panel that can lie about what an agent may do, which is the one
   // failure this product cannot afford.
   if (!taskId || !regions) return null;
-  return <LiveAgentAccess taskId={taskId} regions={regions} activeArtifactId={activeArtifactId} />;
+  return <LiveAgentAccess taskId={taskId} regions={regions} />;
 }
 
-function LiveAgentAccess({
-  taskId,
-  regions,
-  activeArtifactId,
-}: {
-  taskId: string;
-  regions: Region[];
-  activeArtifactId: string | null;
-}) {
+function LiveAgentAccess({ taskId, regions }: { taskId: string; regions: Region[] }) {
   const [rows, setRows] = useState<Row[] | null>(null);
   const [pending, setPending] = useState<string | null>(null);
   const [rowError, setRowError] = useState<{ regionId: string; message: string } | null>(null);
   const [denials, setDenials] = useState<DenialView[]>([]);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
-  const { specs, registered, refresh } = useCapabilities(taskId, activeArtifactId);
+  const { specs, registered, refresh } = useCapabilities(taskId);
   const webMcpAvailable = isWebMcpAvailable();
 
   const loadCapabilities = useCallback(async () => {
