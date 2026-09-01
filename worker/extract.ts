@@ -18,11 +18,111 @@ const LINK_CAP = 12;
 const BODY_CAP = 512 * 1024;
 const UA =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
+const MAX_REDIRECTS = 3;
+
+const BLOCKED_HOST_SUFFIXES = [
+  ".localhost",
+  ".local",
+  ".internal",
+  ".home.arpa",
+  ".test",
+  ".invalid",
+  ".example",
+  ".nip.io",
+  ".sslip.io",
+  ".xip.io",
+  ".localtest.me",
+  ".lvh.me",
+];
+
+function ipv4Parts(host: string): number[] | null {
+  const parts = host.split(".");
+  if (parts.length !== 4 || parts.some((part) => !/^\d+$/.test(part))) return null;
+  const values = parts.map(Number);
+  return values.every((part) => part >= 0 && part <= 255) ? values : null;
+}
+
+function isPrivateIpv4(host: string): boolean {
+  const parts = ipv4Parts(host);
+  if (!parts) return false;
+  const [a, b] = parts;
+  return (
+    a === 0 ||
+    a === 10 ||
+    a === 127 ||
+    (a === 100 && b >= 64 && b <= 127) ||
+    (a === 169 && b === 254) ||
+    (a === 172 && b >= 16 && b <= 31) ||
+    (a === 192 && (b === 0 || b === 168)) ||
+    (a === 198 && (b === 18 || b === 19 || b === 51)) ||
+    (a === 203 && b === 0) ||
+    a >= 224
+  );
+}
+
+function ipv6Bytes(host: string): number[] | null {
+  const normalized = host.toLowerCase().replace(/^\[|\]$/g, "");
+  if (!normalized.includes(":")) return null;
+  const halves = normalized.split("::");
+  if (halves.length > 2) return null;
+  const parse = (part: string): number[] | null => {
+    if (!part) return [];
+    const groups = part.split(":");
+    const out: number[] = [];
+    for (const group of groups) {
+      if (group.includes(".")) {
+        const ipv4 = ipv4Parts(group);
+        if (!ipv4) return null;
+        out.push((ipv4[0] << 8) | ipv4[1], (ipv4[2] << 8) | ipv4[3]);
+      } else if (/^[0-9a-f]{1,4}$/.test(group)) {
+        out.push(Number.parseInt(group, 16));
+      } else {
+        return null;
+      }
+    }
+    return out;
+  };
+  const left = parse(halves[0]);
+  const right = parse(halves[1] ?? "");
+  if (!left || !right) return null;
+  if (left.length + right.length > 8 || (halves.length === 1 && left.length !== 8)) return null;
+  const groups = halves.length === 2 ? [...left, ...Array(8 - left.length - right.length).fill(0), ...right] : [...left];
+  return groups.length === 8 ? groups : null;
+}
+
+function isPrivateIpv6(host: string): boolean {
+  const groups = ipv6Bytes(host);
+  if (!groups) return false;
+  const isZero = groups.every((group) => group === 0);
+  const isLoopback = groups.slice(0, 7).every((group) => group === 0) && groups[7] === 1;
+  const isUniqueLocal = (groups[0] & 0xfe00) === 0xfc00;
+  const isLinkLocal = (groups[0] & 0xffc0) === 0xfe80;
+  const isMulticast = (groups[0] & 0xff00) === 0xff00;
+  const isDocumentation = groups[0] === 0x2001 && groups[1] === 0x0db8;
+  const isV4Mapped = groups.slice(0, 5).every((group) => group === 0) && groups[5] === 0xffff;
+  const mappedV4 = isV4Mapped ? `${groups[6] >> 8}.${groups[6] & 0xff}.${groups[7] >> 8}.${groups[7] & 0xff}` : "";
+  return isZero || isLoopback || isUniqueLocal || isLinkLocal || isMulticast || isDocumentation || isPrivateIpv4(mappedV4);
+}
+
+/** Accept only public http(s) URLs; DNS names are syntactically public hosts. */
+export function isPublicHttpUrl(input: string | URL): boolean {
+  let url: URL;
+  try {
+    url = typeof input === "string" ? new URL(input) : input;
+  } catch {
+    return false;
+  }
+  if ((url.protocol !== "http:" && url.protocol !== "https:") || url.username || url.password) return false;
+  const host = url.hostname.toLowerCase().replace(/\.$/, "");
+  if (!host || host === "localhost" || BLOCKED_HOST_SUFFIXES.some((suffix) => host.endsWith(suffix))) return false;
+  return !isPrivateIpv4(host) && !isPrivateIpv6(host);
+}
 
 function absolutize(href: unknown, base: string): string | null {
   if (typeof href !== "string" || !href.trim()) return null;
   try {
-    return new URL(href, base).toString();
+    const url = new URL(href, base);
+    return isPublicHttpUrl(url) ? url.toString() : null;
   } catch {
     return null;
   }
@@ -131,36 +231,56 @@ export function parsePageHtml(html: string, baseUrl: string): ExtractResult {
   };
 }
 
-async function fetchText(url: string, headers: Record<string, string>, wantHtml: boolean): Promise<string | null> {
+async function fetchText(
+  url: string,
+  headers: Record<string, string>,
+  wantHtml: boolean,
+  fetchImpl: typeof fetch,
+): Promise<string | null> {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 5000);
   try {
-    const res = await fetch(url, { headers, signal: ctrl.signal, redirect: "follow" });
-    if (!res.ok || !res.body) return null;
-    const ct = res.headers.get("content-type") ?? "";
-    if (wantHtml && !/text\/html|application\/xhtml/i.test(ct)) return null;
-    const reader = res.body.getReader();
-    const chunks: Uint8Array[] = [];
-    let total = 0;
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      if (value) {
-        chunks.push(value);
-        total += value.byteLength;
-        if (total >= BODY_CAP) {
-          await reader.cancel();
-          break;
+    let current = url;
+    for (let redirectCount = 0; redirectCount <= MAX_REDIRECTS; redirectCount++) {
+      if (!isPublicHttpUrl(current)) return null;
+      const res = await fetchImpl(current, { headers, signal: ctrl.signal, redirect: "manual" });
+      if ([301, 302, 303, 307, 308].includes(res.status)) {
+        if (redirectCount === MAX_REDIRECTS) return null;
+        const location = res.headers.get("location");
+        const next = location ? absolutize(location, current) : null;
+        if (!next) return null;
+        current = next;
+        continue;
+      }
+      if (!res.ok || !res.body) return null;
+      const ct = res.headers.get("content-type") ?? "";
+      if (wantHtml && !/text\/html|application\/xhtml/i.test(ct)) return null;
+      const reader = res.body.getReader();
+      const chunks: Uint8Array[] = [];
+      let total = 0;
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        if (value) {
+          const remaining = BODY_CAP - total;
+          const chunk = value.byteLength > remaining ? value.subarray(0, remaining) : value;
+          chunks.push(chunk);
+          total += chunk.byteLength;
+          if (total >= BODY_CAP) {
+            await reader.cancel();
+            break;
+          }
         }
       }
+      const buf = new Uint8Array(total);
+      let off = 0;
+      for (const c of chunks) {
+        buf.set(c, off);
+        off += c.byteLength;
+      }
+      return new TextDecoder().decode(buf);
     }
-    const buf = new Uint8Array(total);
-    let off = 0;
-    for (const c of chunks) {
-      buf.set(c.subarray(0, Math.min(c.byteLength, buf.byteLength - off)), off);
-      off += c.byteLength;
-    }
-    return new TextDecoder().decode(buf);
+    return null;
   } catch {
     return null;
   } finally {
@@ -168,20 +288,20 @@ async function fetchText(url: string, headers: Record<string, string>, wantHtml:
   }
 }
 
-export async function extractUrl(url: string): Promise<ExtractResult | null> {
+export async function extractUrl(url: string, fetchImpl: typeof fetch = fetch): Promise<ExtractResult | null> {
   let parsed: URL;
   try {
     parsed = new URL(url);
   } catch {
     return null;
   }
-  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
+  if (!isPublicHttpUrl(parsed)) return null;
 
   const tweet = TWEET_RE.exec(url);
   if (tweet) {
     const id = tweet[1];
     const synUrl = `https://cdn.syndication.twimg.com/tweet-result?id=${id}&lang=en&token=a`;
-    const body = await fetchText(synUrl, { "User-Agent": UA, Accept: "application/json" }, false);
+    const body = await fetchText(synUrl, { "User-Agent": UA, Accept: "application/json" }, false, fetchImpl);
     if (body) {
       try {
         const result = parseTweetResult(JSON.parse(body));
@@ -195,6 +315,7 @@ export async function extractUrl(url: string): Promise<ExtractResult | null> {
       `https://publish.twitter.com/oembed?url=${encodeURIComponent(url)}&dnt=true&omit_script=true`,
       { "User-Agent": UA, Accept: "application/json" },
       false,
+      fetchImpl,
     );
     if (!oe) return null;
     try {
@@ -216,7 +337,7 @@ export async function extractUrl(url: string): Promise<ExtractResult | null> {
     }
   }
 
-  const html = await fetchText(url, { "User-Agent": UA, Accept: "text/html,application/xhtml+xml" }, true);
+  const html = await fetchText(url, { "User-Agent": UA, Accept: "text/html,application/xhtml+xml" }, true, fetchImpl);
   if (!html) return null;
   return parsePageHtml(html, url);
 }

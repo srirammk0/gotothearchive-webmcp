@@ -1,9 +1,9 @@
 /**
  * FROZEN BUILD CONTRACT — GoToTheArchive
  *
- * Every track compiles against this file. No track may edit it.
- * If you believe something here is wrong or missing, STOP and report the drift
- * to the integrating agent. Do not work around it locally.
+ * Every track compiles against this file. The central integration track may
+ * evolve it when the product contract changes, with the matching schema and
+ * focused documentation updated in the same change.
  *
  * See docs/technical/BUILD-CONTRACT.md for track ownership and rationale.
  */
@@ -113,6 +113,26 @@ export interface Region {
   created_at: number;
 }
 
+/** A cross-cutting working grouping; membership is explicit and owned. */
+export interface Project {
+  id: Id;
+  space_id: Id;
+  owner_id: Id;
+  name: string;
+  description: string | null;
+  created_at: number;
+  updated_at: number;
+}
+
+/** One explicit Project membership, targeting either a Region or an Item. */
+export interface ProjectMember {
+  id: Id;
+  project_id: Id;
+  region_id: Id | null;
+  item_id: Id | null;
+  created_at: number;
+}
+
 export interface ContextItem {
   id: Id;
   space_id: Id;
@@ -162,6 +182,8 @@ export interface Task {
   status: "open" | "complete" | "cancelled";
   created_at: number;
   expires_at: number | null;
+  /** Optional project scope. Database/API responses normalize this to null. */
+  project_id?: Id | null;
 }
 
 export interface Grant {
@@ -342,6 +364,8 @@ export interface TasteSignal {
   created_at: number;
   /** Bitemporal: id of the signal this one replaces, or null. */
   supersedes: Id | null;
+  /** Required for project scope; null for personal signals. */
+  project_id?: Id | null;
 }
 
 /** Words, not false-precision percentages (taste-learning.md §Taste interface). */
@@ -419,8 +443,10 @@ export interface AuditEvent {
 export interface RetrievalSignals {
   /** Reciprocal-rank-fused score over the lists this item appeared in. */
   fused: number;
-  /** Per-list 1-based rank, or null if absent from that list. */
-  ranks: { fts: number | null; recency: number | null; graph: number | null };
+  /** Per-list 1-based rank, or null if absent from that list. `semantic` is the
+   * optional external memory index (Supermemory); null whenever it is
+   * unconfigured, timed out, or returned nothing. */
+  ranks: { fts: number | null; recency: number | null; graph: number | null; semantic: number | null };
   graph_strength: number;
   /** Lexical + dimension overlap with confirmed in-scope taste signals, weighted by confidence and authority order. 0 when taste is silent. */
   taste_relevance: number;
@@ -492,7 +518,9 @@ export interface CapabilityInput {
   humanRegions: { slug: string; level: GrantLevel }[];
   /** Live, unexpired, unrevoked grants keyed by region slug. */
   grants: { slug: string; level: GrantLevel }[];
-  task: { id: Id; title: string; expires_at: number | null } | null;
+  task: { id: Id; title: string; expires_at: number | null; project_id?: Id | null } | null;
+  /** The task's resolved scope, included for Agent Access/Lens consumers. */
+  scope?: { project_id: Id | null; project_name: string | null };
   pageState: { hasPendingProposals: boolean; activeArtifactId: Id | null };
 }
 
@@ -520,6 +548,7 @@ export const DENIAL_REASONS = {
   EXPIRED: "The grant for this region has expired",
   TASK_CLOSED: "The task this grant was bound to is no longer open",
   EXCEEDS_HUMAN: "The invoking person does not have this access themselves",
+  OUT_OF_PROJECT_SCOPE: "That item is outside this task's project scope",
   INSUFFICIENT_LEVEL: "This operation needs a higher access level than granted",
   UNKNOWN_REGION: "That region does not exist or is not visible",
   INVALID_PARENT: "parent_version_id must be an existing version of the same artifact",
@@ -533,6 +562,8 @@ export const API = {
   health: "/api/health",
   bootstrap: "/api/bootstrap",
   regions: "/api/regions",
+  projects: "/api/projects",
+  projectMembers: "/api/project-members",
   items: "/api/items",
   upload: "/api/upload",
   /** GET ?key=… — streams a canonical original back out of R2. */

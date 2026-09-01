@@ -301,11 +301,11 @@ export function Workbench() {
         <ArtifactViewer
           version={version}
           annotations={annotations}
-          onAddRegion={(target, { comment, sentiment, dimensions }) =>
-            void addAnnotation({ sentiment, comment, dimensions, target })
+          onAddRegion={(target, { comment, sentiment }) =>
+            void addAnnotation({ sentiment, comment, target })
           }
-          onAddComment={({ comment, sentiment, dimensions }) =>
-            void addAnnotation({ sentiment, comment, dimensions })
+          onAddComment={({ comment, sentiment }) =>
+            void addAnnotation({ sentiment, comment })
           }
         />
 

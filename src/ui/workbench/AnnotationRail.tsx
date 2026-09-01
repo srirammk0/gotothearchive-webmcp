@@ -1,14 +1,13 @@
 import { useState } from "react";
-import { dimensionLabel, type Annotation } from "@shared/contract";
+import type { Annotation } from "@shared/contract";
 import { Button } from "../primitives/Button";
 import { Disclosure } from "../primitives/Disclosure";
 import { Icon } from "../primitives/Icon";
-import { DimensionTags, SentimentButtons, toggleDimension } from "./ArtifactViewer";
+import { SentimentButtons } from "./ArtifactViewer";
 
 interface EditChanges {
   comment?: string;
   sentiment?: Annotation["sentiment"];
-  dimensions?: string[];
 }
 
 function Row({
@@ -21,14 +20,12 @@ function Row({
   const [editing, setEditing] = useState(false);
   const [comment, setComment] = useState(annotation.comment);
   const [sentiment, setSentiment] = useState<Annotation["sentiment"]>(annotation.sentiment);
-  const [dimensions, setDimensions] = useState<string[]>(annotation.dimensions);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
 
   const start = () => {
     setComment(annotation.comment);
     setSentiment(annotation.sentiment);
-    setDimensions(annotation.dimensions);
     setSaveError("");
     setEditing(true);
   };
@@ -36,7 +33,7 @@ function Row({
     setSaving(true);
     setSaveError("");
     try {
-      await onEdit(annotation.id, { comment: comment.trim(), sentiment, dimensions });
+      await onEdit(annotation.id, { comment: comment.trim(), sentiment });
       setEditing(false);
     } catch {
       setSaveError("Couldn't save this feedback. Try again.");
@@ -68,15 +65,6 @@ function Row({
             <div className="flex flex-wrap items-center gap-1.5">
               <SentimentButtons sentiment={sentiment} onSentiment={setSentiment} />
             </div>
-          </div>
-          <div>
-            <p className="mb-1 text-[length:var(--text-micro)] font-medium text-faint">
-              Labels <span className="font-normal">· choose up to 6</span>
-            </p>
-            <DimensionTags
-              dimensions={dimensions}
-              onToggle={(d) => setDimensions((prev) => toggleDimension(prev, d))}
-            />
           </div>
         </div>
         {saveError ? (
@@ -110,11 +98,6 @@ function Row({
         <span className={`rounded-[var(--radius-sm)] px-1.5 py-0.5 ${sentimentMeta.className}`}>
           {sentimentMeta.label}
         </span>
-        {annotation.dimensions.map((d) => (
-          <span key={d} className="rounded-[var(--radius-sm)] bg-hover px-1.5 py-0.5 text-muted">
-            {dimensionLabel(d)}
-          </span>
-        ))}
         <button
           type="button"
           onClick={start}

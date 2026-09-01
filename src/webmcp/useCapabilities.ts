@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { API, type CapabilityInput, type ToolSpec } from "@shared/contract";
+import { authHeader } from "../api/client";
 import { compile } from "./compiler";
 import { registrar } from "./registrar";
 import { callTool } from "./transport";
@@ -44,6 +45,7 @@ export function useCapabilities(taskId: string | null, activeArtifactId: string 
       const params = new URLSearchParams({ task_id: taskId });
       if (activeArtifactId) params.set("artifact_id", activeArtifactId);
       const res = await fetch(`${API.capabilities}?${params.toString()}`, {
+        headers: await authHeader(),
         credentials: "same-origin",
       });
       if (!res.ok) throw new Error(`capabilities request failed (${res.status})`);
@@ -67,15 +69,15 @@ export function useCapabilities(taskId: string | null, activeArtifactId: string 
     prevSpecs.current = next;
     setSpecs(next);
 
-    await registrar.sync(next, (spec, toolInput) => {
+    await registrar.sync(next, (spec, toolInput, signal) => {
       const toolArgs = toolInput as Record<string, unknown>;
       // The browser knows which Workbench artifact registered this tool. Keep
       // page state out of an agent-authored request; the worker still validates
       // the derived version against the current task and permission boundary.
       if (spec.name === "trace_artifact_influences" && activeArtifactId && !toolArgs.version_id && !toolArgs.artifact_id) {
-        return callTool(spec.name, { ...toolArgs, artifact_id: activeArtifactId });
+        return callTool(spec.name, { ...toolArgs, artifact_id: activeArtifactId }, signal);
       }
-      return callTool(spec.name, toolArgs);
+      return callTool(spec.name, toolArgs, signal);
     });
     setRegistered(registrar.getRegistered());
     setLastChange(Date.now());
