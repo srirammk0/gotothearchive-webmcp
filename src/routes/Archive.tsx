@@ -638,7 +638,7 @@ export function Archive() {
               </p>
             </div>
             <div className="flex items-center gap-2">
-              <label className="relative w-48 sm:w-64">
+              <label className="relative w-44 transition-[width] duration-[var(--duration-base)] ease-out focus-within:w-56 sm:w-56 sm:focus-within:w-72">
                 <Icon
                   name="search"
                   size={14}
