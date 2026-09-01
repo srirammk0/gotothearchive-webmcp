@@ -285,7 +285,7 @@ function RegionSection({
   onDelete: (region: Region) => void;
   onOpenFolder: (region: Region) => void;
   onAdd: (region: Region) => void;
-  childFolders: { region: Region; count: number }[];
+  childFolders: Region[];
   showOpen: boolean;
 }) {
   const [renaming, setRenaming] = useState(false);
@@ -391,37 +391,17 @@ function RegionSection({
           >
           <div className="pt-4">
             {childFolders.length > 0 ? (
-              <ul className="mb-6 flex flex-col">
-                {childFolders.map(({ region: f, count }) => (
-                  <li
-                    key={f.id}
-                    className="flex items-center justify-between gap-4 border-b border-line-soft py-2.5"
-                  >
+              <ul className="mb-6 flex flex-wrap gap-2">
+                {childFolders.map((f) => (
+                  <li key={f.id}>
                     <button
                       type="button"
                       onClick={() => onOpenFolder(f)}
-                      className="group/child flex min-w-0 items-center gap-1.5 text-left"
+                      className="inline-flex items-center gap-2 rounded-[var(--radius-md)] border border-line-soft bg-surface px-3 py-2 text-[length:var(--text-meta)] text-text transition-colors duration-[var(--duration-fast)] hover:border-line hover:bg-hover"
                     >
-                      <Icon name="folder" size={14} className="shrink-0 text-faint" />
-                      <span className="truncate text-[length:var(--text-meta)] text-text group-hover/child:underline">
-                        {f.name}
-                      </span>
+                      <Icon name="folder" size={14} className="text-faint" />
+                      {f.name}
                     </button>
-                    <div className="flex shrink-0 items-center gap-2">
-                      {count > 0 ? (
-                        <span className="text-[length:var(--text-micro)] text-faint">
-                          {count} {count === 1 ? "item" : "items"}
-                        </span>
-                      ) : null}
-                      <button
-                        type="button"
-                        aria-label={`Add to ${f.name}`}
-                        onClick={() => onAdd(f)}
-                        className="rounded-[var(--radius-sm)] p-1 text-muted transition-colors duration-[var(--duration-fast)] hover:bg-hover hover:text-text"
-                      >
-                        <Icon name="plus" size={14} />
-                      </button>
-                    </div>
                   </li>
                 ))}
               </ul>
@@ -804,10 +784,7 @@ export function Archive() {
               onDelete={setFolderToDelete}
               onOpenFolder={(r) => setParams({ folder: r.slug })}
               onAdd={setCaptureFor}
-              childFolders={childFoldersOf(view.region.id).map((r) => ({
-                region: r,
-                count: (items ?? []).filter((i) => i.region_id === r.id).length,
-              }))}
+              childFolders={childFoldersOf(view.region.id)}
               showOpen={!activeFolder}
             />
           ))
