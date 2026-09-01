@@ -22,7 +22,11 @@ function makeAbortError(): Error {
 function isUnknownTool(reason: unknown, status: number): boolean {
   if (status === 404) return true;
   if (typeof reason !== "string") return false;
-  return reason === "UNKNOWN_REGION" || reason === DENIAL_REASONS.UNKNOWN_REGION;
+  // Only a genuine "tool not recognized" from the server maps to the
+  // not-registered message. UNKNOWN_REGION / UNKNOWN_ITEM are ordinary denials
+  // (bad id, no access) and must pass through as such — mapping them here made
+  // every stale item id read as "the tool vanished".
+  return reason === "UNKNOWN_TOOL" || reason === DENIAL_REASONS.UNKNOWN_TOOL;
 }
 
 export async function callTool(

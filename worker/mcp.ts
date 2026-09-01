@@ -259,10 +259,10 @@ export async function handleToolCall(
     case "inspect_context_item": {
       const itemId = typeof input.item_id === "string" ? input.item_id : "";
       const item = q.getItem(itemId);
-      if (!item) return denyResult(DENIAL_REASONS.UNKNOWN_REGION);
+      if (!item) return denyResult(DENIAL_REASONS.UNKNOWN_ITEM);
       const region = q.getRegion(item.region_id);
       if (!region || region.space_id !== task.space_id || item.space_id !== task.space_id) {
-        return denyResult(DENIAL_REASONS.UNKNOWN_REGION);
+        return denyResult(DENIAL_REASONS.UNKNOWN_ITEM);
       }
       const result = authorize(
         q,
@@ -298,10 +298,10 @@ export async function handleToolCall(
     case "inspect_relationships": {
       const itemId = typeof input.item_id === "string" ? input.item_id : "";
       const item = q.getItem(itemId);
-      if (!item) return denyResult(DENIAL_REASONS.UNKNOWN_REGION);
+      if (!item) return denyResult(DENIAL_REASONS.UNKNOWN_ITEM);
       const region = q.getRegion(item.region_id);
       if (!region || region.space_id !== task.space_id || item.space_id !== task.space_id) {
-        return denyResult(DENIAL_REASONS.UNKNOWN_REGION);
+        return denyResult(DENIAL_REASONS.UNKNOWN_ITEM);
       }
       const result = authorize(
         q,
@@ -756,6 +756,6 @@ export async function handleToolCall(
       return denyResult(DENIAL_REASONS.INSUFFICIENT_LEVEL);
 
     default:
-      return denyResult(DENIAL_REASONS.UNKNOWN_REGION);
+      return denyResult(DENIAL_REASONS.UNKNOWN_TOOL);
   }
 }

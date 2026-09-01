@@ -38,6 +38,7 @@ import { authorizedRegionIds, humanRegions, liveGrants, taskIsLive, taskProject 
 import { traverse } from "./graph";
 import { handleToolCall } from "./mcp";
 import { deriveTasteSignals, statementOverlap } from "./taste/derive";
+import { classifyAnnotationDimensions } from "./taste/classifier";
 import { extractUrl, isPublicHttpUrl } from "./extract";
 import { deriveEdgesForItem } from "./graph-build";
 
@@ -1084,6 +1085,24 @@ function cleanDimensions(input: unknown): TasteDimension[] {
   return [...seen].slice(0, 6) as TasteDimension[];
 }
 
+/**
+ * The taste loop groups annotations by dimension, so a note with no dimensions
+ * derives nothing. The manual dimension picker was removed from the UI; a human
+ * note now gets its dimensions inferred from its own text. An explicit list
+ * (WebMCP record_feedback, or a future UI) still wins. `env` unused for now —
+ * keyword classification only, deterministic and free; pass `env.AI` here to
+ * upgrade to the model path (see worker/taste/classifier.ts).
+ */
+async function resolveAnnotationDimensions(
+  _env: Env,
+  explicit: unknown,
+  ctx: { title: string; comment: string; authorId: string; sentiment: "positive" | "negative" | "neutral" },
+): Promise<TasteDimension[]> {
+  const chosen = cleanDimensions(explicit);
+  if (chosen.length > 0) return chosen;
+  return classifyAnnotationDimensions(undefined, ctx);
+}
+
 async function handleAnnotations(request: Request, q: Queries, humanId: string, env: Env): Promise<Response> {
   if (request.method === "GET") {
     const url = new URL(request.url);
@@ -1112,7 +1131,12 @@ async function handleAnnotations(request: Request, q: Queries, humanId: string, 
       author_id: humanId,
       target: body.target ?? null,
       sentiment: body.sentiment,
-      dimensions: cleanDimensions(body.dimensions),
+      dimensions: await resolveAnnotationDimensions(env, body.dimensions, {
+        title: artifact.title,
+        comment: body.comment,
+        authorId: humanId,
+        sentiment: body.sentiment,
+      }),
       comment: body.comment,
       status: "open",
       created_at: Date.now(),
@@ -1132,10 +1156,27 @@ async function handleAnnotations(request: Request, q: Queries, humanId: string, 
     if (!existing) return badRequest("unknown annotation");
     // A person may only edit their own note.
     if (existing.author_id !== humanId) return badRequest("not your note");
+    const nextComment = typeof body.comment === "string" ? body.comment : undefined;
+    const nextSentiment = body.sentiment ?? existing.sentiment;
+    // Re-infer dimensions when the text changed and the caller gave no explicit
+    // list, so an edited note still lands in the right taste group.
+    let nextDimensions: TasteDimension[] | undefined;
+    if (Array.isArray(body.dimensions)) {
+      nextDimensions = cleanDimensions(body.dimensions);
+    } else if (nextComment !== undefined && nextComment !== existing.comment) {
+      const version = q.getArtifactVersion(existing.version_id);
+      const artifact = version ? q.getArtifact(version.artifact_id) : null;
+      nextDimensions = await resolveAnnotationDimensions(env, undefined, {
+        title: artifact?.title ?? "",
+        comment: nextComment,
+        authorId: humanId,
+        sentiment: nextSentiment,
+      });
+    }
     q.updateAnnotation(body.id, {
-      comment: typeof body.comment === "string" ? body.comment : undefined,
+      comment: nextComment,
       sentiment: body.sentiment,
-      dimensions: body.dimensions ? cleanDimensions(body.dimensions) : undefined,
+      dimensions: nextDimensions,
     });
     await deriveTasteSignals(q, spaceIdFor(humanId), Date.now(), env);
     return json({ ok: true, annotation: q.getAnnotation(body.id) });

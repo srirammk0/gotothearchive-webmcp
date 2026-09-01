@@ -551,6 +551,8 @@ export const DENIAL_REASONS = {
   OUT_OF_PROJECT_SCOPE: "That item is outside this task's project scope",
   INSUFFICIENT_LEVEL: "This operation needs a higher access level than granted",
   UNKNOWN_REGION: "That region does not exist or is not visible",
+  UNKNOWN_ITEM: "That item does not exist or is not visible in this task",
+  UNKNOWN_TOOL: "That tool is not available for this task",
   INVALID_PARENT: "parent_version_id must be an existing version of the same artifact",
 } as const;
 
