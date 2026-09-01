@@ -1,5 +1,7 @@
 import { useId, useState, type ReactNode } from "react";
+import { AnimatePresence, motion } from "motion/react";
 import { Icon } from "./Icon";
+import { duration, ease } from "../tokens";
 
 export interface DisclosureProps {
   summary: ReactNode;
@@ -38,13 +40,20 @@ export function Disclosure({ summary, children, defaultOpen = false, className =
           }`}
         />
       </button>
-      <div
-        id={panelId}
-        className="grid transition-[grid-template-rows,opacity] duration-[var(--duration-base)]"
-        style={{ gridTemplateRows: open ? "1fr" : "0fr", opacity: open ? 1 : 0 }}
-      >
-        <div className="overflow-hidden">{children}</div>
-      </div>
+      <AnimatePresence initial={false}>
+        {open ? (
+          <motion.div
+            id={panelId}
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: duration.base, ease }}
+            className="overflow-hidden"
+          >
+            {children}
+          </motion.div>
+        ) : null}
+      </AnimatePresence>
     </div>
   );
 }
