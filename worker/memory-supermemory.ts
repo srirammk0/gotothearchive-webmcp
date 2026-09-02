@@ -221,7 +221,11 @@ export class SupermemoryMemoryIndex implements MemoryIndex {
     this.apiKey = apiKey || undefined;
     this.baseUrl = (config.baseUrl?.trim() || DEFAULT_BASE_URL).replace(/\/+$/, "");
     this.timeoutMs = normalizedTimeout(config.timeoutMs);
-    this.fetchImpl = config.fetchImpl ?? fetch;
+    // The Workers runtime's global `fetch` must keep its original `this`. Stored
+    // on an instance field and called as `this.fetchImpl(...)` it detaches and
+    // throws "Illegal invocation", so bind it (a caller-supplied impl is used
+    // as-is — test doubles don't care about `this`).
+    this.fetchImpl = config.fetchImpl ?? fetch.bind(globalThis);
   }
 
   async addText(
@@ -350,12 +354,13 @@ export class SupermemoryMemoryIndex implements MemoryIndex {
     parse: (value: unknown) => T | null,
   ): Promise<T | null> {
     if (!response.ok) {
-      // TEMP diagnostic — remove once sync is confirmed working.
+      let detail = "";
       try {
-        console.warn(`supermemory: HTTP ${response.status} — ${(await response.text()).slice(0, 300)}`);
+        detail = ` — ${(await response.text()).slice(0, 200)}`;
       } catch {
-        console.warn(`supermemory: HTTP ${response.status} (body unreadable)`);
+        /* body unreadable */
       }
+      console.warn(`supermemory: HTTP ${response.status}${detail}`);
       return null;
     }
     try {
@@ -394,8 +399,7 @@ export class SupermemoryMemoryIndex implements MemoryIndex {
       }).then((response) => consume(response));
       return await Promise.race([operation, requestSignal.abortPromise]);
     } catch (e) {
-      // TEMP diagnostic — remove once sync is confirmed working.
-      console.warn(`supermemory: ${method} ${path} threw — ${e instanceof Error ? `${e.name}: ${e.message}` : String(e)}`);
+      console.warn(`supermemory: ${method} ${path} — ${e instanceof Error ? `${e.name}: ${e.message}` : String(e)}`);
       return null;
     } finally {
       requestSignal.dispose();
