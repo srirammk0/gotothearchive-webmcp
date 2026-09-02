@@ -39,6 +39,11 @@ export class ApiError extends Error {
   }
 }
 
+/** A caught value's message, or `fallback` when it isn't an Error (a thrown string, a rejected non-Error). */
+export function errorMessage(err: unknown, fallback: string): string {
+  return err instanceof Error ? err.message : fallback;
+}
+
 /**
  * The signed-in visitor's Clerk session token. Read globally rather than
  * threaded through hooks, so every call site carries identity without knowing

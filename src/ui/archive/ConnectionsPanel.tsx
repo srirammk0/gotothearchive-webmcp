@@ -12,6 +12,7 @@ import {
 } from "../../api/client";
 import { Button } from "../primitives/Button";
 import { Icon } from "../primitives/Icon";
+import { useAction } from "../hooks/useAction";
 import { ItemPreview } from "./ItemPreview";
 import { kind } from "./itemKind";
 
@@ -33,7 +34,8 @@ export function ConnectionsPanel({ item, allItems }: { item: ContextItem; allIte
   const [picking, setPicking] = useState(false);
   const [pickQuery, setPickQuery] = useState("");
   const [noteDraft, setNoteDraft] = useState("");
-  const [busy, setBusy] = useState(false);
+  const action = useAction();
+  const busy = action.busy;
 
   const reload = () => {
     listItemLinks(item.id)
@@ -60,12 +62,10 @@ export function ConnectionsPanel({ item, allItems }: { item: ContextItem; allIte
   const approved = (links ?? []).filter((l) => l.approval_state === "approved");
   const pending = (links ?? []).filter((l) => l.approval_state === "proposed");
 
+  // Errors aren't surfaced here — a failed link/note write just leaves the
+  // list stale until reload() below runs regardless of outcome.
   const guard = (fn: () => Promise<unknown>) => {
-    setBusy(true);
-    void fn().finally(() => {
-      setBusy(false);
-      reload();
-    });
+    void action.run(async () => void (await fn())).then(reload);
   };
 
   return (

@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 import type { ContextItem, ItemType, Region } from "@shared/contract";
-import { createItem, uploadBlob } from "../../api/client";
+import { createItem, errorMessage, uploadBlob } from "../../api/client";
 import { Button } from "../primitives/Button";
 import { Spinner } from "../primitives/Spinner";
 import { Icon } from "../primitives/Icon";
@@ -54,7 +54,7 @@ export function Capture({ region, onCaptured }: CaptureProps) {
       setText("");
       setStatus({ kind: "idle" });
     } catch (err) {
-      setStatus({ kind: "error", message: err instanceof Error ? err.message : "Could not save that." });
+      setStatus({ kind: "error", message: errorMessage(err, "Could not save that.") });
     }
   }
 
@@ -74,7 +74,7 @@ export function Capture({ region, onCaptured }: CaptureProps) {
         });
         onCaptured(item);
       } catch (err) {
-        setStatus({ kind: "error", message: err instanceof Error ? err.message : `Could not upload ${file.name}.` });
+        setStatus({ kind: "error", message: errorMessage(err, `Could not upload ${file.name}.`) });
         return;
       }
     }

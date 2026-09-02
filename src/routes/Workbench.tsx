@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router";
 import { motion } from "motion/react";
 import { REVIEW_DECISIONS, type ArtifactState, type Region, type ReviewDecision } from "@shared/contract";
@@ -10,6 +10,7 @@ import { EmptyRow } from "../ui/primitives/EmptyRow";
 import { Spinner } from "../ui/primitives/Spinner";
 import { Icon } from "../ui/primitives/Icon";
 import { useTrail } from "../ui/Breadcrumbs";
+import { useAsync } from "../ui/hooks/useAsync";
 import { useSpace } from "../ui/hooks/useSpace";
 import { duration, ease } from "../ui/tokens";
 import { ArtifactViewer } from "../ui/workbench/ArtifactViewer";
@@ -115,25 +116,10 @@ function ArtifactCard({ artifact, onOpen }: { artifact: WorkbenchArtifact; onOpe
 /** Shown at /workbench with no id: artifacts grouped by the folder that shaped them. */
 function ArtifactList({ regions }: { regions: Region[] }) {
   const navigate = useNavigate();
-  const [status, setStatus] = useState<"loading" | "error" | "ready">("loading");
-  const [artifacts, setArtifacts] = useState<WorkbenchArtifact[]>([]);
+  const { status, data } = useAsync(() => listArtifacts().then((r) => r.artifacts), [], "");
+  const artifacts = data ?? [];
 
   useTrail([{ label: "Workbench" }]);
-
-  useEffect(() => {
-    let cancelled = false;
-    listArtifacts()
-      .then(({ artifacts: loaded }) => {
-        if (!cancelled) {
-          setArtifacts(loaded);
-          setStatus("ready");
-        }
-      })
-      .catch(() => !cancelled && setStatus("error"));
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
   const groups = useMemo(() => {
     const nameBySlug = new Map(regions.map((r) => [r.slug, r.name]));

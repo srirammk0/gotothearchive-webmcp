@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { confidenceLabel, dimensionLabel, type ContextItem, type TasteSignal } from "@shared/contract";
 import {
-  ApiError,
   getTasteEvidence,
   listTasteSignals,
   updateTasteSignal,
@@ -17,6 +16,7 @@ import { kind } from "../ui/archive/itemKind";
 import { ItemPreview } from "../ui/archive/ItemPreview";
 import { ArtifactThumb } from "../ui/workbench/ArtifactThumb";
 import { useTrail } from "../ui/Breadcrumbs";
+import { useAction } from "../ui/hooks/useAction";
 import { duration, ease } from "../ui/tokens";
 import { EmptyState } from "../ui/primitives/EmptyState";
 import { EmptyRow } from "../ui/primitives/EmptyRow";
@@ -96,8 +96,7 @@ function SignalCard({
     changes: { status?: TasteSignal["status"]; statement?: string; scope?: TasteSignal["scope"] },
   ) => Promise<void>;
 }) {
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
+  const action = useAction("That didn't go through. Try again.");
   const [editing, setEditing] = useState(false);
   const [evidence, setEvidence] = useState<EvidenceRecord[] | null>(null);
   const [history, setHistory] = useState<TasteHistoryEvent[] | null>(null);
@@ -127,18 +126,8 @@ function SignalCard({
   const sourceItems = (evidence ?? []).map((e) => e.item).filter((i): i is ContextItem => i !== null);
   const noteCount = (evidence ?? []).filter((e) => e.annotation).length;
 
-  const run = async (changes: { status?: TasteSignal["status"]; statement?: string; scope?: TasteSignal["scope"] }) => {
-    setBusy(true);
-    setErr(null);
-    try {
-      await onAct(signal.id, changes);
-      setEditing(false);
-    } catch (e) {
-      setErr(e instanceof ApiError ? e.message : "That didn't go through. Try again.");
-    } finally {
-      setBusy(false);
-    }
-  };
+  const run = (changes: { status?: TasteSignal["status"]; statement?: string; scope?: TasteSignal["scope"] }) =>
+    action.run(() => onAct(signal.id, changes)).then((ok) => ok && setEditing(false));
 
   return (
     <motion.article
@@ -270,39 +259,39 @@ function SignalCard({
       <div className="flex flex-wrap items-center gap-2 pt-1">
         {editing ? (
           <>
-            <Button variant="primary" disabled={busy} onClick={() => void run({ statement: draft.trim() })}>
+            <Button variant="primary" disabled={action.busy} onClick={() => void run({ statement: draft.trim() })}>
               Save statement
             </Button>
-            <Button variant="secondary" disabled={busy} onClick={() => setEditing(false)}>
+            <Button variant="secondary" disabled={action.busy} onClick={() => setEditing(false)}>
               Cancel
             </Button>
           </>
         ) : (
           <>
             {signal.status === "proposed" ? (
-              <Button variant="primary" disabled={busy} onClick={() => void run({ status: "confirmed" })}>
+              <Button variant="primary" disabled={action.busy} onClick={() => void run({ status: "confirmed" })}>
                 Accept
               </Button>
             ) : null}
-            <Button variant="secondary" disabled={busy} onClick={() => setEditing(true)}>
+            <Button variant="secondary" disabled={action.busy} onClick={() => setEditing(true)}>
               Edit
             </Button>
             <Button
               variant="secondary"
-              disabled={busy}
+              disabled={action.busy}
               onClick={() => void run({ scope: signal.scope === "personal" ? "project" : "personal" })}
             >
               {signal.scope === "personal" ? "Share with project" : "Make personal"}
             </Button>
-            <Button variant="danger" disabled={busy} onClick={() => void run({ status: "rejected" })}>
+            <Button variant="danger" disabled={action.busy} onClick={() => void run({ status: "rejected" })}>
               Reject
             </Button>
           </>
         )}
-        {busy ? <Spinner label="Saving…" /> : null}
-        {err ? (
+        {action.busy ? <Spinner label="Saving…" /> : null}
+        {action.error ? (
           <span role="alert" className="text-meta text-bad">
-            {err}
+            {action.error}
           </span>
         ) : null}
       </div>

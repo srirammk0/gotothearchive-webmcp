@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { API, type CapabilityInput, type ToolSpec } from "@shared/contract";
-import { authHeader } from "../api/client";
+import { authHeader, errorMessage } from "../api/client";
 import { compile } from "./compiler";
 import { registrar } from "./registrar";
 import { callTool } from "./transport";
@@ -55,7 +55,7 @@ export function useCapabilities(taskId: string | null, activeArtifactId: string 
     } catch (e) {
       // Surface it. A silent failure here looks exactly like "the agent lost
       // access", which is the one thing this product must never fake.
-      setError(e instanceof Error ? e.message : "Could not load capabilities");
+      setError(errorMessage(e, "Could not load capabilities"));
       return;
     }
 

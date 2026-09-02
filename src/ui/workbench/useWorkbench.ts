@@ -3,6 +3,7 @@ import type { Annotation, Artifact, ArtifactVersion, ReviewDecision } from "@sha
 import {
   ApiError,
   createAnnotation,
+  errorMessage,
   getArtifact,
   getProvenance,
   listAnnotations,
@@ -59,7 +60,7 @@ export function useWorkbench(artifactId: string | undefined) {
           return;
         }
         setStatus("error");
-        setError(e instanceof Error ? e.message : "Something went wrong loading this artifact.");
+        setError(errorMessage(e, "Something went wrong loading this artifact."));
       }
     },
     [artifactId],

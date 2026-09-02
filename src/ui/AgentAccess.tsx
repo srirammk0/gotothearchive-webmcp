@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { GRANT_LABEL, GRANT_LEVELS, type GrantLevel, type Region } from "@shared/contract";
 import { duration, ease } from "./tokens";
-import { getCapabilities, getLens, setGrant } from "../api/client";
+import { errorMessage, getCapabilities, getLens, setGrant } from "../api/client";
 import { useCapabilities } from "../webmcp/useCapabilities";
 import { isWebMcpAvailable } from "../webmcp/registrar";
 import { Disclosure } from "./primitives/Disclosure";
@@ -157,7 +157,7 @@ function LiveAgentAccess({ taskId, regions }: { taskId: string; regions: Region[
         .catch(() => undefined);
     } catch (err) {
       setRows((prev) => prev?.map((r) => (r.regionId === row.regionId ? { ...r, level: previous } : r)) ?? prev);
-      setRowError({ regionId: row.regionId, message: err instanceof Error ? err.message : "Could not change access." });
+      setRowError({ regionId: row.regionId, message: errorMessage(err, "Could not change access.") });
     } finally {
       setPending(null);
     }
