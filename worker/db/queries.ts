@@ -836,6 +836,21 @@ export class Queries {
       .map(toItem);
   }
 
+  /** Images/screenshots with real bytes but no description yet — caption backlog. */
+  imagesNeedingCaption(spaceId: string, limit: number): ContextItem[] {
+    return this.sql
+      .exec<ItemRow>(
+        `SELECT * FROM items
+         WHERE space_id = ? AND type IN ('image', 'screenshot') AND content_ref IS NOT NULL
+           AND (semantic_text IS NULL OR semantic_text = '')
+         ORDER BY created_at LIMIT ?`,
+        spaceId,
+        Math.max(1, Math.floor(limit)),
+      )
+      .toArray()
+      .map(toItem);
+  }
+
   /* ---------------- project membership ---------------- */
 
   insertProjectMember(m: ProjectMember): void {

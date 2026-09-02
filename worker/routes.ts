@@ -40,6 +40,7 @@ import { handleToolCall } from "./mcp";
 import { deriveTasteSignals, statementOverlap } from "./taste/derive";
 import { classifyAnnotationDimensions } from "./taste/classifier";
 import { extractUrl, isPublicHttpUrl } from "./extract";
+import { captionImage } from "./vision";
 import { deriveEdgesForItem } from "./graph-build";
 import { drainSpaceMemory, memoryIndexFor } from "./memory-drain";
 
@@ -104,7 +105,7 @@ export async function handleRoute(
     case API.projectMembers:
       return await handleProjectMembers(request, q, human.human_id);
     case API.items:
-      return await handleItems(request, q, human.human_id);
+      return await handleItems(request, env, q, human.human_id);
     case API.upload:
       return await handleUpload(request, env, q, human.human_id);
     case API.blob:
@@ -367,7 +368,7 @@ async function handleProjectMembers(request: Request, q: Queries, humanId: strin
 
 /* ---------------- items ---------------- */
 
-async function handleItems(request: Request, q: Queries, humanId: string): Promise<Response> {
+async function handleItems(request: Request, env: Env, q: Queries, humanId: string): Promise<Response> {
   if (request.method === "GET") {
     const url = new URL(request.url);
     const regionSlug = url.searchParams.get("region");
@@ -444,6 +445,22 @@ async function handleItems(request: Request, q: Queries, humanId: string): Promi
           },
           updated_at: now,
         });
+      }
+    }
+
+    // An image/screenshot with no human-written description: caption it so an
+    // agent — which never receives image bytes through WebMCP, only this text —
+    // gets something instead of nothing. A human description always wins; this
+    // only fills a gap. Best-effort and inline, same trade-off as the link
+    // enrichment above.
+    if ((body.type === "image" || body.type === "screenshot") && body.content_ref && !body.semantic_text) {
+      const blob = await env.BLOBS.get(body.content_ref).catch(() => null);
+      if (blob) {
+        const caption = await captionImage(env, new Uint8Array(await blob.arrayBuffer())).catch(() => null);
+        const parent = q.getItem(id);
+        if (caption && parent) {
+          q.updateItem({ ...parent, semantic_text: caption, updated_at: now });
+        }
       }
     }
     deriveEdgesForItem(q, q.getItem(id)!, now);

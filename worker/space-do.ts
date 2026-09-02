@@ -5,12 +5,15 @@ import { migrate, rebuildFts } from "./db/migrate";
 import { rebuildSpaceEdges } from "./graph-build";
 import { handleRoute } from "./routes";
 import { drainSpaceMemory, memoryIndexFor } from "./memory-drain";
+import { captionSpaceImages } from "./vision";
 
 const GRAPH_DERIVATION_VERSION = 1;
 /** Bump to force a one-time DROP + reindex of items_fts on the next boot. */
 const FTS_REBUILD_VERSION = 1;
 const MEMORY_DRAIN_DELAY_MS = 5_000;
 const MEMORY_DRAIN_RETRY_MS = 30_000;
+const CAPTION_DRAIN_DELAY_MS = 5_000;
+const CAPTION_DRAIN_RETRY_MS = 30_000;
 
 export class SpaceDO extends DurableObject<Env> {
   private queries: Queries;
@@ -75,41 +78,78 @@ export class SpaceDO extends DurableObject<Env> {
       } catch (e) {
         console.error("space-do: graph backfill failed", e);
       }
+
+      // Images captured before auto-captioning existed (or where a caption call
+      // previously failed) have no separate queue — imagesNeedingCaption's own
+      // live query is the backlog. Just check whether it's non-empty and arm.
+      try {
+        for (const space of this.queries.listSpaces()) {
+          if (this.queries.imagesNeedingCaption(space.id, 1).length > 0) {
+            await this.ctx.storage.setAlarm(Date.now() + CAPTION_DRAIN_DELAY_MS);
+            break;
+          }
+        }
+      } catch (e) {
+        console.error("space-do: caption backlog check failed", e);
+      }
     });
   }
 
   async fetch(request: Request): Promise<Response> {
     const response = await handleRoute(request, this.env, this.queries);
-    // A write may have queued a memory_outbox row. Arm the drain alarm without
-    // delaying the response, and only when the external index is configured.
+    // A write may have queued a memory_outbox row, or added an uncaptioned
+    // image. Arm the relevant drain alarm without delaying the response.
     if (request.method !== "GET" && request.method !== "HEAD") {
       this.ctx.waitUntil(this.scheduleMemoryDrain());
+      this.ctx.waitUntil(this.scheduleCaptionDrain());
     }
     return response;
   }
 
-  /** SpaceDO.alarm(): drain one batch of memory_outbox, re-arm if work remains. */
+  /** SpaceDO.alarm(): drain one batch each of memory_outbox and the caption backlog, re-arm if either has more. */
   async alarm(): Promise<void> {
+    let morePending = false;
+
     const index = memoryIndexFor(this.env);
-    if (!index) return;
-    try {
-      const { report, morePending } = await drainSpaceMemory(
-        this.queries,
-        index,
-        [this.env.SUPERMEMORY_API_KEY ?? ""],
-        async (key) => {
-          const obj = await this.env.BLOBS.get(key);
-          return obj?.body ? { body: obj.body, contentType: obj.httpMetadata?.contentType ?? null } : null;
-        },
-      );
-      console.log(
-        `space-do: memory drain — ${JSON.stringify(report)} morePending=${morePending}`,
-      );
-      if (morePending) await this.ctx.storage.setAlarm(Date.now() + MEMORY_DRAIN_RETRY_MS);
-    } catch (e) {
-      console.error("space-do: memory drain failed", e);
-      await this.ctx.storage.setAlarm(Date.now() + MEMORY_DRAIN_RETRY_MS);
+    if (index) {
+      try {
+        const { report, morePending: memoryMore } = await drainSpaceMemory(
+          this.queries,
+          index,
+          [this.env.SUPERMEMORY_API_KEY ?? ""],
+          async (key) => {
+            const obj = await this.env.BLOBS.get(key);
+            return obj?.body ? { body: obj.body, contentType: obj.httpMetadata?.contentType ?? null } : null;
+          },
+        );
+        console.log(`space-do: memory drain — ${JSON.stringify(report)} morePending=${memoryMore}`);
+        morePending ||= memoryMore;
+      } catch (e) {
+        console.error("space-do: memory drain failed", e);
+        morePending = true;
+      }
     }
+
+    try {
+      for (const space of this.queries.listSpaces()) {
+        const { captioned, morePending: captionsMore } = await captionSpaceImages(
+          this.queries,
+          this.env,
+          space.id,
+          async (key) => {
+            const obj = await this.env.BLOBS.get(key);
+            return obj?.body ? new Uint8Array(await obj.arrayBuffer()) : null;
+          },
+        );
+        if (captioned > 0) console.log(`space-do: captioned ${captioned} image(s) in ${space.id}`);
+        morePending ||= captionsMore;
+      }
+    } catch (e) {
+      console.error("space-do: caption drain failed", e);
+      morePending = true;
+    }
+
+    if (morePending) await this.ctx.storage.setAlarm(Date.now() + Math.max(MEMORY_DRAIN_RETRY_MS, CAPTION_DRAIN_RETRY_MS));
   }
 
   private async scheduleMemoryDrain(): Promise<void> {
@@ -120,6 +160,17 @@ export class SpaceDO extends DurableObject<Env> {
       await this.ctx.storage.setAlarm(Date.now() + MEMORY_DRAIN_DELAY_MS);
     } catch (e) {
       console.error("space-do: could not arm memory drain", e);
+    }
+  }
+
+  private async scheduleCaptionDrain(): Promise<void> {
+    try {
+      if ((await this.ctx.storage.getAlarm()) !== null) return;
+      const backlog = this.queries.listSpaces().some((s) => this.queries.imagesNeedingCaption(s.id, 1).length > 0);
+      if (!backlog) return;
+      await this.ctx.storage.setAlarm(Date.now() + CAPTION_DRAIN_DELAY_MS);
+    } catch (e) {
+      console.error("space-do: could not arm caption drain", e);
     }
   }
 }
