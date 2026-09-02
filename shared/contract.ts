@@ -594,4 +594,6 @@ export const API = {
   edges: "/api/edges",
   /** Notes on one item. GET ?item_id=… · POST create · DELETE ?id=… */
   itemNotes: "/api/items/notes",
+  /** External memory index sync. GET — status · POST — force a full re-sync. */
+  memoryStatus: "/api/memory/status",
 } as const;

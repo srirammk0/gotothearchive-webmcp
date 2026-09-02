@@ -1967,6 +1967,39 @@ export class Queries {
       id,
     );
   }
+
+  /** A human-readable sync health snapshot for one space. */
+  memoryStatus(spaceId: string): {
+    mirror_enabled: boolean;
+    items: number;
+    synced: number;
+    pending: number;
+    failed: number;
+    recent_errors: string[];
+  } {
+    const one = (q: string, ...b: SqlStorageValue[]) =>
+      this.sql.exec<{ n: number }>(q, ...b).toArray()[0]?.n ?? 0;
+    return {
+      mirror_enabled: this.opts.mirrorMemory ?? false,
+      items: one(`SELECT COUNT(*) AS n FROM items WHERE space_id = ?`, spaceId),
+      synced: one(
+        `SELECT COUNT(DISTINCT item_id) AS n FROM memory_outbox WHERE space_id = ? AND status = 'done'`,
+        spaceId,
+      ),
+      pending: one(`SELECT COUNT(*) AS n FROM memory_outbox WHERE space_id = ? AND status = 'pending'`, spaceId),
+      failed: one(`SELECT COUNT(*) AS n FROM memory_outbox WHERE space_id = ? AND status = 'failed'`, spaceId),
+      recent_errors: this.sql
+        .exec<{ last_error: string | null }>(
+          `SELECT last_error FROM memory_outbox
+           WHERE space_id = ? AND status = 'failed' AND last_error IS NOT NULL
+           ORDER BY updated_at DESC LIMIT 3`,
+          spaceId,
+        )
+        .toArray()
+        .map((r) => r.last_error ?? "")
+        .filter(Boolean),
+    };
+  }
 }
 
 /**

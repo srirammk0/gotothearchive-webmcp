@@ -140,6 +140,8 @@ export async function handleRoute(
       return await handleEdges(request, q, human.human_id);
     case API.itemNotes:
       return await handleItemNotes(request, q, human.human_id);
+    case API.memoryStatus:
+      return handleMemoryStatus(request, q, human.human_id);
     default:
       return new Response(null, { status: 404 });
   }
@@ -1695,6 +1697,22 @@ function handleQuota(q: Queries, humanId: string): Response {
       metrics: QUOTA_METRICS.map((m) => ({ metric: m, used: used[m] ?? 0, limit: QUOTA[m] })),
     },
   });
+}
+
+/* ---------------- memory sync ---------------- */
+
+function handleMemoryStatus(request: Request, q: Queries, humanId: string): Response {
+  const spaceId = spaceIdFor(humanId);
+  if (request.method === "GET") {
+    return json({ ok: true, status: q.memoryStatus(spaceId) });
+  }
+  if (request.method === "POST") {
+    // Force-queue every not-yet-synced item. SpaceDO.fetch() arms the drain
+    // alarm after this non-GET request returns, so the backlog flushes shortly.
+    const queued = q.backfillMemoryOutbox(spaceId);
+    return json({ ok: true, queued, status: q.memoryStatus(spaceId) });
+  }
+  return badRequest("GET or POST");
 }
 
 /* ---------------- lens ---------------- */

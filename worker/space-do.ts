@@ -51,10 +51,12 @@ export class SpaceDO extends DurableObject<Env> {
       // before the mirror, or before the API key was set). Idempotent; the
       // alarm below drains whatever this queues.
       try {
+        const mirror = Boolean(env.SUPERMEMORY_API_KEY?.trim());
         let queued = 0;
         for (const space of this.queries.listSpaces()) {
           queued += this.queries.backfillMemoryOutbox(space.id);
         }
+        console.log(`space-do: memory backfill — mirror=${mirror} queued=${queued}`);
         if (queued > 0) await this.ctx.storage.setAlarm(Date.now() + MEMORY_DRAIN_DELAY_MS);
       } catch (e) {
         console.error("space-do: memory backfill failed", e);
@@ -91,7 +93,7 @@ export class SpaceDO extends DurableObject<Env> {
     const index = memoryIndexFor(this.env);
     if (!index) return;
     try {
-      const { morePending } = await drainSpaceMemory(
+      const { report, morePending } = await drainSpaceMemory(
         this.queries,
         index,
         [this.env.SUPERMEMORY_API_KEY ?? ""],
@@ -99,6 +101,9 @@ export class SpaceDO extends DurableObject<Env> {
           const obj = await this.env.BLOBS.get(key);
           return obj?.body ? { body: obj.body, contentType: obj.httpMetadata?.contentType ?? null } : null;
         },
+      );
+      console.log(
+        `space-do: memory drain — ${JSON.stringify(report)} morePending=${morePending}`,
       );
       if (morePending) await this.ctx.storage.setAlarm(Date.now() + MEMORY_DRAIN_RETRY_MS);
     } catch (e) {
