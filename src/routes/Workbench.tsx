@@ -76,7 +76,7 @@ function StateBadge({ state }: { state: string }) {
 }
 
 /** Inline version chips beyond this count collapse into a dropdown. */
-const VERSION_CHIPS_VISIBLE = 5;
+const VERSION_CHIPS_VISIBLE = 3;
 
 /**
  * `versions` is sorted oldest → newest. `visible` keeps the most recent
@@ -308,12 +308,11 @@ export function Workbench() {
               Past VERSION_CHIPS_VISIBLE this row would just grow forever, so
               only the most recent stay inline; the rest collapse into one
               dropdown trigger, which shows the active version number itself
-              when the selected one is among those collapsed. */}
+              when the selected one is among those collapsed. Earlier
+              versions read chronologically first, so the "earlier" trigger
+              sits before the visible chips, not after. */}
           {versions.length > 1 ? (
             <div className="flex flex-wrap items-center gap-2">
-              {visibleVersions.map((v) => (
-                <VersionChip key={v.id} v={v} active={v.id === version.id} onSelect={selectVersion} />
-              ))}
               {hiddenVersions.length > 0 ? (
                 <Menu
                   items={hiddenVersions.map((v) => ({
@@ -346,6 +345,9 @@ export function Workbench() {
                   )}
                 />
               ) : null}
+              {visibleVersions.map((v) => (
+                <VersionChip key={v.id} v={v} active={v.id === version.id} onSelect={selectVersion} />
+              ))}
             </div>
           ) : null}
         </header>
