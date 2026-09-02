@@ -349,10 +349,19 @@ export class SupermemoryMemoryIndex implements MemoryIndex {
     response: Response,
     parse: (value: unknown) => T | null,
   ): Promise<T | null> {
-    if (!response.ok) return null;
+    if (!response.ok) {
+      // TEMP diagnostic — remove once sync is confirmed working.
+      try {
+        console.warn(`supermemory: HTTP ${response.status} — ${(await response.text()).slice(0, 300)}`);
+      } catch {
+        console.warn(`supermemory: HTTP ${response.status} (body unreadable)`);
+      }
+      return null;
+    }
     try {
       return parse(await response.json());
-    } catch {
+    } catch (e) {
+      console.warn(`supermemory: response parse failed — ${e instanceof Error ? e.message : String(e)}`);
       return null;
     }
   }
@@ -384,7 +393,9 @@ export class SupermemoryMemoryIndex implements MemoryIndex {
         signal: requestSignal.signal,
       }).then((response) => consume(response));
       return await Promise.race([operation, requestSignal.abortPromise]);
-    } catch {
+    } catch (e) {
+      // TEMP diagnostic — remove once sync is confirmed working.
+      console.warn(`supermemory: ${method} ${path} threw — ${e instanceof Error ? `${e.name}: ${e.message}` : String(e)}`);
       return null;
     } finally {
       requestSignal.dispose();
