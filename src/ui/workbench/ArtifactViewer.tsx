@@ -263,13 +263,22 @@ export function ArtifactViewer({ version, annotations = [], onAddRegion, onAddCo
           className="h-[560px] w-full rounded-[var(--radius-md)] border border-line bg-white"
         />
 
-        {/* Review layer */}
+        {/* Review layer. Always captures pointer/wheel input (never
+            pointer-events-none) — a wheel event that reaches the iframe
+            underneath doesn't bubble back out to scroll the page once it's
+            inside that nested browsing context (a real cross-document quirk,
+            not specific to this app), so this layer has to catch it first,
+            in the parent document, where normal scroll bubbling still
+            applies. Trade-off: a live "component" artifact's own buttons
+            aren't directly clickable at this compact size anymore, only via
+            "view full screen" below (no overlay there) — this is a review
+            surface for marking regions, not a way to use the artifact. */}
         <div
           ref={layerRef}
           onPointerDown={onPointerDown}
           onPointerMove={onPointerMove}
           onPointerUp={onPointerUp}
-          className={`absolute inset-0 ${marking ? "cursor-crosshair" : "pointer-events-none"}`}
+          className={`absolute inset-0 ${marking ? "cursor-crosshair" : ""}`}
         >
           {regionAnnotations.map((a, i) => (
             <div
