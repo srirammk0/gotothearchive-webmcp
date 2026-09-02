@@ -46,6 +46,12 @@ function seed(q: Queries) {
     source_url: null, content_ref: null, semantic_text: "just text", metadata: {},
     authority_class: "human_authored", created_by: HUMAN, created_at: now, updated_at: now,
   });
+  q.insertItem({
+    id: "tweet1", space_id: SPACE, region_id: "r_a", owner_id: HUMAN, type: "link", title: "A captured tweet",
+    source_url: "https://x.com/someone/status/123", content_ref: null, semantic_text: "great design thread",
+    metadata: { extracted: { images: ["https://pbs.twimg.com/media/abc.jpg"] } },
+    authority_class: "human_authored", created_by: HUMAN, created_at: now, updated_at: now,
+  });
   q.insertTask({ id: "t1", space_id: SPACE, human_id: HUMAN, title: "Task", instruction: "", status: "open", created_at: now, expires_at: null });
   q.insertGrant({
     id: "g_r_a", task_id: "t1", space_id: SPACE, region_id: "r_a", level: "read",
@@ -85,4 +91,19 @@ test("a non-viewable item (a plain note) gets neither url field", async () => {
   const item = (res as { result: { item: { content_url: string | null; embed_url: string | null } } }).result.item;
   expect(item.content_url).toBeNull();
   expect(item.embed_url).toBeNull();
+});
+
+test("a captured tweet's extracted image is exposed as both URLs, unsigned, even in a listing", async () => {
+  const q = makeQueries();
+  seed(q);
+  const deep = await call(q, "inspect_context_item", { region: "assets", item_id: "tweet1" });
+  const deepItem = (deep as { result: { item: { content_url: string | null; embed_url: string | null } } }).result.item;
+  expect(deepItem.content_url).toBe("https://pbs.twimg.com/media/abc.jpg");
+  expect(deepItem.embed_url).toBe("https://pbs.twimg.com/media/abc.jpg");
+
+  // And unlike an uploaded image, it's cheap (no signature) so it's not
+  // gated out of list-shaped results either.
+  const listed = await call(q, "get_context_for_task", { region: "assets", query: "thread" });
+  const items = (listed as { result: { items: { id: string; embed_url: string | null }[] } }).result.items;
+  expect(items.find((i) => i.id === "tweet1")?.embed_url).toBe("https://pbs.twimg.com/media/abc.jpg");
 });

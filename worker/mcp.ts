@@ -84,35 +84,55 @@ function versionSessionBelongsToTask(
 }
 
 /**
+ * A captured link/tweet's own extracted preview image (og:image, tweet
+ * media) — already validated as a public http(s) URL at capture time
+ * (worker/extract.ts's absolutize() runs the same isPublicHttpUrl SSRF
+ * check as the source URL itself), so it needs no signing or proxying to
+ * be safe to hand an agent directly: it's already just as fetchable by
+ * anyone as the tweet/page itself was.
+ */
+function extractedImageUrl(it: ContextItem): string | null {
+  if (it.type !== "link") return null;
+  const extracted = (it.metadata as { extracted?: { images?: unknown } }).extracted;
+  const first = Array.isArray(extracted?.images) ? extracted.images[0] : undefined;
+  return typeof first === "string" && /^https?:\/\//i.test(first) ? first : null;
+}
+
+/**
  * Trimmed view of an archive item for a tool result; every free-text field is
- * fenced. Two different URLs, for two different consumers, on an
- * image/screenshot/PDF item only:
+ * fenced. Two different URLs, for two different consumers:
  *
- * `content_url` — a signed URL good for ~15 minutes that an agent can fetch
- * independently of this session, right now. The mechanism that actually lets
- * an agent view the bytes, since WebMCP's tool-call transport itself is
- * string-only and can't carry them (see webmcp-capability-layer.md's rule
- * against overclaiming multimodal transport). Costs real tokens (a 64-char
+ * `content_url` — something an agent can fetch independently of this
+ * session, right now. The mechanism that actually lets an agent view an
+ * image, since WebMCP's tool-call transport itself is string-only and can't
+ * carry the bytes (see webmcp-capability-layer.md's rule against
+ * overclaiming multimodal transport). For an uploaded image/screenshot/PDF
+ * this is a signed URL good for ~15 minutes — a real cost (a 64-char
  * signature), so `deepLook` gates it off for list-shaped results the agent
- * hasn't chosen to look closely at yet — call inspect_context_item for that.
+ * hasn't chosen to look closely at yet. A captured link's own extracted
+ * image is already a plain public URL with nothing to sign, so it's
+ * included unconditionally — there's no per-call cost to gate.
  *
- * `embed_url` — the same plain, permanent /api/blob path this app's own UI
- * already uses, no signature, never expires. For dropping straight into
- * `<img src>` inside content_html the agent is authoring with record_artifact
- * (a logo, an existing photo) — that HTML is saved and viewed by the signed-in
- * human later, same-origin, so it needs a link that still works then, not one
- * that's gone in 15 minutes. Cheap (no signing), so always included.
+ * `embed_url` — for dropping straight into `<img src>` inside content_html
+ * the agent is authoring with record_artifact (a logo, an existing photo,
+ * a captured reference image) — that HTML is saved and viewed by the
+ * signed-in human later, so it needs a link that still works then, not one
+ * that's gone in 15 minutes. For an uploaded blob this is the same plain,
+ * permanent /api/blob path this app's own UI already uses; for a captured
+ * link it's the same extracted URL as content_url (already permanent).
  *
  * Both are minted only for an item the caller already resolved through this
  * tool's own authorization check — neither re-derives grants on its own.
  */
 async function slimItem(it: ContextItem, env: Env | undefined, origin: string | undefined, deepLook = true) {
-  const viewable = it.content_ref && VIEWABLE_TYPES.has(it.type);
+  const hasBlob = Boolean(it.content_ref) && VIEWABLE_TYPES.has(it.type);
+  const extracted = extractedImageUrl(it);
   const content_url =
-    deepLook && env && origin && viewable
+    extracted ??
+    (deepLook && env && origin && hasBlob
       ? await signedBlobUrl(env.BLOB_SIGNING_SECRET, origin, API.blob, it.content_ref!)
-      : null;
-  const embed_url = viewable ? `${API.blob}?key=${encodeURIComponent(it.content_ref!)}` : null;
+      : null);
+  const embed_url = extracted ?? (hasBlob ? `${API.blob}?key=${encodeURIComponent(it.content_ref!)}` : null);
   return {
     id: it.id,
     type: it.type,
@@ -292,9 +312,10 @@ export async function handleToolCall(
         title: spotlight(clip(ret.item.title, 120)),
         why: clip(ret.why, MAX_TEXT),
         embed_url:
-          ret.item.content_ref && VIEWABLE_TYPES.has(ret.item.type)
+          extractedImageUrl(ret.item) ??
+          (ret.item.content_ref && VIEWABLE_TYPES.has(ret.item.type)
             ? `${API.blob}?key=${encodeURIComponent(ret.item.content_ref)}`
-            : null,
+            : null),
       }));
       return { ok: true, result: { items: compact } };
     }
