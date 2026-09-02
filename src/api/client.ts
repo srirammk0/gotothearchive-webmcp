@@ -55,28 +55,70 @@ export async function authHeader(): Promise<Record<string, string>> {
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
+/**
+ * A short-lived, in-memory GET cache — no persistence, no new dependency,
+ * just reuse within the same tab. Every read goes through `req()`, so this
+ * covers every list/get call site uniformly instead of each hook growing its
+ * own cache. A GET within CACHE_TTL_MS of the last one for that exact URL
+ * (including query string, so distinct filters/ids never collide) returns
+ * instantly with no network round trip; a concurrent identical GET reuses
+ * the same in-flight promise instead of firing twice.
+ *
+ * Any non-GET request clears the whole cache on success — simpler and
+ * safer than per-endpoint invalidation given how cross-referenced this data
+ * is (an item write can move counts on regions, stats, and taste evidence).
+ * TTL is short enough that both existing polls (MemorySync ~15s, Stats
+ * ~30s + focus/visibility refresh) still hit the network on every tick.
+ */
+const CACHE_TTL_MS = 10_000;
+const cache = new Map<string, { at: number; data: unknown }>();
+const inflight = new Map<string, Promise<unknown>>();
+
+/** Test-only: resets the module-level request cache between tests. */
+export function clearRequestCacheForTests(): void {
+  cache.clear();
+  inflight.clear();
+}
+
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(path, {
-    ...init,
-    credentials: "same-origin",
-    headers: {
-      ...(init?.body ? { "content-type": "application/json" } : {}),
-      ...(await authHeader()),
-      ...init?.headers,
-    },
-  });
-  const text = await res.text();
-  let data: unknown;
-  try {
-    data = text ? JSON.parse(text) : {};
-  } catch {
-    throw new ApiError(`Unexpected response from ${path}`, res.status);
+  const isGet = !init?.method || init.method === "GET";
+  if (isGet) {
+    const hit = cache.get(path);
+    if (hit && Date.now() - hit.at < CACHE_TTL_MS) return hit.data as T;
+    const pending = inflight.get(path);
+    if (pending) return pending as Promise<T>;
   }
-  const body = data as { ok?: boolean; error?: string; message?: string };
-  if (!res.ok || body.ok === false) {
-    throw new ApiError(body.message ?? body.error ?? `Request to ${path} failed`, res.status);
-  }
-  return data as T;
+
+  const run = async (): Promise<T> => {
+    const res = await fetch(path, {
+      ...init,
+      credentials: "same-origin",
+      headers: {
+        ...(init?.body ? { "content-type": "application/json" } : {}),
+        ...(await authHeader()),
+        ...init?.headers,
+      },
+    });
+    const text = await res.text();
+    let data: unknown;
+    try {
+      data = text ? JSON.parse(text) : {};
+    } catch {
+      throw new ApiError(`Unexpected response from ${path}`, res.status);
+    }
+    const body = data as { ok?: boolean; error?: string; message?: string };
+    if (!res.ok || body.ok === false) {
+      throw new ApiError(body.message ?? body.error ?? `Request to ${path} failed`, res.status);
+    }
+    if (isGet) cache.set(path, { at: Date.now(), data });
+    else cache.clear();
+    return data as T;
+  };
+
+  if (!isGet) return run();
+  const promise = run().finally(() => inflight.delete(path));
+  inflight.set(path, promise);
+  return promise;
 }
 
 const qs = (params: Record<string, string | null | undefined>): string => {

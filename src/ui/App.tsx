@@ -21,9 +21,7 @@ function AnimatedRoutes() {
         transition={{ duration: duration.base, ease }}
         className="mx-auto w-full max-w-[1440px] px-5 py-10 sm:px-8 sm:py-14"
       >
-        <div className="mb-3 text-faint">
-          <Breadcrumbs />
-        </div>
+        <Breadcrumbs />
         <Routes location={location}>
           <Route path="/" element={<Archive />} />
           <Route path="/workbench/:artifactId?" element={<Workbench />} />

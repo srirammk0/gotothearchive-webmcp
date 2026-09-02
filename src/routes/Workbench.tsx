@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { useNavigate, useParams } from "react-router";
+import { Link, useNavigate, useParams } from "react-router";
 import { motion } from "motion/react";
 import { REVIEW_DECISIONS, type ArtifactState, type Region, type ReviewDecision } from "@shared/contract";
 import { ApiError, deleteArtifact, listArtifacts, type WorkbenchArtifact } from "../api/client";
@@ -194,11 +194,8 @@ export function Workbench() {
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deletePending, setDeletePending] = useState(false);
 
-  useTrail(
-    artifactId
-      ? [{ label: "Workbench", to: "/workbench" }, { label: data?.artifact.title ?? "Artifact" }]
-      : [{ label: "Workbench" }],
-  );
+  // An open artifact gets a back link above its own title instead of a breadcrumb.
+  useTrail(artifactId ? null : [{ label: "Workbench" }]);
 
   if (!artifactId) return <ArtifactList regions={regions} />;
 
@@ -246,6 +243,13 @@ export function Workbench() {
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-7">
         <ArtifactCapabilitySync taskId={artifact.task_id} artifactId={artifact.id} />
         <header className="flex flex-col gap-4">
+          <Link
+            to="/workbench"
+            className="-ml-1 -mb-1 inline-flex w-fit items-center gap-1 rounded-[var(--radius-sm)] px-1 py-0.5 text-meta text-faint transition-colors duration-[var(--duration-fast)] hover:text-text"
+          >
+            <Icon name="chevronRight" size={14} className="rotate-180" />
+            Back
+          </Link>
           <div className="flex min-w-0 items-start justify-between gap-4">
             <div>
             <h1 className="text-display leading-tight text-text">{artifact.title}</h1>
