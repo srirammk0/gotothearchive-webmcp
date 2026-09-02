@@ -1,8 +1,9 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import type { ContextItem } from "@shared/contract";
 import { blobUrl } from "../../api/client";
 import { Icon } from "../primitives/Icon";
 import { ArtifactThumb } from "../workbench/ArtifactThumb";
+import { previewSandbox, previewSrcDoc } from "../workbench/componentPreview";
 import { extractedImage, FileCard, host, kind, tweetId } from "./itemKind";
 import { Tweet } from "./Tweet";
 
@@ -150,6 +151,82 @@ export function ItemPreview({ item, size }: { item: ContextItem; size: PreviewSi
   return <ChipPreview item={item} />;
 }
 
+const ZOOM_MIN = 0.5;
+const ZOOM_MAX = 2.5;
+const ZOOM_STEP = 0.25;
+
+/**
+ * The artifact branch of detailPreview(), split out because it needs its own
+ * zoom state (a hook) — unlike ArtifactThumb (a fixed-scale, pointer-events-
+ * none *thumbnail*, correctly used at tile size), this is the full-size,
+ * genuinely interactive artifact: the same sandboxed srcDoc as
+ * ArtifactViewer, at natural size, with a scroll/pinch (ctrl+wheel) +
+ * click zoom the way an image viewer would.
+ */
+function ArtifactDetailPreview({ item }: { item: ContextItem }) {
+  const html = String(item.metadata?.preview_html ?? "");
+  const [zoom, setZoom] = useState(1);
+  useEffect(() => setZoom(1), [item.id]);
+
+  if (!html) {
+    return (
+      <div className="flex h-full w-full items-center justify-center text-micro text-faint">No preview</div>
+    );
+  }
+
+  const zoomBy = (delta: number) => setZoom((z) => Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, z + delta)));
+
+  return (
+    <div
+      className="relative h-full w-full overflow-auto rounded-[var(--radius-sm)] border border-line-soft bg-white"
+      onWheel={(e) => {
+        // Trackpad pinch and ctrl+scroll both fire as a wheel event with ctrlKey —
+        // a plain scroll should still pan the zoomed content, not zoom it.
+        if (!e.ctrlKey) return;
+        e.preventDefault();
+        zoomBy(e.deltaY * -0.01);
+      }}
+    >
+      <iframe
+        title="Artifact preview"
+        srcDoc={previewSrcDoc(html)}
+        sandbox={previewSandbox(html)}
+        referrerPolicy="no-referrer"
+        className="h-full w-full origin-top-left"
+        style={{ transform: `scale(${zoom})` }}
+      />
+      <div className="absolute bottom-2 right-2 flex items-center gap-0.5 rounded-[var(--radius-sm)] bg-raised/90 p-0.5 text-meta text-muted backdrop-blur">
+        <button
+          type="button"
+          onClick={() => zoomBy(-ZOOM_STEP)}
+          disabled={zoom <= ZOOM_MIN}
+          aria-label="Zoom out"
+          className="flex h-6 w-6 items-center justify-center rounded-[var(--radius-sm)] hover:bg-hover hover:text-text disabled:opacity-30"
+        >
+          −
+        </button>
+        <button
+          type="button"
+          onClick={() => setZoom(1)}
+          aria-label="Reset zoom"
+          className="min-w-[3ch] px-1 text-center text-micro tabular-nums hover:text-text"
+        >
+          {Math.round(zoom * 100)}%
+        </button>
+        <button
+          type="button"
+          onClick={() => zoomBy(ZOOM_STEP)}
+          disabled={zoom >= ZOOM_MAX}
+          aria-label="Zoom in"
+          className="flex h-6 w-6 items-center justify-center rounded-[var(--radius-sm)] hover:bg-hover hover:text-text disabled:opacity-30"
+        >
+          +
+        </button>
+      </div>
+    </div>
+  );
+}
+
 /**
  * The full-detail render shared by CapturePreview and ItemLightbox: the six
  * kinds whose full-size treatment is identical in both (an embed or the real
@@ -183,9 +260,7 @@ export function detailPreview(item: ContextItem): ReactNode | null {
       <iframe title={item.title} src={blobUrl(item.content_ref)} className="h-full w-full rounded-[var(--radius-sm)] bg-white" />
     );
   }
-  if (render === "artifact") {
-    return <ArtifactThumb html={String(item.metadata?.preview_html ?? "")} className="h-full w-full" />;
-  }
+  if (render === "artifact") return <ArtifactDetailPreview item={item} />;
   if (render === "office") return <FileCard item={item} big />;
   if (render === "tweet") {
     const tw = tweetId(item.source_url);
