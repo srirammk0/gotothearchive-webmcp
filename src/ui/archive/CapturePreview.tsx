@@ -139,7 +139,7 @@ export function CapturePreview({
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
         transition={{ duration: duration.fast, ease }}
-        className="fixed inset-0 z-50 flex items-center justify-center bg-canvas/80 px-3 py-3 backdrop-blur-lg sm:px-5"
+        className="fixed inset-0 z-50 flex items-center justify-center bg-canvas/80 p-5 backdrop-blur-lg sm:p-8"
         onMouseDown={(e) => e.target === e.currentTarget && done()}
       >
         <motion.div
@@ -147,7 +147,7 @@ export function CapturePreview({
           animate={{ opacity: 1, y: 0, scale: 1 }}
           exit={{ opacity: 0, y: 10, scale: 0.985 }}
           transition={{ duration: duration.base, ease }}
-          className="relative flex h-[94vh] max-h-[94vh] w-full max-w-[min(1440px,96vw)] flex-col overflow-hidden rounded-[var(--radius-lg)] border border-line bg-surface shadow-2xl shadow-black/50 md:flex-row"
+          className="relative flex h-[84vh] max-h-[84vh] w-full max-w-[min(1200px,92vw)] flex-col overflow-hidden rounded-[var(--radius-lg)] border border-line bg-surface shadow-2xl shadow-black/50 md:flex-row"
         >
           <button
             type="button"
@@ -158,11 +158,11 @@ export function CapturePreview({
             <Icon name="close" size={16} />
           </button>
 
-          <div className="flex min-h-[280px] flex-1 items-center justify-center overflow-hidden border-b border-line-soft bg-canvas p-6 md:border-b-0 md:border-r md:p-12">
+          <div className="flex min-h-[240px] flex-1 items-center justify-center overflow-hidden border-b border-line-soft bg-canvas p-6 md:border-b-0 md:border-r md:p-10">
             <PreviewPane item={item} />
           </div>
 
-          <div className="no-scrollbar flex w-full shrink-0 flex-col gap-4 overflow-y-auto p-6 md:w-[400px]">
+          <div className="no-scrollbar flex w-full shrink-0 flex-col gap-4 overflow-y-auto p-6 md:w-[370px]">
             <label className="flex flex-col gap-1">
               <span className="text-[length:var(--text-micro)] uppercase tracking-wide text-faint">Title</span>
               <input value={title} onChange={(e) => setTitle(e.target.value)} onBlur={saveTitle} className={controlClass} />
