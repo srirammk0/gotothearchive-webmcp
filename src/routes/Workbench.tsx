@@ -64,7 +64,7 @@ function relTime(at: number): string {
 function StateBadge({ state }: { state: string }) {
   return (
     <span
-      className={`shrink-0 rounded-[var(--radius-sm)] px-1.5 py-px text-[length:var(--text-micro)] ${
+      className={`shrink-0 rounded-[var(--radius-sm)] px-1.5 py-px text-micro ${
         STATE_STYLE[state as ArtifactState] ?? "bg-hover text-muted"
       }`}
     >
@@ -96,12 +96,12 @@ function ArtifactCard({ artifact, onOpen }: { artifact: WorkbenchArtifact; onOpe
       />
       <div className="flex flex-col gap-1">
         <div className="flex items-center gap-1.5">
-          <span className="shrink-0 rounded-[var(--radius-sm)] bg-accent/15 px-1.5 py-px text-[length:var(--text-micro)] text-accent">
+          <span className="shrink-0 rounded-[var(--radius-sm)] bg-accent/15 px-1.5 py-px text-micro text-accent">
             Agent
           </span>
-          <p className="truncate text-[length:var(--text-meta)] text-text">{artifact.title}</p>
+          <p className="truncate text-meta text-text">{artifact.title}</p>
         </div>
-        <div className="flex items-center gap-2 text-[length:var(--text-micro)] text-faint">
+        <div className="flex items-center gap-2 text-micro text-faint">
           <StateBadge state={artifact.state} />
           <span>
             v{artifact.version_count} · {artifact.influence_count} refs · {relTime(artifact.updated_at)}
@@ -163,8 +163,8 @@ function ArtifactList({ regions }: { regions: Region[] }) {
     <div className="flex flex-col gap-10">
       <header className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <h1 className="text-[length:var(--text-display)] leading-tight text-text">Workbench</h1>
-          <p className="mt-1 text-[length:var(--text-meta)] text-faint">
+          <h1 className="text-display leading-tight text-text">Workbench</h1>
+          <p className="mt-1 text-meta text-faint">
             {artifacts.length} {artifacts.length === 1 ? "artifact" : "artifacts"} · grouped by source folder
           </p>
         </div>
@@ -179,8 +179,8 @@ function ArtifactList({ regions }: { regions: Region[] }) {
         groups.map((g) => (
           <section key={g.name} className="flex flex-col gap-4">
             <div className="flex items-baseline justify-between gap-4 border-b border-line-soft pb-2.5">
-              <h2 className="text-[length:var(--text-headline)] text-text">{g.name}</h2>
-              <span className="text-[length:var(--text-micro)] text-faint">{g.items.length}</span>
+              <h2 className="text-headline text-text">{g.name}</h2>
+              <span className="text-micro text-faint">{g.items.length}</span>
             </div>
             {g.items.length === 0 ? (
               <EmptyRow />
@@ -262,8 +262,8 @@ export function Workbench() {
         <header className="flex flex-col gap-4">
           <div className="flex min-w-0 items-start justify-between gap-4">
             <div>
-            <h1 className="text-[length:var(--text-display)] leading-tight text-text">{artifact.title}</h1>
-            <p className="mt-1 text-[length:var(--text-meta)] text-faint">
+            <h1 className="text-display leading-tight text-text">{artifact.title}</h1>
+            <p className="mt-1 text-meta text-faint">
               Viewing v{version.version_no} of {versions.length} · {stateLabel(version.state)}
             </p>
             </div>
@@ -283,7 +283,7 @@ export function Workbench() {
                     type="button"
                     onClick={() => selectVersion(v.id)}
                     aria-pressed={active}
-                    className={`flex items-center gap-2 rounded-[var(--radius-md)] border px-2.5 py-1.5 text-[length:var(--text-micro)] transition-colors duration-[var(--duration-fast)] ${
+                    className={`flex items-center gap-2 rounded-[var(--radius-md)] border px-2.5 py-1.5 text-micro transition-colors duration-[var(--duration-fast)] ${
                       active ? "border-line bg-surface text-text" : "border-line-soft text-muted hover:border-line hover:text-text"
                     }`}
                   >
@@ -337,20 +337,20 @@ export function Workbench() {
             {decisionPending ? <Spinner label="Recording…" /> : null}
           </div>
           {decisionError ? (
-            <span role="alert" className="sr-only text-[length:var(--text-meta)] text-bad">
+            <span role="alert" className="sr-only text-meta text-bad">
               {decisionError}
             </span>
           ) : null}
         </div>
         {version.state === "changes_requested" ? (
-          <p className="self-center text-[length:var(--text-meta)] text-muted">
+          <p className="self-center text-meta text-muted">
             Changes requested — the agent can read these notes via trace_artifact_influences and submit v
             {version.version_no + 1}.
           </p>
         ) : null}
         <Modal open={deleteOpen} onClose={() => !deletePending && setDeleteOpen(false)} title="Delete artifact">
           <div className="flex flex-col gap-4">
-            <p className="text-[length:var(--text-body)] leading-relaxed text-muted">Delete “{artifact.title}” and its version history? This cannot be undone.</p>
+            <p className="text-body leading-relaxed text-muted">Delete “{artifact.title}” and its version history? This cannot be undone.</p>
             <div className="flex justify-end gap-2">
               <Button variant="secondary" disabled={deletePending} onClick={() => setDeleteOpen(false)}>Cancel</Button>
               <Button variant="danger" disabled={deletePending} onClick={() => void handleDelete()}>{deletePending ? "Deleting…" : "Delete artifact"}</Button>

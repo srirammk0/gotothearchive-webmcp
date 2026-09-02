@@ -26,7 +26,7 @@ export function Rail() {
               {({ isActive }) => (
                 <>
                   <span
-                    className={`text-[length:var(--text-meta)] transition-colors duration-[var(--duration-fast)] ${
+                    className={`text-meta transition-colors duration-[var(--duration-fast)] ${
                       isActive ? "text-text" : "text-muted hover:text-text"
                     }`}
                   >
@@ -77,7 +77,7 @@ function BetaBadge() {
           ? `Beta member ${quota.beta.slot} of ${quota.beta.max} · quota resets monthly`
           : "Closed beta"
       }
-      className="shrink-0 rounded-[var(--radius-sm)] bg-accent/15 px-1.5 py-px text-[length:var(--text-micro)] text-accent transition-opacity duration-[var(--duration-fast)] hover:opacity-80"
+      className="shrink-0 rounded-[var(--radius-sm)] bg-accent/15 px-1.5 py-px text-micro text-accent transition-opacity duration-[var(--duration-fast)] hover:opacity-80"
     >
       Beta{quota?.beta.slot ? ` ${quota.beta.slot}/${quota.beta.max}` : ""}
     </NavLink>
@@ -97,7 +97,7 @@ function Account() {
         <SignInButton mode="modal">
           <button
             type="button"
-            className="text-[length:var(--text-meta)] text-muted transition-colors duration-[var(--duration-fast)] hover:text-text"
+            className="text-meta text-muted transition-colors duration-[var(--duration-fast)] hover:text-text"
           >
             Sign in
           </button>

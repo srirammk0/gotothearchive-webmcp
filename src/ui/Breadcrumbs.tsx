@@ -43,7 +43,7 @@ export function Breadcrumbs() {
 
   return (
     <nav aria-label="Breadcrumb" className="min-w-0">
-      <ol className="flex min-w-0 items-center gap-1.5 text-[length:var(--text-meta)]">
+      <ol className="flex min-w-0 items-center gap-1.5 text-meta">
         {crumbs.map((c, i) => {
           const last = i === crumbs.length - 1;
           return (

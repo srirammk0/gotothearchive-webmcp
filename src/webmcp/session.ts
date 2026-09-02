@@ -49,12 +49,6 @@ export async function startSession(
   return current;
 }
 
-export function declareIdentity(declared: DeclaredIdentity): void {
-  if (!current) return;
-  // Attribution only — see file header. Never read for authorization decisions.
-  current = { ...current, declared };
-}
-
 export function getSession(): SessionState | null {
   return current;
 }

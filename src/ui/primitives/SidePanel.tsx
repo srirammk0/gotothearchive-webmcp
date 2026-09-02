@@ -22,8 +22,8 @@ export function SidePanel({
       className={`flex h-fit flex-col gap-4 border-t border-line pt-4 ${sticky ? "lg:sticky lg:top-20" : ""}`}
     >
       <div className="flex items-baseline justify-between gap-3">
-        <p className="text-[length:var(--text-section)] text-text">{title}</p>
-        {label ? <span className="text-[length:var(--text-micro)] text-faint">{label}</span> : null}
+        <p className="text-section text-text">{title}</p>
+        {label ? <span className="text-micro text-faint">{label}</span> : null}
       </div>
       {children}
     </aside>

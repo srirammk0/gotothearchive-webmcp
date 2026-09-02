@@ -27,11 +27,3 @@ export const duration = { fast: 0.14, base: 0.26, slow: 0.42 } as const;
 
 /** Motion's array form of the CSS --ease-out curve. */
 export const ease = [0.22, 1, 0.36, 1] as const;
-
-/** Shared enter transition for panels, rows, and route content. */
-export const rise = {
-  initial: { opacity: 0, y: 8 },
-  animate: { opacity: 1, y: 0 },
-  exit: { opacity: 0, y: -6 },
-  transition: { duration: duration.base, ease },
-} as const;

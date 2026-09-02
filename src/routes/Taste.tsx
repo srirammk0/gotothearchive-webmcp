@@ -34,7 +34,7 @@ function ItemThumb({ item }: { item: ContextItem }) {
   if (tw) return <Tweet id={tw} className="scale-90" />;
   if (render === "office" || render === "pdf") return <FileCard item={item} />;
   return (
-    <p className="line-clamp-4 p-2 text-[length:var(--text-micro)] leading-relaxed text-muted">
+    <p className="line-clamp-4 p-2 text-micro leading-relaxed text-muted">
       {item.semantic_text ?? item.title}
     </p>
   );
@@ -46,7 +46,7 @@ function EvidenceCard({ record }: { record: EvidenceRecord }) {
   return (
     <div className="flex items-start gap-3 rounded-[var(--radius-md)] border border-line-soft bg-surface p-3">
       <span
-        className={`mt-0.5 shrink-0 self-start rounded-[var(--radius-sm)] px-1.5 py-px text-[length:var(--text-micro)] leading-tight ${
+        className={`mt-0.5 shrink-0 self-start rounded-[var(--radius-sm)] px-1.5 py-px text-micro leading-tight ${
           supports ? "bg-good/15 text-good" : "bg-bad/15 text-bad"
         }`}
       >
@@ -58,8 +58,8 @@ function EvidenceCard({ record }: { record: EvidenceRecord }) {
             <ItemThumb item={record.item} />
           </div>
           <div className="min-w-0">
-            <p className="truncate text-[length:var(--text-meta)] text-text">{record.item.title}</p>
-            <p className="truncate text-[length:var(--text-micro)] text-faint">
+            <p className="truncate text-meta text-text">{record.item.title}</p>
+            <p className="truncate text-micro text-faint">
               {kind(record.item).label}
               {record.item.source_url
                 ? ` · ${new URL(record.item.source_url).hostname.replace(/^www\./, "")}`
@@ -69,13 +69,13 @@ function EvidenceCard({ record }: { record: EvidenceRecord }) {
         </div>
       ) : record.annotation ? (
         <div className="min-w-0 flex-1">
-          <p className="text-[length:var(--text-meta)] leading-relaxed text-muted">“{record.annotation.comment}”</p>
-          <p className="mt-1 text-[length:var(--text-micro)] text-faint">
+          <p className="text-meta leading-relaxed text-muted">“{record.annotation.comment}”</p>
+          <p className="mt-1 text-micro text-faint">
             {record.annotation.dimensions.map(dimensionLabel).join(", ") || "general"} · review note
           </p>
         </div>
       ) : (
-        <p className="flex-1 text-[length:var(--text-meta)] text-faint">Recorded evidence</p>
+        <p className="flex-1 text-meta text-faint">Recorded evidence</p>
       )}
     </div>
   );
@@ -167,23 +167,23 @@ function SignalCard({
     >
       <div className="flex flex-wrap items-center gap-2">
         <span
-          className={`shrink-0 rounded-[var(--radius-sm)] px-1.5 py-px text-[length:var(--text-micro)] ${
+          className={`shrink-0 rounded-[var(--radius-sm)] px-1.5 py-px text-micro ${
             signal.created_by === "system" ? "bg-accent/15 text-accent" : "bg-hover text-muted"
           }`}
         >
           {signal.created_by === "system" ? "Agent" : "You"}
         </span>
         {signal.created_by === "system" && signal.status === "proposed" ? (
-          <span className="shrink-0 rounded-[var(--radius-sm)] bg-hover px-1.5 py-px text-[length:var(--text-micro)] text-muted">
+          <span className="shrink-0 rounded-[var(--radius-sm)] bg-hover px-1.5 py-px text-micro text-muted">
             proposed from your notes
           </span>
         ) : null}
         {signal.supersedes ? (
-          <span className="shrink-0 rounded-[var(--radius-sm)] bg-hover px-1.5 py-px text-[length:var(--text-micro)] text-muted">
+          <span className="shrink-0 rounded-[var(--radius-sm)] bg-hover px-1.5 py-px text-micro text-muted">
             revised
           </span>
         ) : null}
-        <span className="text-[length:var(--text-micro)] text-faint">{relTime(signal.created_at)}</span>
+        <span className="text-micro text-faint">{relTime(signal.created_at)}</span>
       </div>
       {editing ? (
         <textarea
@@ -193,7 +193,7 @@ function SignalCard({
           className={`${controlClass} resize-none`}
         />
       ) : (
-        <p className="text-[length:var(--text-section)] leading-snug text-text">{signal.statement}</p>
+        <p className="text-section leading-snug text-text">{signal.statement}</p>
       )}
 
       {sourceItems.length > 0 || noteCount > 0 ? (
@@ -208,17 +208,17 @@ function SignalCard({
             </div>
           ))}
           {sourceItems.length > 6 ? (
-            <span className="text-[length:var(--text-micro)] text-faint">+{sourceItems.length - 6}</span>
+            <span className="text-micro text-faint">+{sourceItems.length - 6}</span>
           ) : null}
           {noteCount > 0 ? (
-            <span className="rounded-[var(--radius-sm)] bg-hover px-1.5 py-1 text-[length:var(--text-micro)] text-muted">
+            <span className="rounded-[var(--radius-sm)] bg-hover px-1.5 py-1 text-micro text-muted">
               {noteCount} note{noteCount === 1 ? "" : "s"}
             </span>
           ) : null}
         </div>
       ) : null}
 
-      <p className="text-[length:var(--text-micro)] text-faint">
+      <p className="text-micro text-faint">
         {signal.dimensions.map(dimensionLabel).join(" · ")} · {signal.scope === "personal" ? "Personal" : "Project"} ·{" "}
         {confidenceLabel(signal.confidence)} confidence
         {history && history.some((e) => e.kind === "applied")
@@ -227,7 +227,7 @@ function SignalCard({
       </p>
 
       {signal.supersedes && revisions.length > 0 ? (
-        <ol className="flex flex-col gap-1 border-l border-line-soft pl-3 text-[length:var(--text-micro)] text-faint">
+        <ol className="flex flex-col gap-1 border-l border-line-soft pl-3 text-micro text-faint">
           {reversed(revisions).map((e) => (
               <li key={e.id}>
                 {e.kind === "edited" ? "Reworded" : "Replaced"}
@@ -239,9 +239,9 @@ function SignalCard({
 
       <Disclosure summary="Evidence" onOpen={load}>
         {evidence === null ? (
-          <p className="py-2 text-[length:var(--text-meta)] text-faint">Looking for what supports this…</p>
+          <p className="py-2 text-meta text-faint">Looking for what supports this…</p>
         ) : evidence.length === 0 ? (
-          <p className="py-2 text-[length:var(--text-meta)] text-faint">
+          <p className="py-2 text-meta text-faint">
             Nothing cited yet. A proposal without evidence stays a proposal.
           </p>
         ) : (
@@ -255,16 +255,16 @@ function SignalCard({
 
       <Disclosure summary="History" onOpen={load}>
         {history === null ? (
-          <p className="py-2 text-[length:var(--text-meta)] text-faint">Loading history…</p>
+          <p className="py-2 text-meta text-faint">Loading history…</p>
         ) : history.length === 0 ? (
-          <p className="py-2 text-[length:var(--text-meta)] text-faint">No history recorded yet.</p>
+          <p className="py-2 text-meta text-faint">No history recorded yet.</p>
         ) : (
           <ul className="flex flex-col gap-2 py-2">
             {reversed(history).map((e) => (
-                <li key={e.id} className="flex items-baseline justify-between gap-4 text-[length:var(--text-meta)]">
+                <li key={e.id} className="flex items-baseline justify-between gap-4 text-meta">
                   <span className="min-w-0 text-muted">
                     <span
-                      className={`mr-1.5 rounded-[var(--radius-sm)] px-1.5 py-px text-[length:var(--text-micro)] ${
+                      className={`mr-1.5 rounded-[var(--radius-sm)] px-1.5 py-px text-micro ${
                         e.actor_type === "agent"
                           ? "bg-accent/15 text-accent"
                           : e.actor_type === "human"
@@ -277,7 +277,7 @@ function SignalCard({
                     {e.kind}
                     {e.artifact ? ` — ${e.artifact.title} v${e.artifact.version_no}` : e.detail ? ` — ${e.detail}` : ""}
                   </span>
-                  <span className="shrink-0 text-[length:var(--text-micro)] text-faint">{relTime(e.at)}</span>
+                  <span className="shrink-0 text-micro text-faint">{relTime(e.at)}</span>
                 </li>
               ))}
           </ul>
@@ -318,7 +318,7 @@ function SignalCard({
         )}
         {busy ? <Spinner label="Saving…" /> : null}
         {err ? (
-          <span role="alert" className="text-[length:var(--text-meta)] text-bad">
+          <span role="alert" className="text-meta text-bad">
             {err}
           </span>
         ) : null}
@@ -364,8 +364,8 @@ export function Taste() {
     <div className="grid grid-cols-1 gap-12 lg:grid-cols-[minmax(0,1fr)_400px] lg:gap-16">
       <div className="flex max-w-4xl flex-col gap-12">
         <header>
-          <h1 className="text-[length:var(--text-display)] leading-tight text-text">Taste</h1>
-          <p className="mt-1 text-[length:var(--text-meta)] text-faint">
+          <h1 className="text-display leading-tight text-text">Taste</h1>
+          <p className="mt-1 text-meta text-faint">
             What this space has decided it believes, and what is still only proposed.
           </p>
         </header>
@@ -381,8 +381,8 @@ export function Taste() {
         {status === "ready" ? (
           <>
             <section className="flex flex-col gap-1">
-              <h2 className="flex items-baseline justify-between gap-4 border-b border-line-soft pb-2.5 text-[length:var(--text-headline)] text-text">
-                Pending proposals <span className="text-[length:var(--text-micro)] text-faint">{pending.length}</span>
+              <h2 className="flex items-baseline justify-between gap-4 border-b border-line-soft pb-2.5 text-headline text-text">
+                Pending proposals <span className="text-micro text-faint">{pending.length}</span>
               </h2>
               {pending.length === 0 ? (
                 <EmptyRow>Nothing waiting on you</EmptyRow>
@@ -396,8 +396,8 @@ export function Taste() {
             </section>
 
             <section className="flex flex-col gap-1">
-              <h2 className="flex items-baseline justify-between gap-4 border-b border-line-soft pb-2.5 text-[length:var(--text-headline)] text-text">
-                Confirmed <span className="text-[length:var(--text-micro)] text-faint">{confirmed.length}</span>
+              <h2 className="flex items-baseline justify-between gap-4 border-b border-line-soft pb-2.5 text-headline text-text">
+                Confirmed <span className="text-micro text-faint">{confirmed.length}</span>
               </h2>
               {confirmed.length === 0 ? (
                 <EmptyRow>No confirmed signals yet</EmptyRow>
@@ -424,14 +424,14 @@ export function Taste() {
                   <span className={`relative z-10 mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full ${dot} ring-4 ring-canvas`} />
                   <div className="flex min-w-0 flex-1 flex-col gap-1">
                     <div className="flex items-baseline gap-2">
-                      <span className="text-[length:var(--text-meta)] text-text">
+                      <span className="text-meta text-text">
                         <span className="text-muted">{e.actor_label}</span> {VERB[e.kind] ?? e.kind}
                       </span>
-                      <span className="ml-auto shrink-0 text-[length:var(--text-micro)] text-faint">
+                      <span className="ml-auto shrink-0 text-micro text-faint">
                         {relTime(e.at)}
                       </span>
                     </div>
-                    <p className="line-clamp-2 text-[length:var(--text-meta)] leading-snug text-faint">
+                    <p className="line-clamp-2 text-meta leading-snug text-faint">
                       {e.statement}
                     </p>
                     {e.artifact ? (
@@ -439,14 +439,14 @@ export function Taste() {
                         <div className="h-9 w-12 shrink-0 overflow-hidden rounded-[2px]">
                           <ArtifactThumb html={e.artifact.preview_html} className="h-full w-full" />
                         </div>
-                        <span className="truncate text-[length:var(--text-micro)] text-muted">{e.artifact.title}</span>
+                        <span className="truncate text-micro text-muted">{e.artifact.title}</span>
                       </div>
                     ) : e.item ? (
                       <div className="mt-1 flex items-center gap-2 rounded-[var(--radius-sm)] border border-line-soft bg-canvas p-1.5">
                         <div className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-[2px]">
                           <ItemThumb item={e.item} />
                         </div>
-                        <span className="truncate text-[length:var(--text-micro)] text-muted">{e.item.title}</span>
+                        <span className="truncate text-micro text-muted">{e.item.title}</span>
                       </div>
                     ) : null}
                   </div>

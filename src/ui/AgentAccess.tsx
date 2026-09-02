@@ -68,7 +68,7 @@ function AccessRow({
             />
           </button>
         ) : null}
-        <span className={`truncate text-[length:var(--text-body)] ${child ? "text-muted" : "text-text"}`}>
+        <span className={`truncate text-body ${child ? "text-muted" : "text-text"}`}>
           {row.label}
         </span>
       </span>
@@ -77,7 +77,7 @@ function AccessRow({
         onClick={() => onCycle(row)}
         disabled={pending === row.regionId}
         aria-label={`${row.label}: ${GRANT_LABEL[row.level]}. Activate to change.`}
-        className={`inline-flex shrink-0 items-center gap-1.5 rounded-[var(--radius-sm)] px-2 py-1 text-[length:var(--text-meta)] transition-colors duration-[var(--duration-fast)] hover:bg-raised disabled:opacity-40 ${
+        className={`inline-flex shrink-0 items-center gap-1.5 rounded-[var(--radius-sm)] px-2 py-1 text-meta transition-colors duration-[var(--duration-fast)] hover:bg-raised disabled:opacity-40 ${
           isWrite ? "text-accent" : isNone ? "text-faint hover:text-text" : "text-muted hover:text-text"
         }`}
       >
@@ -178,13 +178,13 @@ function LiveAgentAccess({ taskId, regions }: { taskId: string; regions: Region[
       aria-label="Agent access"
       className="flex h-fit flex-col gap-4 border-t border-line pt-4 lg:sticky lg:top-20"
     >
-      <p className="text-[length:var(--text-section)] text-text">Agent Access</p>
+      <p className="text-section text-text">Agent Access</p>
 
       {rows === null ? (
         <Spinner label="Loading access…" />
       ) : (
         <>
-          <p className="text-[length:var(--text-micro)] text-faint">This agent can currently use</p>
+          <p className="text-micro text-faint">This agent can currently use</p>
           <ul className="flex flex-col">
             {rows.filter((row) => row.parentId === null).map((row) => {
               const children = childRows(row.regionId);
@@ -199,7 +199,7 @@ function LiveAgentAccess({ taskId, regions }: { taskId: string; regions: Region[
                     pending={pending}
                     onCycle={(next) => void cycleLevel(next)}
                   />
-                  {rowError?.regionId === row.regionId ? <p role="alert" className="py-1 text-[length:var(--text-micro)] text-bad">{rowError.message}</p> : null}
+                  {rowError?.regionId === row.regionId ? <p role="alert" className="py-1 text-micro text-bad">{rowError.message}</p> : null}
                   <AnimatePresence initial={false}>
                     {children.length > 0 && open ? (
                       <motion.div
@@ -229,13 +229,13 @@ function LiveAgentAccess({ taskId, regions }: { taskId: string; regions: Region[
             })}
           </ul>
 
-          <p className="text-[length:var(--text-micro)] text-faint">{expiryNote}</p>
+          <p className="text-micro text-faint">{expiryNote}</p>
         </>
       )}
 
       <div className="border-t border-line-soft">
         <Disclosure summary="Agent Lens">
-          <div className="flex flex-col gap-4 py-2 font-mono text-[length:var(--text-micro)] leading-relaxed text-muted">
+          <div className="flex flex-col gap-4 py-2 font-mono text-micro leading-relaxed text-muted">
             <div>
               {/*
                 Show the compiled tool surface, not just what the browser managed to

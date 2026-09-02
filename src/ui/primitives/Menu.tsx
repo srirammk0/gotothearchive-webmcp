@@ -102,7 +102,7 @@ export function Menu({
                   setOpen(false);
                   item.onSelect();
                 }}
-                className={`flex w-full items-center gap-2 rounded-[var(--radius-sm)] px-2.5 py-1.5 text-left text-[length:var(--text-meta)] transition-colors duration-[var(--duration-fast)] disabled:opacity-40 ${
+                className={`flex w-full items-center gap-2 rounded-[var(--radius-sm)] px-2.5 py-1.5 text-left text-meta transition-colors duration-[var(--duration-fast)] disabled:opacity-40 ${
                   item.danger ? "text-bad hover:bg-bad/10" : "text-muted hover:bg-hover hover:text-text"
                 }`}
               >

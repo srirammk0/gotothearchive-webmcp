@@ -29,7 +29,7 @@ export function Disclosure({ summary, children, defaultOpen = false, className =
             return !o;
           });
         }}
-        className="flex w-full items-center justify-between gap-3 rounded-[var(--radius-sm)] py-2 text-left text-[length:var(--text-meta)] text-muted transition-colors duration-[var(--duration-fast)] hover:text-text"
+        className="flex w-full items-center justify-between gap-3 rounded-[var(--radius-sm)] py-2 text-left text-meta text-muted transition-colors duration-[var(--duration-fast)] hover:text-text"
       >
         <span>{summary}</span>
         <Icon

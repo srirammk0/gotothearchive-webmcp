@@ -62,12 +62,12 @@ export function FileCard({ item, big = false }: { item: ContextItem; big?: boole
       <Icon name="file" size={big ? 44 : 28} />
       <p
         className={`max-w-[80%] truncate text-center ${
-          big ? "text-[length:var(--text-meta)]" : "text-[length:var(--text-micro)]"
+          big ? "text-meta" : "text-micro"
         }`}
       >
         {item.title}
       </p>
-      <span className="rounded-[var(--radius-sm)] bg-hover px-1.5 py-px text-[length:var(--text-micro)] text-muted">
+      <span className="rounded-[var(--radius-sm)] bg-hover px-1.5 py-px text-micro text-muted">
         {kind(item).label}
       </span>
     </div>

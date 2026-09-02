@@ -80,13 +80,13 @@ export function ConnectionsPanel({ item, allItems }: { item: ContextItem; allIte
       {/* Connections */}
       <section className="flex flex-col gap-2.5">
         <div className="flex items-center justify-between">
-          <p className="text-[length:var(--text-micro)] uppercase tracking-wide text-faint">
+          <p className="text-micro uppercase tracking-wide text-faint">
             Connections {approved.length > 0 ? `· ${approved.length}` : ""}
           </p>
           <button
             type="button"
             onClick={() => setPicking((v) => !v)}
-            className="inline-flex items-center gap-1 text-[length:var(--text-micro)] text-muted transition-colors hover:text-text"
+            className="inline-flex items-center gap-1 text-micro text-muted transition-colors hover:text-text"
           >
             <Icon name={picking ? "close" : "plus"} size={12} />
             {picking ? "Close" : "Link a block"}
@@ -100,10 +100,10 @@ export function ConnectionsPanel({ item, allItems }: { item: ContextItem; allIte
               value={pickQuery}
               onChange={(e) => setPickQuery(e.target.value)}
               placeholder="Search your archive…"
-              className="bg-transparent px-1.5 py-1 text-[length:var(--text-meta)] text-text placeholder:text-faint"
+              className="bg-transparent px-1.5 py-1 text-meta text-text placeholder:text-faint"
             />
             {candidates.length === 0 ? (
-              <p className="px-1.5 py-1 text-[length:var(--text-micro)] text-faint">No matches</p>
+              <p className="px-1.5 py-1 text-micro text-faint">No matches</p>
             ) : (
               <div className="no-scrollbar flex max-h-64 flex-col overflow-y-auto overscroll-contain">
                 {candidates.map((c) => (
@@ -118,7 +118,7 @@ export function ConnectionsPanel({ item, allItems }: { item: ContextItem; allIte
                         setPickQuery("");
                       })
                     }
-                    className="flex shrink-0 items-center gap-2 rounded-[var(--radius-sm)] px-1.5 py-1 text-left text-[length:var(--text-meta)] text-muted transition-colors hover:bg-hover hover:text-text"
+                    className="flex shrink-0 items-center gap-2 rounded-[var(--radius-sm)] px-1.5 py-1 text-left text-meta text-muted transition-colors hover:bg-hover hover:text-text"
                   >
                     <span className="flex h-6 w-6 shrink-0 items-center justify-center overflow-hidden rounded-[2px] border border-line-soft bg-canvas">
                       <Thumb item={c} />
@@ -138,9 +138,9 @@ export function ConnectionsPanel({ item, allItems }: { item: ContextItem; allIte
                 key={l.id}
                 className="flex items-center gap-2 rounded-[var(--radius-sm)] border border-accent/40 bg-accent/5 p-1.5"
               >
-                <span className="min-w-0 flex-1 truncate text-[length:var(--text-meta)] text-text">
+                <span className="min-w-0 flex-1 truncate text-meta text-text">
                   {l.other?.title ?? "Unknown"}
-                  <span className="ml-1.5 text-[length:var(--text-micro)] text-accent">agent proposed</span>
+                  <span className="ml-1.5 text-micro text-accent">agent proposed</span>
                 </span>
                 <button
                   type="button"
@@ -166,9 +166,9 @@ export function ConnectionsPanel({ item, allItems }: { item: ContextItem; allIte
         ) : null}
 
         {links === null ? (
-          <p className="text-[length:var(--text-meta)] text-faint">Loading…</p>
+          <p className="text-meta text-faint">Loading…</p>
         ) : approved.length === 0 && pending.length === 0 ? (
-          <p className="text-[length:var(--text-meta)] text-faint">Not linked to anything yet.</p>
+          <p className="text-meta text-faint">Not linked to anything yet.</p>
         ) : (
           <ul className="flex flex-col">
             {approved.map((l) => (
@@ -180,10 +180,10 @@ export function ConnectionsPanel({ item, allItems }: { item: ContextItem; allIte
                   {l.other ? <Thumb item={l.other} /> : <Icon name="file" size={14} className="text-faint" />}
                 </span>
                 <span className="flex min-w-0 flex-1 flex-col">
-                  <span className="truncate text-[length:var(--text-meta)] text-text">
+                  <span className="truncate text-meta text-text">
                     {l.other?.title ?? "Unknown item"}
                   </span>
-                  <span className="text-[length:var(--text-micro)] text-faint">
+                  <span className="text-micro text-faint">
                     {l.other ? kind(l.other).label : ""} · {l.relationship.replace(/_/g, " ")}
                   </span>
                 </span>
@@ -204,21 +204,21 @@ export function ConnectionsPanel({ item, allItems }: { item: ContextItem; allIte
 
       {/* Notes */}
       <section className="flex flex-col gap-2.5">
-        <p className="text-[length:var(--text-micro)] uppercase tracking-wide text-faint">
+        <p className="text-micro uppercase tracking-wide text-faint">
           Notes {notes && notes.length > 0 ? `· ${notes.length}` : ""}
         </p>
         {notes && notes.length > 0 ? (
           <ul className="flex flex-col gap-2">
             {notes.map((n) => (
               <li key={n.id} className="group/note rounded-[var(--radius-sm)] border border-line-soft p-2">
-                <p className="whitespace-pre-wrap text-[length:var(--text-meta)] leading-relaxed text-muted">{n.body}</p>
+                <p className="whitespace-pre-wrap text-meta leading-relaxed text-muted">{n.body}</p>
                 <div className="mt-1 flex items-center justify-between">
-                  <span className="text-[length:var(--text-micro)] text-faint">{relTime(n.created_at)} ago</span>
+                  <span className="text-micro text-faint">{relTime(n.created_at)} ago</span>
                   <button
                     type="button"
                     disabled={busy}
                     onClick={() => guard(() => deleteItemNote(n.id))}
-                    className="text-[length:var(--text-micro)] text-faint opacity-0 transition-opacity hover:text-bad group-hover/note:opacity-100"
+                    className="text-micro text-faint opacity-0 transition-opacity hover:text-bad group-hover/note:opacity-100"
                   >
                     Delete
                   </button>
@@ -243,7 +243,7 @@ export function ConnectionsPanel({ item, allItems }: { item: ContextItem; allIte
             value={noteDraft}
             onChange={(e) => setNoteDraft(e.target.value)}
             placeholder="Add a note on this block…"
-            className="w-full resize-none rounded-[var(--radius-sm)] border border-line-soft bg-canvas px-2 py-1.5 text-[length:var(--text-meta)] text-text placeholder:text-faint"
+            className="w-full resize-none rounded-[var(--radius-sm)] border border-line-soft bg-canvas px-2 py-1.5 text-meta text-text placeholder:text-faint"
           />
           <Button type="submit" variant="secondary" className="self-start" disabled={busy || !noteDraft.trim()}>
             Add note

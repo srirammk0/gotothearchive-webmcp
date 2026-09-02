@@ -7,7 +7,6 @@
 import { API, DENIAL_REASONS, type Id, type ToolCallResponse, type ToolName } from "@shared/contract";
 import { authHeader } from "../api/client";
 import { getSession } from "./session";
-import { recordDenial } from "./lens";
 
 function isAbortError(error: unknown, signal?: AbortSignal): boolean {
   return signal?.aborted === true || (error instanceof Error && error.name === "AbortError");
@@ -72,7 +71,6 @@ export async function callTool(
     if (isUnknownTool(body.reason, response.status)) {
       return `Unknown tool "${name}". It is not currently registered.`;
     }
-    recordDenial(name, input, body.reason);
     return `Denied: ${body.reason}`;
   }
 

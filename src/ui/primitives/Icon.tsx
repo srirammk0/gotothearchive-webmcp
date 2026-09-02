@@ -1,7 +1,6 @@
 import type { CSSProperties } from "react";
 import {
   ArrowRight,
-  ArrowUpLeft,
   ArrowUpRight,
   Check,
   ChevronDown,
@@ -11,7 +10,6 @@ import {
   Hammer,
   Link,
   Maximize2,
-  MoreHorizontal,
   Pencil,
   Pin,
   Plus,
@@ -29,13 +27,11 @@ import {
  */
 const ICONS = {
   arrowRight: ArrowRight,
-  arrowUpLeft: ArrowUpLeft,
   arrowUpRight: ArrowUpRight,
   chevronRight: ChevronRight,
   chevronDown: ChevronDown,
   check: Check,
   close: X,
-  dots: MoreHorizontal,
   expand: Maximize2,
   file: File,
   folder: Folder,

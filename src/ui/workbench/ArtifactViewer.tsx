@@ -33,7 +33,7 @@ export function SentimentButtons({
           type="button"
           onClick={() => onSentiment(s.value)}
           aria-pressed={sentiment === s.value}
-          className={`inline-flex items-center gap-1.5 rounded-[var(--radius-sm)] border px-2 py-1 text-[length:var(--text-micro)] transition-colors duration-[var(--duration-fast)] ${
+          className={`inline-flex items-center gap-1.5 rounded-[var(--radius-sm)] border px-2 py-1 text-micro transition-colors duration-[var(--duration-fast)] ${
             sentiment === s.value ? `${s.on} border-current/15` : "border-transparent bg-hover text-muted hover:text-text"
           }`}
         >
@@ -54,7 +54,7 @@ function FeedbackControls({
 }) {
   return (
     <div>
-      <p className="mb-1 text-[length:var(--text-micro)] font-medium text-faint">Reaction</p>
+      <p className="mb-1 text-micro font-medium text-faint">Reaction</p>
       <div className="flex flex-wrap items-center gap-1.5">
         <SentimentButtons sentiment={sentiment} onSentiment={onSentiment} />
       </div>
@@ -181,7 +181,7 @@ export function ArtifactViewer({ version, annotations = [], onAddRegion, onAddCo
   return (
     <div className="flex flex-col gap-2">
       <div className="relative flex items-center justify-between gap-3">
-        <p className="text-[length:var(--text-micro)] text-faint">
+        <p className="text-micro text-faint">
           {regionAnnotations.length > 0
             ? `${regionAnnotations.length} region comment(s)`
             : componentPreview
@@ -189,7 +189,7 @@ export function ArtifactViewer({ version, annotations = [], onAddRegion, onAddCo
               : "Preview"}
         </p>
         {onAddRegion || onAddComment ? (
-          <div className="flex items-center gap-1.5 text-[length:var(--text-micro)]">
+          <div className="flex items-center gap-1.5 text-micro">
             {onAddRegion ? (
               <button
                 type="button"
@@ -220,7 +220,7 @@ export function ArtifactViewer({ version, annotations = [], onAddRegion, onAddCo
 
       {commenting ? (
         <div className="flex flex-col gap-2 border-b border-line-soft pb-3">
-          <label htmlFor="version-feedback" className="text-[length:var(--text-micro)] font-medium text-faint">
+          <label htmlFor="version-feedback" className="text-micro font-medium text-faint">
             Feedback on this version
           </label>
           <textarea
@@ -230,7 +230,7 @@ export function ArtifactViewer({ version, annotations = [], onAddRegion, onAddCo
             value={comment}
             onChange={(e) => setComment(e.target.value)}
             placeholder="What worked, or what should change?"
-            className="w-full resize-none bg-transparent text-[length:var(--text-body)] text-text placeholder:text-faint"
+            className="w-full resize-none bg-transparent text-body text-text placeholder:text-faint"
           />
           <FeedbackControls
             sentiment={sentiment}
@@ -278,7 +278,7 @@ export function ArtifactViewer({ version, annotations = [], onAddRegion, onAddCo
               <span className="absolute -left-2 -top-2 flex h-4 w-4 items-center justify-center rounded-full bg-accent text-[10px] text-canvas">
                 {i + 1}
               </span>
-              <span className="pointer-events-none absolute left-0 top-full mt-1 max-w-[240px] rounded-[var(--radius-sm)] bg-raised px-2 py-1 text-[length:var(--text-micro)] text-text opacity-0 shadow-lg transition-opacity group-hover/mark:opacity-100">
+              <span className="pointer-events-none absolute left-0 top-full mt-1 max-w-[240px] rounded-[var(--radius-sm)] bg-raised px-2 py-1 text-micro text-text opacity-0 shadow-lg transition-opacity group-hover/mark:opacity-100">
                 {a.comment}
               </span>
             </div>
@@ -315,7 +315,7 @@ export function ArtifactViewer({ version, annotations = [], onAddRegion, onAddCo
               top: `calc(${(draft.y + draft.h) * 100}% + 8px)`,
             }}
           >
-            <label htmlFor="region-feedback" className="mb-1 block text-[length:var(--text-micro)] font-medium text-faint">
+            <label htmlFor="region-feedback" className="mb-1 block text-micro font-medium text-faint">
               Feedback on this region
             </label>
             <textarea
@@ -325,7 +325,7 @@ export function ArtifactViewer({ version, annotations = [], onAddRegion, onAddCo
               value={comment}
               onChange={(e) => setComment(e.target.value)}
               placeholder="What worked, or what should change?"
-              className="w-full resize-none bg-transparent text-[length:var(--text-meta)] text-text placeholder:text-faint"
+              className="w-full resize-none bg-transparent text-meta text-text placeholder:text-faint"
             />
             <div className="mt-1.5">
               <FeedbackControls
@@ -357,7 +357,7 @@ export function ArtifactViewer({ version, annotations = [], onAddRegion, onAddCo
               onMouseDown={(e) => e.target === e.currentTarget && setFull(false)}
             >
               <div className="mb-3 flex items-center justify-between">
-                <p className="text-[length:var(--text-meta)] text-faint">
+                <p className="text-meta text-faint">
                   Version {version.version_no} · {version.state.replace(/_/g, " ")}
                 </p>
                 <button

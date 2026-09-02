@@ -78,7 +78,7 @@ function Heatmap({
       </div>
       {hover ? (
         <span
-          className="pointer-events-none fixed z-50 -translate-x-1/2 -translate-y-full whitespace-nowrap rounded-[var(--radius-sm)] bg-text px-2 py-1 text-[length:var(--text-micro)] text-canvas shadow-sm"
+          className="pointer-events-none fixed z-50 -translate-x-1/2 -translate-y-full whitespace-nowrap rounded-[var(--radius-sm)] bg-text px-2 py-1 text-micro text-canvas shadow-sm"
           style={{ left: hover.x, top: hover.y - 8 }}
         >
           {hover.text}
@@ -102,11 +102,11 @@ function BarList({
     <ul className="flex flex-col gap-2.5">
       {rows.map((r) => (
         <li key={r.label} className="flex items-center gap-3">
-          <span className={`${labelWidth} shrink-0 truncate text-[length:var(--text-meta)] text-muted`}>{r.label}</span>
+          <span className={`${labelWidth} shrink-0 truncate text-meta text-muted`}>{r.label}</span>
           <span className="h-1.5 flex-1 overflow-hidden rounded-full bg-line-soft">
             <span className={`block h-full rounded-full ${tint}`} style={{ width: `${(r.value / max) * 100}%` }} />
           </span>
-          <span className="w-7 shrink-0 text-right text-[length:var(--text-micro)] tabular-nums text-faint">
+          <span className="w-7 shrink-0 text-right text-micro tabular-nums text-faint">
             {r.value}
           </span>
         </li>
@@ -133,8 +133,8 @@ function Section({
           <Icon name={icon} size={15} />
         </span>
         <div>
-          <h2 className="text-[length:var(--text-headline)] text-text">{title}</h2>
-          <p className="text-[length:var(--text-meta)] text-faint">{blurb}</p>
+          <h2 className="text-headline text-text">{title}</h2>
+          <p className="text-meta text-faint">{blurb}</p>
         </div>
       </div>
       {children}
@@ -145,8 +145,8 @@ function Section({
 function Stat({ label, value }: { label: string; value: ReactNode }) {
   return (
     <div className="flex flex-col gap-0.5">
-      <span className="text-[length:var(--text-display)] leading-none tabular-nums text-text">{value}</span>
-      <span className="text-[length:var(--text-micro)] uppercase tracking-wide text-faint">{label}</span>
+      <span className="text-display leading-none tabular-nums text-text">{value}</span>
+      <span className="text-micro uppercase tracking-wide text-faint">{label}</span>
     </div>
   );
 }
@@ -224,8 +224,8 @@ export function Stats() {
     <div className="flex flex-col gap-10">
       <header className="flex flex-col gap-5">
         <div>
-          <h1 className="text-[length:var(--text-display)] leading-tight text-text">Stats</h1>
-          <p className="mt-1 max-w-prose text-[length:var(--text-meta)] leading-relaxed text-faint">
+          <h1 className="text-display leading-tight text-text">Stats</h1>
+          <p className="mt-1 max-w-prose text-meta leading-relaxed text-faint">
             Everything an agent does in this space is logged — what it read, which tools it called, which taste
             signals shaped its work. This is that trail, rolled up.
           </p>
@@ -254,9 +254,9 @@ export function Stats() {
               <Heatmap counts={stats.activity_by_day} />
             </div>
             <div className="min-w-0 flex-1 xl:border-l xl:border-line-soft xl:pl-8">
-              <p className="mb-3 text-[length:var(--text-micro)] uppercase tracking-wide text-faint">Agents</p>
+              <p className="mb-3 text-micro uppercase tracking-wide text-faint">Agents</p>
               {agents.length === 0 ? (
-                <p className="text-[length:var(--text-meta)] text-faint">No client has run identify_agent yet.</p>
+                <p className="text-meta text-faint">No client has run identify_agent yet.</p>
               ) : (
                 <ul className="flex flex-col gap-4">
                   {agents.map((a) => {
@@ -264,8 +264,8 @@ export function Stats() {
                       <li key={a.label} className="flex flex-col gap-1.5">
                         <div className="flex items-center gap-2.5">
                           <BrandMark name={`${a.label} ${a.provider}`} size={18} className="shrink-0 text-text" />
-                          <span className="truncate text-[length:var(--text-meta)] text-text">{a.label}</span>
-                          <span className="ml-auto flex shrink-0 items-center gap-3 text-[length:var(--text-micro)] tabular-nums text-faint">
+                          <span className="truncate text-meta text-text">{a.label}</span>
+                          <span className="ml-auto flex shrink-0 items-center gap-3 text-micro tabular-nums text-faint">
                             <span className="flex items-center gap-1" title="tool calls">
                               <Icon name="bolt" size={11} />
                               {a.actions}
@@ -310,25 +310,25 @@ export function Stats() {
 
         {taste.applications > 0 ? (
           <div className="mt-2 flex flex-col gap-2">
-            <p className="text-[length:var(--text-micro)] uppercase tracking-wide text-faint">Applied over time</p>
+            <p className="text-micro uppercase tracking-wide text-faint">Applied over time</p>
             <Heatmap counts={taste.applied_by_day} tint="var(--color-good)" unit="taste use" />
           </div>
         ) : null}
 
         {taste.dimensions.length > 0 ? (
           <div className="mt-2 flex flex-col gap-2">
-            <p className="text-[length:var(--text-micro)] uppercase tracking-wide text-faint">By dimension</p>
+            <p className="text-micro uppercase tracking-wide text-faint">By dimension</p>
             <BarList rows={taste.dimensions} tint="bg-good" />
           </div>
         ) : null}
 
         {taste.top_applied.length > 0 ? (
           <div className="mt-2 flex flex-col gap-2">
-            <p className="text-[length:var(--text-micro)] uppercase tracking-wide text-faint">Most-leaned-on signals</p>
+            <p className="text-micro uppercase tracking-wide text-faint">Most-leaned-on signals</p>
             <ul className="flex flex-col gap-2">
               {taste.top_applied.map((s) => (
-                <li key={s.label} className="flex items-start gap-2.5 text-[length:var(--text-meta)]">
-                  <span className="mt-px shrink-0 rounded-[var(--radius-sm)] bg-good/15 px-1.5 py-px text-[length:var(--text-micro)] text-good">
+                <li key={s.label} className="flex items-start gap-2.5 text-meta">
+                  <span className="mt-px shrink-0 rounded-[var(--radius-sm)] bg-good/15 px-1.5 py-px text-micro text-good">
                     {s.value}×
                   </span>
                   <span className="text-muted">{s.label}</span>
@@ -352,7 +352,7 @@ export function Stats() {
                 className="group flex flex-col gap-1.5 text-left"
               >
                 <ArtifactThumb html={a.preview_html} className="aspect-[4/3] w-full group-hover:border-line" />
-                <p className="truncate text-[length:var(--text-micro)] text-muted">{a.title}</p>
+                <p className="truncate text-micro text-muted">{a.title}</p>
               </button>
             ))}
           </div>
@@ -380,9 +380,9 @@ export function Stats() {
                 const pct = Math.max(0, Math.min(100, (used / limit) * 100));
                 return (
                   <li key={m.metric} className="flex flex-col gap-1">
-                    <div className="flex items-baseline justify-between gap-2 text-[length:var(--text-meta)]">
+                    <div className="flex items-baseline justify-between gap-2 text-meta">
                       <span className="text-muted">{QUOTA_LABEL[m.metric] ?? m.metric}</span>
-                      <span className="text-[length:var(--text-micro)] tabular-nums text-faint">
+                      <span className="text-micro tabular-nums text-faint">
                         {used}/{m.limit}
                       </span>
                     </div>
@@ -395,7 +395,7 @@ export function Stats() {
                   </li>
                 );
               })}
-              {!quota ? <li className="text-[length:var(--text-micro)] text-faint">Loading usage…</li> : null}
+              {!quota ? <li className="text-micro text-faint">Loading usage…</li> : null}
             </ul>
           </Section>
 
@@ -421,7 +421,7 @@ export function Stats() {
                     />
                   ))}
                 </div>
-                <ul className="flex flex-col gap-1 text-[length:var(--text-micro)] text-muted">
+                <ul className="flex flex-col gap-1 text-micro text-muted">
                   {outcomes.map((o) => (
                     <li key={o.label} className="flex items-center gap-1.5">
                       <span className={`h-2 w-2 shrink-0 rounded-full ${OUTCOME_TONE[o.label] ?? "bg-line"}`} />

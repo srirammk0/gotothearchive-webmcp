@@ -44,10 +44,10 @@ function Row({
 
   if (editing) {
     return (
-      <li className="border-b border-line-soft py-2.5 text-[length:var(--text-meta)] last:border-0">
+      <li className="border-b border-line-soft py-2.5 text-meta last:border-0">
         <label
           htmlFor={`annotation-${annotation.id}`}
-          className="mb-1 block text-[length:var(--text-micro)] font-medium text-faint"
+          className="mb-1 block text-micro font-medium text-faint"
         >
           Feedback
         </label>
@@ -57,18 +57,18 @@ function Row({
           rows={2}
           value={comment}
           onChange={(e) => setComment(e.target.value)}
-          className="w-full resize-none bg-transparent text-[length:var(--text-body)] text-text placeholder:text-faint"
+          className="w-full resize-none bg-transparent text-body text-text placeholder:text-faint"
         />
         <div className="mt-2.5 flex flex-col gap-2.5">
           <div>
-            <p className="mb-1 text-[length:var(--text-micro)] font-medium text-faint">Reaction</p>
+            <p className="mb-1 text-micro font-medium text-faint">Reaction</p>
             <div className="flex flex-wrap items-center gap-1.5">
               <SentimentButtons sentiment={sentiment} onSentiment={setSentiment} />
             </div>
           </div>
         </div>
         {saveError ? (
-          <p role="alert" className="mt-2 text-[length:var(--text-micro)] text-bad">
+          <p role="alert" className="mt-2 text-micro text-bad">
             {saveError}
           </p>
         ) : null}
@@ -92,8 +92,8 @@ function Row({
         : { label: "Neutral", className: "bg-hover text-muted" };
 
   return (
-    <li className="group border-b border-line-soft py-2.5 text-[length:var(--text-meta)] last:border-0">
-      <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[length:var(--text-micro)] text-faint">
+    <li className="group border-b border-line-soft py-2.5 text-meta last:border-0">
+      <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-micro text-faint">
         <span>{annotation.target?.kind === "region" ? "Marked region" : "Version note"}</span>
         <span className={`rounded-[var(--radius-sm)] px-1.5 py-0.5 ${sentimentMeta.className}`}>
           {sentimentMeta.label}

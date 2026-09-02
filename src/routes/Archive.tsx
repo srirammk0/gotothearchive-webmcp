@@ -30,7 +30,12 @@ import {
   updateItems,
 } from "../api/client";
 import { duration, ease } from "../ui/tokens";
-import type { ArchiveRegionView } from "../ui/viewmodels";
+
+/** Archive: a region rendered as an editorial index of its items. */
+interface ArchiveRegionView {
+  region: Region;
+  items: ContextItem[];
+}
 
 type TypeFilter = ItemType | "all";
 
@@ -139,7 +144,7 @@ function Preview({ item }: { item: ContextItem }) {
   }
   if (render === "link") return <LinkPreview item={item} />;
   return (
-    <p className="line-clamp-6 self-start text-[length:var(--text-meta)] leading-relaxed text-muted">
+    <p className="line-clamp-6 self-start text-meta leading-relaxed text-muted">
       {item.semantic_text ?? item.title}
     </p>
   );
@@ -150,7 +155,7 @@ function LinkPreview({ item }: { item: ContextItem }) {
   const [failed, setFailed] = useState(false);
   const img = extractedImage(item);
   const chip = host(item) ? (
-    <span className="inline-flex w-fit shrink-0 items-center gap-1.5 rounded-[var(--radius-sm)] bg-raised px-2 py-1 text-[length:var(--text-micro)] text-muted">
+    <span className="inline-flex w-fit shrink-0 items-center gap-1.5 rounded-[var(--radius-sm)] bg-raised px-2 py-1 text-micro text-muted">
       <Icon name="arrowRight" size={12} />
       {host(item)}
     </span>
@@ -175,7 +180,7 @@ function LinkPreview({ item }: { item: ContextItem }) {
   return (
     <div className="flex flex-col gap-1.5 self-start">
       {chip}
-      <p className="line-clamp-5 text-[length:var(--text-meta)] leading-relaxed text-muted">
+      <p className="line-clamp-5 text-meta leading-relaxed text-muted">
         {item.semantic_text ?? item.title}
       </p>
     </div>
@@ -265,15 +270,15 @@ function Tile({
       <div className="absolute inset-x-0 top-full flex flex-col gap-0.5 pt-2 leading-tight">
         <div className="flex items-center gap-1.5">
           <span
-            className={`shrink-0 rounded-[var(--radius-sm)] px-1.5 py-px text-[length:var(--text-micro)] ${
+            className={`shrink-0 rounded-[var(--radius-sm)] px-1.5 py-px text-micro ${
               isAgentAdded(item) ? "bg-accent/15 text-accent" : "bg-hover text-muted"
             }`}
           >
             {isAgentAdded(item) ? "Agent" : "Human"}
           </span>
-          <p className="truncate text-[length:var(--text-meta)] text-text">{item.title}</p>
+          <p className="truncate text-meta text-text">{item.title}</p>
         </div>
-        <p className="truncate text-[length:var(--text-micro)] text-faint">
+        <p className="truncate text-micro text-faint">
           {kind(item).label} · {itemDate(item)}
           {host(item) ? ` · ${host(item)}` : ""}
         </p>
@@ -351,7 +356,7 @@ function RegionSection({
                   collapsed ? "rotate-0" : "rotate-180"
                 }`}
               />
-              <h2 className="truncate text-[length:var(--text-headline)] text-text">{view.region.name}</h2>
+              <h2 className="truncate text-headline text-text">{view.region.name}</h2>
             </button>
             <button
               type="button"
@@ -379,7 +384,7 @@ function RegionSection({
 
         <div className="flex shrink-0 items-center gap-2">
           {view.items.length > 0 ? (
-            <span className="text-[length:var(--text-micro)] text-faint">
+            <span className="text-micro text-faint">
               {view.items.length} {view.items.length === 1 ? "item" : "items"}
             </span>
           ) : null}
@@ -422,7 +427,7 @@ function RegionSection({
                     <button
                       type="button"
                       onClick={() => onOpenFolder(f)}
-                      className="inline-flex items-center gap-2 rounded-[var(--radius-md)] border border-line-soft bg-surface px-3 py-2 text-[length:var(--text-meta)] text-text transition-colors duration-[var(--duration-fast)] hover:border-line hover:bg-hover"
+                      className="inline-flex items-center gap-2 rounded-[var(--radius-md)] border border-line-soft bg-surface px-3 py-2 text-meta text-text transition-colors duration-[var(--duration-fast)] hover:border-line hover:bg-hover"
                     >
                       <Icon name="folder" size={14} className="text-faint" />
                       {f.name}
@@ -683,7 +688,7 @@ export function Archive() {
           <div className="flex flex-wrap items-end justify-between gap-4">
             <div>
               <div className="flex items-center gap-2">
-                <h1 className="text-[length:var(--text-display)] leading-tight text-text">
+                <h1 className="text-display leading-tight text-text">
                   {activeFolder ? activeFolder.name : "Archive"}
                 </h1>
                 {activeFolder && activeFolder.parent_id !== null ? (
@@ -698,7 +703,7 @@ export function Archive() {
                   </button>
                 ) : null}
               </div>
-              <p className="mt-1 text-[length:var(--text-meta)] text-faint">
+              <p className="mt-1 text-meta text-faint">
                 {activeFolder ? `${total} ${total === 1 ? "item" : "items"}` : `${space?.name} · ${total} items`}
               </p>
             </div>
@@ -720,7 +725,7 @@ export function Archive() {
               <button
                 type="button"
                 onClick={() => { setFolderParent(activeFolder); setFolderModal(true); }}
-                className="box-border inline-flex h-9 items-center gap-1.5 rounded-[var(--radius-md)] border border-line bg-raised px-3 text-[length:var(--text-meta)] text-text transition-colors duration-[var(--duration-fast)] hover:bg-hover focus:outline-none focus:ring-0"
+                className="box-border inline-flex h-9 items-center gap-1.5 rounded-[var(--radius-md)] border border-line bg-raised px-3 text-meta text-text transition-colors duration-[var(--duration-fast)] hover:bg-hover focus:outline-none focus:ring-0"
               >
                 <Icon name="plus" size={13} />
                 New folder
@@ -735,7 +740,7 @@ export function Archive() {
                   key={f.value}
                   type="button"
                   onClick={() => setTypeFilter(f.value)}
-                  className={`rounded-[var(--radius-sm)] px-2 py-1 text-[length:var(--text-micro)] transition-colors duration-[var(--duration-fast)] ${
+                  className={`rounded-[var(--radius-sm)] px-2 py-1 text-micro transition-colors duration-[var(--duration-fast)] ${
                     typeFilter === f.value ? "bg-hover text-text" : "text-muted hover:text-text"
                   }`}
                 >
@@ -744,7 +749,7 @@ export function Archive() {
               ))}
             </div>
             {filtered ? (
-              <span className="text-[length:var(--text-micro)] text-faint">
+              <span className="text-micro text-faint">
                 {visible} of {total}
               </span>
             ) : null}
@@ -754,7 +759,7 @@ export function Archive() {
           </div>
 
           {banner ? (
-            <p role="alert" className="text-[length:var(--text-meta)] text-bad">
+            <p role="alert" className="text-meta text-bad">
               {banner}
             </p>
           ) : null}
@@ -833,7 +838,7 @@ export function Archive() {
             transition={{ duration: duration.fast, ease }}
             className="fixed inset-x-0 bottom-6 z-40 mx-auto flex w-fit items-center gap-3 rounded-[var(--radius-lg)] border border-line bg-raised px-4 py-2.5 shadow-lg shadow-black/40"
           >
-            <span className="text-[length:var(--text-meta)] text-text">{selectedIds.size} selected</span>
+            <span className="text-meta text-text">{selectedIds.size} selected</span>
             <span aria-hidden="true" className="h-4 w-px bg-line" />
             <Menu
               side="top"
@@ -927,7 +932,7 @@ export function Archive() {
         title={`Delete ${folderToDelete?.name ?? "folder"}?`}
       >
         <div className="flex flex-col gap-4">
-          <p className="text-[length:var(--text-meta)] leading-relaxed text-muted">
+          <p className="text-meta leading-relaxed text-muted">
             This removes the folder and everything in it. This can't be undone.
           </p>
           <div className="flex justify-end gap-2">

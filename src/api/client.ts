@@ -201,15 +201,6 @@ export const createTask = (title: string, instruction = "") =>
 
 export const listTasks = () => req<{ tasks: Task[] }>(API.task);
 
-export const startAgentSession = (taskId: string, declared?: Record<string, string> | null) =>
-  req<{ agent_session_id: string }>(API.session, {
-    method: "POST",
-    body: JSON.stringify({ task_id: taskId, declared: declared ?? null }),
-  });
-
-export const listGrants = (taskId: string) =>
-  req<{ grants: Grant[] }>(`${API.grants}${qs({ task_id: taskId })}`);
-
 /**
  * Sets a region's level for a task. Supersedes whatever was there before;
  * "none" revokes. This is what the folder lock control calls.
@@ -293,12 +284,6 @@ export type TasteFeedEvent = TasteEvent & {
 
 export const listTasteSignals = () =>
   req<{ signals: TasteSignal[]; recent_events: TasteFeedEvent[] }>(API.taste);
-
-export const createTasteSignal = (input: {
-  statement: string;
-  dimensions: TasteDimension[];
-  scope: "personal" | "project";
-}) => req<{ signal: TasteSignal }>(API.taste, { method: "POST", body: JSON.stringify(input) });
 
 /**
  * Accept, edit, rescope, or reject a signal. Every field is optional except the

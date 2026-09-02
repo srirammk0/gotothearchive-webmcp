@@ -66,11 +66,11 @@ function PreviewPane({ item }: { item: ContextItem }) {
   return (
     <div className="flex max-w-prose flex-col gap-2">
       {host(item.source_url) ? (
-        <span className="text-[length:var(--text-micro)] uppercase tracking-wide text-faint">
+        <span className="text-micro uppercase tracking-wide text-faint">
           {host(item.source_url)}
         </span>
       ) : null}
-      <p className="text-[length:var(--text-body)] leading-relaxed text-muted">
+      <p className="text-body leading-relaxed text-muted">
         {item.semantic_text?.trim() || item.title}
       </p>
     </div>
@@ -164,11 +164,11 @@ export function CapturePreview({
 
           <div className="no-scrollbar flex w-full shrink-0 flex-col gap-4 overflow-y-auto p-6 md:w-[370px]">
             <label className="flex flex-col gap-1">
-              <span className="text-[length:var(--text-micro)] uppercase tracking-wide text-faint">Title</span>
+              <span className="text-micro uppercase tracking-wide text-faint">Title</span>
               <input value={title} onChange={(e) => setTitle(e.target.value)} onBlur={saveTitle} className={controlClass} />
             </label>
             <label className="flex flex-col gap-1">
-              <span className="text-[length:var(--text-micro)] uppercase tracking-wide text-faint">Description</span>
+              <span className="text-micro uppercase tracking-wide text-faint">Description</span>
               <textarea
                 rows={3}
                 value={desc}
@@ -179,7 +179,7 @@ export function CapturePreview({
               />
             </label>
             {region ? (
-              <p className="text-[length:var(--text-micro)] text-faint">Saved to {region.name}</p>
+              <p className="text-micro text-faint">Saved to {region.name}</p>
             ) : null}
 
             <span className="h-px w-full bg-line-soft" />

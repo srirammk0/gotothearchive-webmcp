@@ -171,7 +171,7 @@ export function ItemLightbox({
                 onChange={(e) => setNote(e.target.value)}
                 onBlur={saveNote}
                 placeholder="Write a note…"
-                className="no-scrollbar h-full w-full max-w-prose resize-none bg-transparent text-[length:var(--text-body)] leading-relaxed text-text placeholder:text-faint"
+                className="no-scrollbar h-full w-full max-w-prose resize-none bg-transparent text-body leading-relaxed text-text placeholder:text-faint"
               />
             ) : render === "link" && extractedImage(item) && !linkImgFailed ? (
               <a
@@ -189,7 +189,7 @@ export function ItemLightbox({
               </a>
             ) : (
               <div className="flex max-w-prose flex-col gap-3">
-                <p className="text-[length:var(--text-body)] leading-relaxed text-muted">
+                <p className="text-body leading-relaxed text-muted">
                   {item.semantic_text?.trim() || item.title}
                 </p>
                 {item.source_url ? (
@@ -197,7 +197,7 @@ export function ItemLightbox({
                     href={item.source_url}
                     target="_blank"
                     rel="noreferrer"
-                    className="text-[length:var(--text-meta)] text-faint underline-offset-2 hover:text-muted hover:underline"
+                    className="text-meta text-faint underline-offset-2 hover:text-muted hover:underline"
                   >
                     {new URL(item.source_url).hostname.replace(/^www\./, "")}
                   </a>
@@ -219,13 +219,13 @@ export function ItemLightbox({
                     if (e.key === "Enter") commit();
                     if (e.key === "Escape") setEditing(null);
                   }}
-                  className="w-full rounded-[var(--radius-sm)] bg-canvas px-2 py-1 text-[length:var(--text-headline)] text-text"
+                  className="w-full rounded-[var(--radius-sm)] bg-canvas px-2 py-1 text-headline text-text"
                 />
               ) : (
                 <button
                   type="button"
                   onClick={() => startEdit("title")}
-                  className="-mx-2 rounded-[var(--radius-sm)] px-2 py-1 text-left text-[length:var(--text-headline)] leading-snug text-text transition-colors duration-[var(--duration-fast)] hover:bg-hover"
+                  className="-mx-2 rounded-[var(--radius-sm)] px-2 py-1 text-left text-headline leading-snug text-text transition-colors duration-[var(--duration-fast)] hover:bg-hover"
                 >
                   {item.title}
                 </button>
@@ -242,13 +242,13 @@ export function ItemLightbox({
                     if (e.key === "Escape") setEditing(null);
                   }}
                   placeholder="Add a description…"
-                  className="w-full resize-none rounded-[var(--radius-sm)] bg-canvas px-2 py-1 text-[length:var(--text-meta)] leading-relaxed text-muted placeholder:text-faint"
+                  className="w-full resize-none rounded-[var(--radius-sm)] bg-canvas px-2 py-1 text-meta leading-relaxed text-muted placeholder:text-faint"
                 />
               ) : (
                 <button
                   type="button"
                   onClick={() => startEdit("desc")}
-                  className="-mx-2 rounded-[var(--radius-sm)] px-2 py-1 text-left text-[length:var(--text-meta)] leading-relaxed text-faint transition-colors duration-[var(--duration-fast)] hover:bg-hover"
+                  className="-mx-2 rounded-[var(--radius-sm)] px-2 py-1 text-left text-meta leading-relaxed text-faint transition-colors duration-[var(--duration-fast)] hover:bg-hover"
                 >
                   {item.semantic_text?.trim() ? item.semantic_text : "Add a description"}
                 </button>
@@ -283,7 +283,7 @@ export function ItemLightbox({
               {item.metadata?.artifact_id ? (
                 <a
                   href={`/workbench/${String(item.metadata.artifact_id)}`}
-                  className="inline-flex items-center gap-1.5 rounded-[var(--radius-md)] bg-text px-3 py-1.5 text-[length:var(--text-meta)] text-canvas transition-colors duration-[var(--duration-fast)] hover:bg-white"
+                  className="inline-flex items-center gap-1.5 rounded-[var(--radius-md)] bg-text px-3 py-1.5 text-meta text-canvas transition-colors duration-[var(--duration-fast)] hover:bg-white"
                 >
                   Open in Workbench <Icon name="arrowRight" size={14} />
                 </a>
@@ -293,7 +293,7 @@ export function ItemLightbox({
                   href={item.source_url}
                   target="_blank"
                   rel="noreferrer"
-                  className="inline-flex items-center gap-1.5 rounded-[var(--radius-md)] bg-text px-3 py-1.5 text-[length:var(--text-meta)] text-canvas transition-colors duration-[var(--duration-fast)] hover:bg-white"
+                  className="inline-flex items-center gap-1.5 rounded-[var(--radius-md)] bg-text px-3 py-1.5 text-meta text-canvas transition-colors duration-[var(--duration-fast)] hover:bg-white"
                 >
                   Open source <Icon name="arrowRight" size={14} />
                 </a>
@@ -309,7 +309,7 @@ export function ItemLightbox({
                     type="button"
                     onClick={toggle}
                     aria-expanded={open}
-                    className="inline-flex items-center gap-1.5 rounded-[var(--radius-md)] border border-line px-3 py-1.5 text-[length:var(--text-meta)] text-muted transition-colors duration-[var(--duration-fast)] hover:border-hover hover:text-text"
+                    className="inline-flex items-center gap-1.5 rounded-[var(--radius-md)] border border-line px-3 py-1.5 text-meta text-muted transition-colors duration-[var(--duration-fast)] hover:border-hover hover:text-text"
                   >
                     Actions
                     <Icon

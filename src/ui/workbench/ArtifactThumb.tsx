@@ -19,7 +19,7 @@ export function ArtifactThumb({ html, className = "" }: { html: string; classNam
           style={{ width: "320%", height: "320%", transform: "scale(0.3125)" }}
         />
       ) : (
-        <div className="flex h-full items-center justify-center text-[length:var(--text-micro)] text-faint">
+        <div className="flex h-full items-center justify-center text-micro text-faint">
           No preview
         </div>
       )}

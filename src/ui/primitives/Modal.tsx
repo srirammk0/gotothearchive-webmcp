@@ -57,7 +57,7 @@ export function Modal({ open, onClose, title, size = "sm", children }: ModalProp
             className={`w-full ${width[size]} rounded-[var(--radius-lg)] border border-line bg-surface shadow-2xl shadow-black/50`}
           >
             <div className="flex items-center justify-between gap-4 border-b border-line-soft px-5 py-3.5">
-              <h2 className="text-[length:var(--text-section)] text-text">{title}</h2>
+              <h2 className="text-section text-text">{title}</h2>
               <button
                 type="button"
                 autoFocus

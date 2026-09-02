@@ -36,7 +36,7 @@ export function MemorySync() {
   };
 
   return (
-    <div className="flex items-center gap-2 text-[length:var(--text-micro)] text-faint">
+    <div className="flex items-center gap-2 text-micro text-faint">
       <Icon name={allSynced ? "check" : "arrowRight"} size={12} className={allSynced ? "text-good" : ""} />
       {allSynced ? (
         <span>{status.synced} indexed for retrieval</span>

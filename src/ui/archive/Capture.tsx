@@ -114,7 +114,7 @@ export function Capture({ region, onCaptured }: CaptureProps) {
               void submitFiles(files);
             }
           }}
-          className="w-full resize-none bg-transparent px-3.5 py-3 text-[length:var(--text-body)] leading-relaxed text-text placeholder:text-faint"
+          className="w-full resize-none bg-transparent px-3.5 py-3 text-body leading-relaxed text-text placeholder:text-faint"
         />
         <div className="flex items-center justify-between gap-3 px-3 py-2">
           <button
@@ -123,7 +123,7 @@ export function Capture({ region, onCaptured }: CaptureProps) {
               setFileCue((active) => !active);
               fileInputRef.current?.click();
             }}
-            className="group inline-flex items-center gap-1.5 rounded-[var(--radius-sm)] px-1.5 py-1 text-[length:var(--text-micro)] text-muted transition-all duration-[var(--duration-fast)] hover:bg-raised hover:text-text active:scale-95"
+            className="group inline-flex items-center gap-1.5 rounded-[var(--radius-sm)] px-1.5 py-1 text-micro text-muted transition-all duration-[var(--duration-fast)] hover:bg-raised hover:text-text active:scale-95"
           >
             <span className={`inline-flex transition-transform duration-200 ${fileCue ? "rotate-45 scale-110" : "group-hover:rotate-90"}`}>
               <Icon name="plus" size={12} />
@@ -155,7 +155,7 @@ export function Capture({ region, onCaptured }: CaptureProps) {
 
       {status.kind === "busy" ? <Spinner label={status.label} /> : null}
       {status.kind === "error" ? (
-        <p role="alert" className="text-[length:var(--text-meta)] text-bad">
+        <p role="alert" className="text-meta text-bad">
           {status.message}
         </p>
       ) : null}

@@ -3,7 +3,7 @@ import type { ButtonHTMLAttributes } from "react";
 type Variant = "primary" | "secondary" | "ghost" | "danger";
 
 const base =
-  "inline-flex items-center gap-1.5 rounded-[var(--radius-md)] text-[length:var(--text-meta)] " +
+  "inline-flex items-center gap-1.5 rounded-[var(--radius-md)] text-meta " +
   "transition-colors duration-[var(--duration-fast)] disabled:cursor-not-allowed disabled:opacity-40";
 
 const variants: Record<Variant, string> = {

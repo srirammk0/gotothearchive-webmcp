@@ -1,10 +1,9 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { API, type CapabilityInput, type ToolSpec } from "@shared/contract";
 import { authHeader } from "../api/client";
 import { compile } from "./compiler";
 import { registrar } from "./registrar";
 import { callTool } from "./transport";
-import { recordCapabilityChange } from "./lens";
 
 interface UseCapabilitiesResult {
   specs: ToolSpec[];
@@ -29,12 +28,10 @@ export function useCapabilities(taskId: string | null, activeArtifactId: string 
   const [registered, setRegistered] = useState<ToolSpec[]>([]);
   const [lastChange, setLastChange] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const prevSpecs = useRef<ToolSpec[]>([]);
 
   const refresh = useCallback(async () => {
     if (!taskId) {
       await registrar.sync([], () => Promise.resolve(""));
-      prevSpecs.current = [];
       setSpecs([]);
       setRegistered(registrar.getRegistered());
       return;
@@ -64,9 +61,6 @@ export function useCapabilities(taskId: string | null, activeArtifactId: string 
 
     setError(null);
     const next = compile(input);
-
-    recordCapabilityChange(prevSpecs.current, next);
-    prevSpecs.current = next;
     setSpecs(next);
 
     await registrar.sync(next, (spec, toolInput, signal) => {
