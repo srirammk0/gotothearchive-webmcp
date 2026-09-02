@@ -37,11 +37,9 @@ test("read grant exposes the read tools, not the propose tools", () => {
   expect(n).toContain("get_current_context_scope");
   expect(n).toContain("get_context_for_task");
   expect(n).toContain("inspect_context_item");
-  expect(n).toContain("inspect_relationships");
   expect(n).toContain("get_taste_for_task");
   expect(n).not.toContain("record_artifact");
-  expect(n).not.toContain("record_feedback");
-  expect(n).not.toContain("propose_context_change");
+  expect(n).not.toContain("propose_taste_signal");
 });
 
 test("region enum is exactly the granted, human-reachable regions", () => {
@@ -66,8 +64,7 @@ test("propose grant exposes the propose tools scoped to propose-level regions", 
   const p = input({ grants: [reg("work", "propose"), reg("inspiration", "read")] });
   const n = names(p);
   expect(n).toContain("record_artifact");
-  expect(n).toContain("record_feedback");
-  expect(n).toContain("propose_context_change");
+  expect(n).toContain("propose_taste_signal");
   expect(regionEnum(p, "record_artifact")).toEqual(["work"]);
 });
 
@@ -106,14 +103,12 @@ test("Chrome WebMCP annotations + budgets are set correctly", () => {
     "get_current_context_scope",
     "get_context_for_task",
     "inspect_context_item",
-    "inspect_relationships",
     "get_taste_for_task",
     "trace_artifact_influences",
   ]);
   const untrusted = new Set([
     "get_context_for_task",
     "inspect_context_item",
-    "inspect_relationships",
     "trace_artifact_influences",
     "get_taste_for_task",
   ]);

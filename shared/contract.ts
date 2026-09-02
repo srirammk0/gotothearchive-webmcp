@@ -88,6 +88,220 @@ export const ITEM_TYPES = [
 ] as const;
 export type ItemType = (typeof ITEM_TYPES)[number];
 
+/* ------------------------------------------------------------------ *
+ * Design profile — structured visual facts extracted from an image
+ * ------------------------------------------------------------------ */
+
+/**
+ * What an archived image actually LOOKS like, as structured data rather than a
+ * prose caption. Stored on `ContextItem.metadata.design`.
+ *
+ * Two very different provenances, deliberately kept in one object:
+ *   `palette`  — measured. Exact hex + coverage, quantized from the real pixels
+ *                in the browser at capture time. Not a model's guess.
+ *   everything else — judged. A vision model choosing from the closed
+ *                vocabularies below, so the values are comparable across items
+ *                (graph edges, taste matching) instead of free prose.
+ *
+ * Every vocabulary is a closed enum on purpose: an open string would give a
+ * different word for the same thing on every call, and nothing downstream could
+ * match on it.
+ */
+
+export const TYPE_CLASSIFICATIONS = [
+  "didone_serif",
+  "transitional_serif",
+  "slab_serif",
+  "grotesque",
+  "neo_grotesque",
+  "geometric_sans",
+  "humanist_sans",
+  "monospace",
+  "script",
+  "display_decorative",
+  "blackletter",
+  "none",
+] as const;
+export type TypeClassification = (typeof TYPE_CLASSIFICATIONS)[number];
+
+export const TYPE_CASES = ["uppercase", "lowercase", "title_case", "mixed", "none"] as const;
+export type TypeCase = (typeof TYPE_CASES)[number];
+
+/** Display type size relative to the frame, not in points. */
+export const TYPE_SCALES = ["hero", "large", "moderate", "small", "none"] as const;
+export type TypeScale = (typeof TYPE_SCALES)[number];
+
+export const COMPOSITIONS = [
+  "poster_split",
+  "centered",
+  "full_bleed_image",
+  "grid_contact_sheet",
+  "editorial_column",
+  "asymmetric_stack",
+  "type_only",
+  "diagram",
+  "product_shot",
+] as const;
+export type Composition = (typeof COMPOSITIONS)[number];
+
+export const LAYOUT_DENSITIES = ["sparse", "balanced", "dense"] as const;
+export type LayoutDensity = (typeof LAYOUT_DENSITIES)[number];
+
+export const TEXTURES = [
+  "halftone",
+  "paper_grain",
+  "riso_misregistration",
+  "photocopy",
+  "noise_grain",
+  "gradient_mesh",
+  "flat_clean",
+  "glossy",
+] as const;
+export type Texture = (typeof TEXTURES)[number];
+
+export const CORNER_RADII = ["sharp", "slight", "rounded", "pill", "organic"] as const;
+export type CornerRadius = (typeof CORNER_RADII)[number];
+
+export const STROKE_WEIGHTS = ["none", "hairline", "medium", "heavy"] as const;
+export type StrokeWeight = (typeof STROKE_WEIGHTS)[number];
+
+export const IMAGE_TREATMENTS = [
+  "duotone",
+  "halftone",
+  "full_color_photo",
+  "black_and_white_photo",
+  "illustration",
+  "line_drawing",
+  "3d_render",
+  "collage",
+  "none",
+] as const;
+export type ImageTreatment = (typeof IMAGE_TREATMENTS)[number];
+
+export const MOODS = [
+  "editorial",
+  "retro_print",
+  "minimal",
+  "brutalist",
+  "luxury",
+  "playful",
+  "technical",
+  "organic",
+  "streetwear",
+  "corporate",
+  "experimental",
+] as const;
+export type Mood = (typeof MOODS)[number];
+
+export const PALETTE_ROLES = ["ground", "primary", "secondary", "accent", "text"] as const;
+export type PaletteRole = (typeof PALETTE_ROLES)[number];
+
+/** One measured colour: exact hex, its share of the frame, and what it does. */
+export interface PaletteEntry {
+  /** Uppercase #RRGGBB. Measured from pixels, never invented. */
+  hex: string;
+  /** Percent of sampled pixels, 0-100. The list is sorted by this, descending. */
+  pct: number;
+  /** Assigned by coverage + position: the biggest area is the ground, and so on. */
+  role: PaletteRole;
+}
+
+export interface DesignProfile {
+  palette: PaletteEntry[];
+  /**
+   * Where `palette` came from, and it matters: "measured" is quantized from the
+   * real pixels in the browser at capture time and is exact; "estimated" is the
+   * vision model naming colours it thinks it sees, used only when we never had
+   * the bytes in a browser (backfill of already-archived items). Never present
+   * an estimated palette as measured — the UI and the agent both get told which.
+   */
+  palette_source: "measured" | "estimated" | "none";
+  typography: {
+    classification: TypeClassification;
+    case: TypeCase;
+    scale: TypeScale;
+    /** One short human phrase, e.g. "high-contrast condensed caps". */
+    note: string;
+  };
+  layout: {
+    composition: Composition;
+    density: LayoutDensity;
+    alignment: "left" | "center" | "right" | "justified" | "none";
+  };
+  texture: Texture[];
+  shape: { corner_radius: CornerRadius; stroke: StrokeWeight };
+  imagery: { treatment: ImageTreatment };
+  mood: Mood[];
+  /** Which model judged the non-palette fields. Never presented as human-authored. */
+  extracted_by: string;
+  extracted_at: number;
+}
+
+/**
+ * The design vocabulary that maps onto each taste dimension. Used to turn a
+ * confirmed taste signal into a real attribute match instead of word overlap.
+ */
+export const DIMENSION_DESIGN_FIELDS: Record<TasteDimension, readonly string[]> = {
+  typography: ["typography.classification", "typography.case", "typography.scale"],
+  composition: ["layout.composition", "layout.alignment"],
+  layout_density: ["layout.density"],
+  color: ["palette"],
+  imagery: ["imagery.treatment", "texture"],
+  motion: [],
+  visual_hierarchy: ["typography.scale", "layout.composition"],
+  tone_voice: ["mood"],
+  structure_clarity: ["layout.density", "layout.composition"],
+};
+
+/** Flattened comparable tokens for one profile — the unit of graph + taste matching. */
+export function designTokens(d: DesignProfile | null | undefined): string[] {
+  if (!d) return [];
+  const t: string[] = [];
+  if (d.typography.classification !== "none") t.push(`type:${d.typography.classification}`);
+  if (d.typography.case !== "none") t.push(`case:${d.typography.case}`);
+  if (d.typography.scale !== "none") t.push(`scale:${d.typography.scale}`);
+  t.push(`composition:${d.layout.composition}`, `density:${d.layout.density}`);
+  if (d.layout.alignment !== "none") t.push(`align:${d.layout.alignment}`);
+  for (const x of d.texture) t.push(`texture:${x}`);
+  t.push(`radius:${d.shape.corner_radius}`, `stroke:${d.shape.stroke}`);
+  if (d.imagery.treatment !== "none") t.push(`imagery:${d.imagery.treatment}`);
+  for (const m of d.mood) t.push(`mood:${m}`);
+  for (const p of d.palette) t.push(`hue:${hueBucket(p.hex)}`);
+  return [...new Set(t)];
+}
+
+/**
+ * Coarse hue name for a hex. Two items "share a colour" when they land in the
+ * same bucket — exact hex equality almost never happens across real images, so
+ * matching on it would find nothing.
+ */
+export function hueBucket(hex: string): string {
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
+  if (!m) return "unknown";
+  const n = Number.parseInt(m[1], 16);
+  const r = ((n >> 16) & 255) / 255;
+  const g = ((n >> 8) & 255) / 255;
+  const b = (n & 255) / 255;
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const l = (max + min) / 2;
+  const d = max - min;
+  if (d < 0.08) return l > 0.85 ? "white" : l < 0.15 ? "black" : "grey";
+  let h = 0;
+  if (max === r) h = ((g - b) / d) % 6;
+  else if (max === g) h = (b - r) / d + 2;
+  else h = (r - g) / d + 4;
+  h = (h * 60 + 360) % 360;
+  if (h < 15 || h >= 345) return "red";
+  if (h < 45) return "orange";
+  if (h < 70) return "yellow";
+  if (h < 165) return "green";
+  if (h < 200) return "cyan";
+  if (h < 260) return "blue";
+  if (h < 290) return "violet";
+  return "magenta";
+}
+
 export interface Space {
   id: Id;
   name: string;
@@ -205,6 +419,30 @@ export interface AgentSession {
 /* ------------------------------------------------------------------ *
  * Artifacts, provenance, review
  * ------------------------------------------------------------------ */
+
+/**
+ * The shape an artifact is meant to be viewed at.
+ *
+ * The Workbench cannot measure a sandboxed artifact's natural height (no
+ * scripts in a `sandbox=""` iframe, and the review overlay positions its region
+ * marks as a percentage of the iframe's own box, so letting the content scroll
+ * inside would drift the marks off what they point at). So the artifact
+ * declares its shape and the viewer gives it exactly that box — nothing is
+ * clipped and the marks stay aligned. A 3:4 poster was previously cut off at a
+ * fixed 560px.
+ */
+export const ARTIFACT_ASPECTS = ["poster", "portrait", "square", "wide", "page", "auto"] as const;
+export type ArtifactAspect = (typeof ARTIFACT_ASPECTS)[number];
+
+/** CSS `aspect-ratio` per shape. "auto" keeps the old fixed-height behaviour. */
+export const ASPECT_RATIO: Record<ArtifactAspect, string | null> = {
+  poster: "3 / 4",
+  portrait: "2 / 3",
+  square: "1 / 1",
+  wide: "16 / 9",
+  page: "1 / 1.414",
+  auto: null,
+};
 
 export type ArtifactState =
   | "processing"
@@ -354,7 +592,8 @@ export interface TasteSignal {
   status: "proposed" | "confirmed" | "rejected" | "superseded";
   /** Derived from evidence counts, never a literal. See confidenceFrom(). */
   confidence: number;
-  created_by: "system" | "human";
+  /** "agent" = named by an agent via propose_taste_signal; "system" = derived from annotations. */
+  created_by: "system" | "human" | "agent";
   approved_by: Id | null;
   created_at: number;
   /** Bitemporal: id of the signal this one replaces, or null. */
@@ -474,14 +713,13 @@ export const TOOL_NAMES = [
   "get_current_context_scope",
   "get_context_for_task",
   "inspect_context_item",
-  "inspect_relationships",
   "get_taste_for_task",
   "trace_artifact_influences",
   "record_artifact",
-  "record_feedback",
   "propose_taste_signal",
-  "propose_context_change",
   "add_context_item",
+  "withdraw_artifact",
+  "remove_context_item",
   "approve_proposed_changes",
   "reject_proposed_changes",
 ] as const;
@@ -550,6 +788,18 @@ export const DENIAL_REASONS = {
   UNKNOWN_ITEM: "That item does not exist or is not visible in this task",
   UNKNOWN_TOOL: "That tool is not available for this task",
   INVALID_PARENT: "parent_version_id must be an existing version of the same artifact",
+  /** A malformed call, not a permission problem — these two used to return
+   *  EXCEEDS_HUMAN, which told Agent Lens the person lacked access when the real
+   *  fault was a missing or unusable argument. */
+  MISSING_INPUT: "A required argument was missing or empty",
+  UNKNOWN_ARTIFACT: "That artifact does not exist in this task",
+  NOT_AGENT_AUTHORED:
+    "Only an item an agent filed here can be removed this way. Anything the person wrote or captured is theirs to delete.",
+  NOT_YOURS_TO_WITHDRAW: "That artifact was not produced by this task, so it cannot be withdrawn here",
+  ALREADY_REVIEWED:
+    "A person has already annotated or decided on this artifact — withdrawing it would destroy their feedback. They can delete it themselves.",
+  NO_USABLE_EVIDENCE:
+    "None of the cited annotations or items are reachable in this task, so there is nothing to ground this on",
 } as const;
 
 /* ------------------------------------------------------------------ *
@@ -590,6 +840,4 @@ export const API = {
   edges: "/api/edges",
   /** Notes on one item. GET ?item_id=… · POST create · DELETE ?id=… */
   itemNotes: "/api/items/notes",
-  /** External memory index sync. GET — status · POST — force a full re-sync. */
-  memoryStatus: "/api/memory/status",
 } as const;

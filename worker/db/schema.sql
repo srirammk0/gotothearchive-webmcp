@@ -241,7 +241,9 @@ CREATE TABLE IF NOT EXISTS taste_signals (
   status      TEXT NOT NULL DEFAULT 'proposed'
               CHECK (status IN ('proposed','confirmed','rejected','superseded')),
   confidence  REAL NOT NULL DEFAULT 0.5,
-  created_by  TEXT NOT NULL CHECK (created_by IN ('system','human')),
+  -- 'agent' = named by an agent via propose_taste_signal; 'system' = derived
+  -- from the person's own annotations. Both land as status='proposed'.
+  created_by  TEXT NOT NULL CHECK (created_by IN ('system','human','agent')),
   approved_by TEXT,
   created_at  INTEGER NOT NULL,
   -- Bitemporal correction: a materially changed or replaced signal is not
@@ -310,25 +312,3 @@ CREATE TABLE IF NOT EXISTS usage_counters (
   PRIMARY KEY (human_id, period, metric)
 );
 
--- Deferred mirror of item writes to the external memory index (Supermemory).
--- Enqueued in the same request as the item mutation (a plain local insert, so
--- capture latency is unchanged); drained by SpaceDO.alarm(). Supermemory is a
--- retrieval *augmentation* only — the row here never gates access and a stuck
--- job only means that item stays FTS-only until the next drain.
-CREATE TABLE IF NOT EXISTS memory_outbox (
-  id            TEXT PRIMARY KEY,
-  space_id      TEXT NOT NULL,
-  op            TEXT NOT NULL CHECK (op IN ('upsert','delete')),
-  item_id       TEXT NOT NULL,
-  custom_id     TEXT NOT NULL,              -- Supermemory customId; stable == item_id
-  container_tag TEXT NOT NULL,              -- == space_id; tenant isolation in Supermemory
-  payload       TEXT NOT NULL DEFAULT '{}', -- {title, semantic_text, region_id, authority_class}
-  status        TEXT NOT NULL DEFAULT 'pending'
-                CHECK (status IN ('pending','done','failed')),
-  attempts      INTEGER NOT NULL DEFAULT 0,
-  last_error    TEXT,
-  doc_id        TEXT,                       -- Supermemory document id, once known
-  created_at    INTEGER NOT NULL,
-  updated_at    INTEGER NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_memory_outbox_pending ON memory_outbox(status, updated_at);

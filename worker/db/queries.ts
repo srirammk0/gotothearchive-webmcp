@@ -361,129 +361,11 @@ function toAuditEvent(r: AuditEventRow): AuditEvent {
   };
 }
 
-export interface MemoryOutboxPayload {
-  title: string;
-  semantic_text: string | null;
-  region_id: string;
-  authority_class: string;
-  /** R2 key of the item's canonical file, when it has one — the drain sends the
-   * bytes to the memory index so image / PDF content becomes searchable. */
-  content_ref: string | null;
-  /** Coarse file class for the index: "image" | "pdf" | "document" | null. */
-  file_type: string | null;
-}
-interface MemoryOutboxRow {
-  [key: string]: SqlStorageValue;
-  id: string;
-  space_id: string;
-  op: string;
-  item_id: string;
-  custom_id: string;
-  container_tag: string;
-  payload: string;
-  status: string;
-  attempts: number;
-  last_error: string | null;
-  doc_id: string | null;
-  created_at: number;
-  updated_at: number;
-}
-export interface MemoryOutboxJob {
-  id: string;
-  space_id: string;
-  op: "upsert" | "delete";
-  item_id: string;
-  custom_id: string;
-  container_tag: string;
-  payload: MemoryOutboxPayload;
-  attempts: number;
-  doc_id: string | null;
-}
-function toMemoryOutboxJob(r: MemoryOutboxRow): MemoryOutboxJob {
-  const raw = JSON.parse(r.payload) as Partial<MemoryOutboxPayload>;
-  return {
-    id: r.id,
-    space_id: r.space_id,
-    op: r.op === "delete" ? "delete" : "upsert",
-    item_id: r.item_id,
-    custom_id: r.custom_id,
-    container_tag: r.container_tag,
-    payload: {
-      title: raw.title ?? "",
-      semantic_text: raw.semantic_text ?? null,
-      region_id: raw.region_id ?? "",
-      authority_class: raw.authority_class ?? "",
-      content_ref: raw.content_ref ?? null,
-      file_type: raw.file_type ?? null,
-    },
-    attempts: r.attempts,
-    doc_id: r.doc_id ?? null,
-  };
-}
-
 export class Queries {
   /** Project scope selected by openAnnotationsForSpace for the current derive run. */
   private tasteDerivationProjectId: string | null | undefined;
 
-  /**
-   * `mirrorMemory` makes insert/update/deleteItem also queue a memory_outbox
-   * row — the same transparent-derived-state pattern items_fts already uses,
-   * but for the external index. Off by default so tests and any Supermemory-less
-   * deployment write nothing extra.
-   */
-  constructor(
-    private sql: SqlStorage,
-    private opts: { mirrorMemory?: boolean } = {},
-  ) {}
-
-  private mirrorItem(op: "upsert" | "delete", item: ContextItem, now: number): void {
-    if (!this.opts.mirrorMemory) return;
-    this.enqueueMemoryOp({
-      space_id: item.space_id,
-      op,
-      item_id: item.id,
-      payload: {
-        title: item.title,
-        semantic_text: item.semantic_text,
-        region_id: item.region_id,
-        authority_class: item.authority_class,
-        content_ref: item.content_ref,
-        file_type:
-          item.type === "image" || item.type === "screenshot"
-            ? "image"
-            : item.type === "pdf"
-              ? "pdf"
-              : item.content_ref
-                ? "document"
-                : null,
-      },
-      now,
-    });
-  }
-
-  /**
-   * Catch the external index up: queue an upsert for every item that has never
-   * successfully synced (no 'done' row) and isn't already pending. Covers items
-   * captured before the mirror existed or before the API key was set. Cheap and
-   * idempotent — safe to run on every boot; the alarm drains the backlog.
-   */
-  backfillMemoryOutbox(spaceId: string): number {
-    if (!this.opts.mirrorMemory) return 0;
-    const now = Date.now();
-    let queued = 0;
-    for (const item of this.listItemsBySpace(spaceId)) {
-      const seen = this.sql
-        .exec<{ n: number }>(
-          `SELECT COUNT(*) AS n FROM memory_outbox WHERE item_id = ? AND status IN ('done', 'pending')`,
-          item.id,
-        )
-        .toArray()[0]?.n ?? 0;
-      if (seen > 0) continue;
-      this.mirrorItem("upsert", item, now);
-      queued++;
-    }
-    return queued;
-  }
+  constructor(private sql: SqlStorage) {}
 
   /* ---------------- spaces ---------------- */
 
@@ -707,7 +589,6 @@ export class Queries {
       item.title,
       item.semantic_text ?? "",
     );
-    this.mirrorItem("upsert", item, item.updated_at);
   }
 
   /**
@@ -756,12 +637,10 @@ export class Queries {
       item.title,
       item.semantic_text ?? "",
     );
-    this.mirrorItem("upsert", item, item.updated_at);
   }
 
   deleteItem(id: string): void {
     const prev = this.ftsPrev(id);
-    const doomed = this.opts.mirrorMemory ? this.getItem(id) : null;
     // influences.item_id and accesses.item_id have FKs to items; edges and
     // taste_evidence reference items by id without one. Clear all of them.
     this.sql.exec(`DELETE FROM influences WHERE item_id = ?`, id);
@@ -772,7 +651,6 @@ export class Queries {
     this.sql.exec(`UPDATE taste_evidence SET item_id = NULL WHERE item_id = ?`, id);
     this.sql.exec(`DELETE FROM items WHERE id = ?`, id);
     if (prev) this.ftsDelete(id, prev);
-    if (doomed) this.mirrorItem("delete", doomed, Date.now());
   }
 
   /**
@@ -837,13 +715,25 @@ export class Queries {
       .map(toItem);
   }
 
-  /** Images/screenshots with real bytes but no description yet — caption backlog. */
-  imagesNeedingCaption(spaceId: string, limit: number): ContextItem[] {
+  /**
+   * Images/screenshots with real bytes but no extracted design profile yet.
+   *
+   * This is the backlog itself, not a queue table: an image that fails
+   * extraction is simply still missing `metadata.design` on the next pass, so
+   * it retries without any retry bookkeeping. Matching on the JSON text is
+   * deliberate — `metadata` is a TEXT column and a profile always writes a
+   * `"design":{"palette"` key, so a LIKE is enough and needs no new index at
+   * beta scale.
+   *
+   * ponytail: LIKE over the metadata blob. Fine for a few hundred items per
+   * space; promote `design` to its own column if this ever gets hot.
+   */
+  imagesNeedingDesign(spaceId: string, limit: number): ContextItem[] {
     return this.sql
       .exec<ItemRow>(
         `SELECT * FROM items
          WHERE space_id = ? AND type IN ('image', 'screenshot') AND content_ref IS NOT NULL
-           AND (semantic_text IS NULL OR semantic_text = '')
+           AND (metadata IS NULL OR metadata NOT LIKE '%"design"%')
          ORDER BY created_at LIMIT ?`,
         spaceId,
         Math.max(1, Math.floor(limit)),
@@ -1833,118 +1723,6 @@ export class Queries {
       out[r.metric] = r.used;
     }
     return out;
-  }
-
-  /* ---------------- memory outbox (external index mirror) ---------------- */
-
-  enqueueMemoryOp(job: {
-    space_id: string;
-    op: "upsert" | "delete";
-    item_id: string;
-    payload: MemoryOutboxPayload;
-    doc_id?: string | null;
-    now: number;
-  }): void {
-    this.sql.exec(
-      `INSERT INTO memory_outbox
-         (id, space_id, op, item_id, custom_id, container_tag, payload, status, attempts, doc_id, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?, ?)`,
-      crypto.randomUUID(),
-      job.space_id,
-      job.op,
-      job.item_id,
-      job.item_id,
-      job.space_id,
-      JSON.stringify(job.payload),
-      job.doc_id ?? null,
-      job.now,
-      job.now,
-    );
-  }
-
-  listPendingMemoryOps(limit: number): MemoryOutboxJob[] {
-    return this.sql
-      .exec<MemoryOutboxRow>(
-        `SELECT * FROM memory_outbox WHERE status = 'pending' ORDER BY updated_at, id LIMIT ?`,
-        Math.max(1, Math.floor(limit)),
-      )
-      .toArray()
-      .map(toMemoryOutboxJob);
-  }
-
-  countPendingMemoryOps(): number {
-    return (
-      this.sql
-        .exec<{ n: number }>(`SELECT COUNT(*) AS n FROM memory_outbox WHERE status = 'pending'`)
-        .toArray()[0]?.n ?? 0
-    );
-  }
-
-  markMemoryOpDone(id: string, docId: string | null, now: number): void {
-    this.sql.exec(
-      `UPDATE memory_outbox SET status = 'done', doc_id = COALESCE(?, doc_id), last_error = NULL, updated_at = ? WHERE id = ?`,
-      docId,
-      now,
-      id,
-    );
-  }
-
-  /** Bump the attempt count; park as 'failed' once it reaches maxAttempts. */
-  markMemoryOpRetry(id: string, reason: string, maxAttempts: number, now: number): void {
-    this.sql.exec(
-      `UPDATE memory_outbox
-         SET attempts = attempts + 1,
-             last_error = ?,
-             status = CASE WHEN attempts + 1 >= ? THEN 'failed' ELSE 'pending' END,
-             updated_at = ?
-       WHERE id = ?`,
-      reason.slice(0, 500),
-      Math.max(1, Math.floor(maxAttempts)),
-      now,
-      id,
-    );
-  }
-
-  markMemoryOpFailed(id: string, reason: string, now: number): void {
-    this.sql.exec(
-      `UPDATE memory_outbox SET status = 'failed', last_error = ?, updated_at = ? WHERE id = ?`,
-      reason.slice(0, 500),
-      now,
-      id,
-    );
-  }
-
-  /** A human-readable sync health snapshot for one space. */
-  memoryStatus(spaceId: string): {
-    mirror_enabled: boolean;
-    items: number;
-    synced: number;
-    pending: number;
-    failed: number;
-    recent_errors: string[];
-  } {
-    const one = (q: string, ...b: SqlStorageValue[]) =>
-      this.sql.exec<{ n: number }>(q, ...b).toArray()[0]?.n ?? 0;
-    return {
-      mirror_enabled: this.opts.mirrorMemory ?? false,
-      items: one(`SELECT COUNT(*) AS n FROM items WHERE space_id = ?`, spaceId),
-      synced: one(
-        `SELECT COUNT(DISTINCT item_id) AS n FROM memory_outbox WHERE space_id = ? AND status = 'done'`,
-        spaceId,
-      ),
-      pending: one(`SELECT COUNT(*) AS n FROM memory_outbox WHERE space_id = ? AND status = 'pending'`, spaceId),
-      failed: one(`SELECT COUNT(*) AS n FROM memory_outbox WHERE space_id = ? AND status = 'failed'`, spaceId),
-      recent_errors: this.sql
-        .exec<{ last_error: string | null }>(
-          `SELECT last_error FROM memory_outbox
-           WHERE space_id = ? AND status = 'failed' AND last_error IS NOT NULL
-           ORDER BY updated_at DESC LIMIT 3`,
-          spaceId,
-        )
-        .toArray()
-        .map((r) => r.last_error ?? "")
-        .filter(Boolean),
-    };
   }
 }
 

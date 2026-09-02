@@ -76,4 +76,11 @@ Never surface in ordinary UI: ContextEdge, authority class, embedding, capabilit
 
 ## Definition of done for any track
 
-`bun run build` and `bun run lint` both clean before handing work back. No `any`, no `@ts-expect-error`, no TODO stubs in a path the demo walks through.
+`bun run build`, `bun run lint` AND `bun test` all clean before handing work back.
+No `any`, no `@ts-expect-error`, no TODO stubs in a path the demo walks through.
+
+`bun test` is not optional and must be run with no path argument. A change that
+ran `bun test src worker` reported 120 pass / 0 fail while silently leaving six
+red assertions in `evals/` — including the one pinning the region-enum schema,
+the central WebMCP claim. Scoping the suite hid a regression in the product's
+own thesis for two days. Run the whole suite.

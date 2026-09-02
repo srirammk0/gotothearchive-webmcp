@@ -10,12 +10,13 @@
  * for a human to confirm in the Connections panel. Every rule is grounded in
  * the items' own content or source — nothing is linked for co-location alone.
  *
- * ponytail: rule 3 is O(n) per capture over the space's items (token sets +
- * pairwise jaccard). Fine to low hundreds of items per space. The upgrade
- * beyond that is a blocked/indexed similarity pass (e.g. an FTS-driven
- * candidate shortlist) instead of scanning every sibling.
+ * ponytail: rules 3 and 4 are O(n) per capture over the space's items (token
+ * sets + pairwise jaccard). Fine to low hundreds of items per space. The
+ * upgrade beyond that is a blocked/indexed similarity pass (e.g. an
+ * FTS-driven candidate shortlist) instead of scanning every sibling.
  */
-import type { ContextItem, Relationship } from "@shared/contract";
+import type { ContextItem, DesignProfile, Relationship } from "@shared/contract";
+import { designTokens, hueBucket } from "@shared/contract";
 import type { Queries } from "./db/queries";
 
 const MAX_PER_CALL = 12;
@@ -51,6 +52,17 @@ function jaccard(a: Set<string>, b: Set<string>): { j: number; shared: number } 
   for (const w of a) if (b.has(w)) inter++;
   const union = a.size + b.size - inter;
   return { j: union === 0 ? 0 : inter / union, shared: inter };
+}
+
+function designProfile(item: ContextItem): DesignProfile | null {
+  const d = (item.metadata as { design?: DesignProfile }).design;
+  return d && typeof d === "object" ? d : null;
+}
+
+/** The dominant colour's hue bucket — "ground" role if tagged, else the top palette entry. */
+function groundHue(d: DesignProfile): string | null {
+  const ground = d.palette.find((p) => p.role === "ground") ?? d.palette[0];
+  return ground ? hueBucket(ground.hex) : null;
 }
 
 const childRelationship = (item: ContextItem): Relationship =>
@@ -131,6 +143,65 @@ export function deriveEdgesForItem(q: Queries, item: ContextItem, now: number): 
     scored.sort((a, b) => b.j - a.j);
     for (const s of scored.slice(0, 5)) {
       add(item.id, s.id, "related_to", Math.min(0.5, s.j), "proposed");
+    }
+  }
+
+  // Rule 4: design-attribute similarity -> related_to. Every image item can carry
+  // a DesignProfile (shared/contract.ts); comparing them is the whole point of a
+  // design-reference archive — a shared cream ground or a shared Didone display
+  // face is an obvious link that rules 1-3 (source/structure/words) can't see at
+  // all. `related_to`, not `inspired_by`: a shared attribute is evidence of family
+  // resemblance, not a directional claim that one item influenced the other —
+  // that provenance claim isn't something raw token overlap can support.
+  // Skips entirely when this item has no design profile; never invents one.
+  const myDesign = designProfile(item);
+  if (myDesign) {
+    const myHue = groundHue(myDesign);
+    const myTokens = new Set(designTokens(myDesign));
+    const hueMatches: string[] = [];
+    const tokenScored: { id: string; j: number }[] = [];
+
+    for (const o of siblings) {
+      const oDesign = designProfile(o);
+      if (!oDesign) continue;
+
+      // 4a) same typography.classification AND same typography.scale -> approved,
+      // 0.7. Two independent closed-vocabulary categories matching together is
+      // long odds by chance (12 classifications x 5 scales) — as strong a
+      // structural fact as rule 1's same-hostname match, so it gets the same
+      // auto-approve treatment instead of landing in the proposed queue.
+      if (
+        myDesign.typography.classification !== "none" &&
+        myDesign.typography.classification === oDesign.typography.classification &&
+        myDesign.typography.scale !== "none" &&
+        myDesign.typography.scale === oDesign.typography.scale
+      ) {
+        add(item.id, o.id, "related_to", 0.7, "approved");
+      }
+
+      // 4b) same ground-colour hue bucket -> proposed, 0.35. "Same colour family"
+      // is a real visual link but a single coarse bucket (11 buckets total) is
+      // weak evidence on its own, so — like rule 3 — a human confirms it.
+      if (myHue && myHue !== "unknown" && groundHue(oDesign) === myHue) {
+        hueMatches.push(o.id);
+      }
+
+      // 4c) overall designTokens() jaccard -> proposed, weight = min(0.55, j).
+      // Same shape as rule 3's word jaccard, but the design vocabulary is a
+      // handful of closed enums instead of free text, so incidental overlap is
+      // far more likely — the bar is set higher (0.4 vs rule 3's 0.18) to keep
+      // this meaning "broadly the same look", not "shares a corner radius".
+      const { j } = jaccard(myTokens, new Set(designTokens(oDesign)));
+      if (j >= 0.4) tokenScored.push({ id: o.id, j });
+    }
+
+    // Cap each fuzzy sub-rule at the 5 strongest, mirroring rule 3's cap — cheap
+    // set math over siblings already fetched above, no rescans, and the shared
+    // MAX_PER_CALL guard in add() bounds the total regardless.
+    for (const id of hueMatches.slice(0, 5)) add(item.id, id, "related_to", 0.35, "proposed");
+    tokenScored.sort((a, b) => b.j - a.j);
+    for (const s of tokenScored.slice(0, 5)) {
+      add(item.id, s.id, "related_to", Math.min(0.55, s.j), "proposed");
     }
   }
 

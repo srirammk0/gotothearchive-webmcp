@@ -11,8 +11,8 @@
  * idempotent: it never re-proposes a signal that already covers the same
  * (dimension, direction) with the same evidence.
  */
-import { confidenceFrom, TASTE_DIMENSIONS } from "@shared/contract";
-import type { TasteDimension, TasteSignal } from "@shared/contract";
+import { confidenceFrom, TASTE_DIMENSIONS, DIMENSION_DESIGN_FIELDS, hueBucket } from "@shared/contract";
+import type { TasteDimension, TasteSignal, DesignProfile } from "@shared/contract";
 import type { Queries } from "../db/queries";
 import { refineStatement, type AiLike } from "./statement";
 
@@ -47,6 +47,87 @@ function directionOf(statement: string): "toward" | "away" {
 }
 
 const prettyDimension = (d: string) => d.replace(/_/g, " ");
+
+/**
+ * One comparable value for a DesignProfile field, or null when the field
+ * carries no signal. Mirrors designTokens()'s own conventions (the "none"
+ * enum value means "nothing measured"; palette compares by hueBucket, the
+ * same coarse-colour unit the rest of the design-matching code uses) so
+ * grounding agrees with everything else that reads a DesignProfile.
+ */
+function designFieldValue(design: DesignProfile, path: string): string | null {
+  if (path === "palette") {
+    const hues = [...new Set(design.palette.map((p) => hueBucket(p.hex)))];
+    // oxlint-disable-next-line unicorn/no-array-sort -- hues is a fresh local array
+    hues.sort();
+    return hues.length > 0 ? hues.join(",") : null;
+  }
+  let v: unknown = design;
+  for (const key of path.split(".")) {
+    if (!v || typeof v !== "object") return null;
+    v = (v as Record<string, unknown>)[key];
+  }
+  if (Array.isArray(v)) {
+    const items = [...(v as string[])];
+    // oxlint-disable-next-line unicorn/no-array-sort -- items is a fresh local array
+    items.sort();
+    return items.length > 0 ? items.join(",") : null;
+  }
+  return typeof v === "string" && v !== "none" ? v : null;
+}
+
+/**
+ * Design-attribute grounding: when a dimension maps to DesignProfile fields
+ * (DIMENSION_DESIGN_FIELDS), prefer citing the archive item behind a note as
+ * evidence instead of leaving evidence unattached — but only on a field that
+ * actually differs across the group's items. If every item shares the same
+ * value (or none carry the field), citing one over another would be
+ * decorative rather than evidence, so grounding is skipped and item_id stays
+ * null, exactly as before this feature existed.
+ *
+ * Uses Queries.listInfluences / Queries.getItem, which already exist for
+ * retrieval provenance — nothing outside worker/taste/ needs to change.
+ * Guarded by a typeof check so callers (tests included) that stub only the
+ * taste-specific Queries surface keep working unchanged.
+ */
+function groundDesignEvidence(
+  q: Queries,
+  dimension: string,
+  group: { id: string; version_id: string }[],
+): Map<string, string> {
+  const result = new Map<string, string>();
+  const fields = TASTE_DIMENSIONS.includes(dimension as TasteDimension)
+    ? DIMENSION_DESIGN_FIELDS[dimension as TasteDimension]
+    : [];
+  if (fields.length === 0) return result;
+  if (typeof q.listInfluences !== "function" || typeof q.getItem !== "function") return result;
+
+  // One representative item per annotation: the first influenced item that
+  // actually carries a DesignProfile.
+  const itemByAnnotation = new Map<string, { id: string; design: DesignProfile }>();
+  for (const a of group) {
+    for (const influence of q.listInfluences(a.version_id)) {
+      const item = q.getItem(influence.item_id);
+      const design = item?.metadata.design as DesignProfile | undefined;
+      if (item && design) {
+        itemByAnnotation.set(a.id, { id: item.id, design });
+        break;
+      }
+    }
+  }
+
+  for (const field of fields) {
+    const values = new Map<string, string>();
+    for (const [annotationId, entry] of itemByAnnotation) {
+      const value = designFieldValue(entry.design, field);
+      if (value) values.set(annotationId, value);
+    }
+    if (new Set(values.values()).size < 2) continue; // no real variation on this field
+    for (const annotationId of values.keys()) result.set(annotationId, itemByAnnotation.get(annotationId)!.id);
+    break; // first discriminating field wins
+  }
+  return result;
+}
 
 export async function deriveTasteSignals(
   q: Queries,
@@ -108,10 +189,15 @@ export async function deriveTasteSignals(
   }
 
   for (const [key, group] of groups) {
-    if (group.length < 2) continue;
+    // A single clear annotation is enough to PROPOSE a signal — a proposal is
+    // not a commitment (status stays 'proposed' until a human confirms it),
+    // and confidenceFrom() already scales confidence with evidence count, so
+    // a 1-annotation signal is correctly labelled "tentative" rather than
+    // treated as settled.
 
     const [dimension, sentiment] = key.split(" ") as [string, "positive" | "negative"];
     const direction: "toward" | "away" = sentiment === "positive" ? "toward" : "away";
+    const groundItemFor = groundDesignEvidence(q, dimension, group);
 
     // Top ~3 shared content words across the grouped comments.
     const freq = new Map<string, number>();
@@ -156,13 +242,14 @@ export async function deriveTasteSignals(
           }
           continue;
         }
+        const itemId = groundItemFor.get(a.id) ?? null;
         q.insertTasteEvidence({
           id: crypto.randomUUID(),
           signal_id: signal.id,
           kind,
           annotation_id: a.id,
           version_id: a.version_id,
-          item_id: null,
+          item_id: itemId,
         });
         existing.set(a.id, {
           id: "pending",
@@ -170,7 +257,7 @@ export async function deriveTasteSignals(
           kind,
           annotation_id: a.id,
           version_id: a.version_id,
-          item_id: null,
+          item_id: itemId,
         });
         inserted++;
       }
@@ -256,7 +343,7 @@ export async function deriveTasteSignals(
         kind: "supports",
         annotation_id: a.id,
         version_id: a.version_id,
-        item_id: null,
+        item_id: groundItemFor.get(a.id) ?? null,
       });
     }
 
@@ -267,7 +354,7 @@ export async function deriveTasteSignals(
       actor_type: "system",
       actor_label: "System",
       agent_session_id: null,
-      detail: `Derived from ${supporting} of your notes on ${prettyDimension(dimension)}`,
+      detail: `Derived from ${supporting} note${supporting === 1 ? "" : "s"} on ${prettyDimension(dimension)}`,
       version_id: null,
       at: now,
     });

@@ -1,32 +1,84 @@
-# WebMCP audit — 2026-09-01
+# WebMCP + retrieval audit — 2026-09-02
 
-Run alongside the Supermemory retrieval-augmentation work. Scope: the whole
-browser capability layer (`src/webmcp/*`) plus the worker MCP paths
-(`worker/mcp.ts`, `worker/routes.ts` MCP handlers), against the real
-DO-SQLite + Supermemory-augmented backend.
+Supersedes the 2026-09-01 audit, which concluded "no code defects found in the
+WebMCP layer". That was wrong by the time it was written: the regressions below
+landed hours earlier and its own verification command could not see them.
 
-**Result: no code defects found in the WebMCP layer. No fixes applied.**
+## What was actually broken
 
-## What was checked
+| Area | Finding | State |
+|---|---|---|
+| `compiler.ts` region enums | Commit `d4d788e` ("leaner tool schemas") removed `region: { enum: slugs }` from all 7 tools, to save ~250 tokens. That enum IS the rubric claim "dynamic schemas reflecting permitted regions", and it is how an agent learns which slugs are legal — without it, it guesses, and a wrong guess costs a denial round-trip far larger than the enum. | **Fixed** |
+| `trace_artifact_influences` | Same commit un-gated it from `pageState.activeArtifactId`, leaving an always-failing shell when nothing is open (violates invariant #8). | **Fixed** |
+| `evals/surface.test.ts` | Six red assertions, unnoticed because the definition of done was `build` + `lint` and the commit ran `bun test src worker`, which excludes `evals/`. `compiler.test.ts` had additionally been rewritten to *assert* the regression. | **Fixed**; `bun test` is now a script and part of the definition of done |
+| `get_context_for_task` | Returned `{id, region, title, why}` — no text at all. The agent got titles and had to make a second call per row to read anything. It didn't, so it designed from titles. | **Fixed**: rows carry an excerpt and the design profile; `MAX_TEXT` 240 → 600 |
+| Supermemory | An 800ms blocking network call inside `retrieve()`, ~1,700 LOC of adapter/outbox/drain, a table, an alarm branch, two routes and a UI dot — for one of four candidate lists, with the permission filter applied *after* external hits returned. | **Removed** |
+| Taste loop | `derive.ts` required two annotations sharing a (dimension, sentiment); the dimension classifier ran keyword-only and returned `[]` on no match, so those annotations joined no group and were dropped forever. Net: no signal could ever be derived. | **Fixed**: threshold 1, catch-all dimension |
+| `propose_taste_signal` | Returned `EXCEEDS_HUMAN` ("the invoking person does not have this access themselves") for malformed input, and stored agent proposals as `created_by: "system"`. | **Fixed**: `MISSING_INPUT` / `NO_USABLE_EVIDENCE`, and `created_by: "agent"` |
+| `record_feedback` | Wrote annotations authored `agent:<session>`, which taste derivation excludes at two boundaries. Wrote rows nothing read, and polluted the human's feedback rail. | **Removed** |
 
-| Area | Finding |
-|---|---|
-| `compiler.ts` — `task: null` | `compile()` never reads `input.task` / `input.scope`. When the task is not live, `handleCapabilities` sends `task: null` and `liveGrants` returns `[]`, so `effectiveRegions` collapses every region to `none` and only `identify_agent` compiles. Correct — a dead task leaves the agent no surface. |
-| `compiler.ts` — project scope | The compiler lists every *readable* region in each tool's `enum`, not the project-scoped subset. This is deliberate: the compiler is a hint surface, and the worker (`retrieve()` → `authorizedItemIds`, `get_current_context_scope` → `projectRegionIds`) enforces project scope on every call. An agent naming an in-region-but-out-of-project region gets an `OUT_OF_PROJECT_SCOPE` denial that is written to the ledger — honest, not silent. |
-| `registrar.ts` — `sameMaterialSpec` | A `why`-only change re-registers the browser tool (abort + `registerTool`). `why` is not part of the `registerTool` payload, so this is a small internal churn, not a browser-visible one. `lens.recordCapabilityChange` diffs by **name**, so a tool that stays present produces no spurious timeline event. Acceptable. |
-| `registrar.ts` — executor swap | After a non-material update, `entry.spec` / `entry.execute` are refreshed and the live `execute` closure reads `current.spec` / `current.execute` from the map. A stale closure cannot call an unregistered tool (guarded → "not currently registered" string). Correct. |
-| `transport.ts` — auth | Now sends `authHeader()` (Bearer) + `credentials: "same-origin"`. The committed version relied on the implicit same-origin `__session` cookie (`resolveHuman` accepts it), so this is a robustness upgrade (works cross-origin too), not a closed hole. Abort mapping and `isUnknownTool` (404 / `UNKNOWN_REGION`) → "not currently registered" are sound. Denials still routed to `recordDenial` → Lens. |
-| `useCapabilities.ts` | Auth header on the capabilities fetch; `{ ok, capabilities }` envelope unwrapped correctly; a fetch failure sets `error` rather than compiling an empty state (which would fake "agent lost access"); `taskId: null` clears the surface. |
-| `session.ts` | Session id is server-minted; client cannot name its own session. `authHeader()` present. Declared identity is attribution-only. |
-| `worker/mcp.ts` | Every tool re-resolves session → task → human and gates on `taskIsLive`. Cross-space guards (`item.space_id !== task.space_id`) on every item lookup. `OUT_OF_PROJECT_SCOPE` denials written for `read_full_item`, `trace_artifact_influences`, `record_artifact` claimed influences, and `link_context_items`. |
-| New Supermemory surface | `get_context_for_task` returns only `{ id, region, title, why }` to the agent — `RetrievalSignals` (incl. the new `ranks.semantic`) is never sent over the wire. `why` gains "a semantic match" / "a top semantic match" when list D contributed. Every returned item still gets one `accesses` row (batched `insertAccesses` in `retrieve()`), including Supermemory-only hits that survive the permission filter — audit trail stays complete. |
+## Tool surface: 12 → 9
 
-## Out of scope (noted, not fixed)
+Cut: `inspect_relationships` (folded into `inspect_context_item` as `related[]` —
+an agent that has just looked something up does not know to then ask what it
+connects to, so it is handed over unprompted), `record_feedback` (above),
+`propose_context_change` (never called, not in the demo path).
 
-The annotation **taste-dimension** path: the manual `DimensionTags` UI was removed
-from `ArtifactViewer` / `AnnotationRail`, and the server-side replacement
-`worker/taste/classifier.ts` is not wired into `handleAnnotations` or
-`deriveTasteSignals`. Net effect: human annotations are created with
-`dimensions: []`, and `deriveTasteSignals` groups by dimension, so no taste
-signals are derived from human feedback. This is a pre-existing regression in the
-projects changeset, unrelated to WebMCP, and was not in this plan's scope.
+Unchanged: `approve_proposed_changes` / `reject_proposed_changes` are still never
+compiled and still refused by name (invariant #11).
+
+## Design extraction
+
+An archive of design references was storing a title and one prose caption
+sentence per image, which is why agent output did not resemble the archive.
+Images now carry a structured `DesignProfile` in `metadata.design`.
+
+Split by provenance, and the split is load-bearing:
+
+- **Colour is measured**, never estimated. `src/ui/archive/palette.ts` quantizes
+  the real pixels in the browser (the Worker has no image decoder). Verified
+  against the actual archive: it returns `#F5EBDE` / `#E4753F` / `#2149AC` for
+  the cream-ultramarine-orange poster, exactly right.
+  Asked for the same image's colours, the vision model answered `#2ECC40` green.
+  Model colour estimates are therefore refused outright rather than stored —
+  they would poison hue-bucket graph edges and the palette an agent builds from.
+- **Everything else is judged** by `@cf/meta/llama-3.2-11b-vision-instruct`
+  against closed vocabularies, and `coerceDesign()` validates every field so an
+  invented word can never reach storage.
+
+### Measured reliability of the model half
+
+Run against the real archive, not assumed:
+
+- Good: `typography.note` ("high-contrast condensed caps"), `case`, `texture`.
+- Adjacent-but-wrong: `classification` (said `transitional_serif` for a Didone,
+  `slab_serif` on another run of the same image).
+- Unreliable: `layout.composition` and `imagery.treatment` — it answers
+  `type_only` / `none` on images that plainly contain photographs.
+
+Roughly one call in three returns brace-less `"key": value` lines instead of
+JSON. The content is as good as a well-formed reply, so those are parsed rather
+than discarded (`parseKeyValueLines`).
+
+Two vision calls per image became one: `worker/vision.ts` (prose captioning) was
+deleted, and `designSummary()` folds the profile back into `semantic_text` so FTS
+still reaches an item by words like "halftone" or "condensed serif".
+
+## Known gaps, deliberately not closed
+
+- **Local embeddings.** `RetrievalSignals.ranks.semantic` is present and always
+  `null`. FTS + graph + the design summary carry retrieval today. The scaffolding
+  is in place for a `bge-small` column and in-JS cosine over the
+  already-permission-filtered candidate set — no Vectorize needed at this scale.
+- **PDF design extraction.** Two 36-page PDFs in the archive stay text-only;
+  rasterizing pages in a Worker is not a small change.
+- **Composition and imagery accuracy.** See above. The values are stored and
+  labelled as a model reading; the panel in the UI shows the person what the
+  agent was told, so a wrong value is visible rather than mysterious.
+- **`pageState.hasPendingProposals`** is still hardcoded `false` in
+  `handleCapabilities`, so that compiler branch is dead.
+- **Sharing.** `humanRegions()` grants the owner `write` and everyone else
+  `none`. There is no multi-person Archive; do not pitch one.
+- **Workers AI cost.** The vision model is the only real Workers AI expense and
+  is not represented in `QUOTA`. Bounded per alarm (`BACKFILL_BATCH = 4`) but not
+  per month. Measure against the free neuron allowance before opening the beta.

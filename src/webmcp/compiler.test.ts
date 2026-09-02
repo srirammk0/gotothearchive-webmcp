@@ -10,13 +10,16 @@ function findTool(specs: ReturnType<typeof compile>, name: string) {
   return specs.find((s) => s.name === name);
 }
 
-test("region is a plain string field, not a per-tool enum of every accessible slug", () => {
-  // The enum used to repeat the full accessible-region list in every one of
-  // ~7 tools' inputSchema — real, duplicated tokens sent to the calling
-  // model on every capability refresh, scaling with region count × tool
-  // count. Region names are still validated server-side either way (see
-  // authorize() in worker/permissions.ts); the schema now just points at
-  // get_current_context_scope instead of re-enumerating.
+/** The accessible-region enum a tool's `region` field currently advertises. */
+function enumOf(tool: ReturnType<typeof findTool>): string[] {
+  return (tool!.inputSchema.properties.region as { enum?: string[] }).enum!.toSorted();
+}
+
+test("each region field is an enum of exactly the accessible slugs", () => {
+  // This is the central WebMCP claim, not a nicety: the SCHEMA narrows when a
+  // grant does. The server re-checks every call anyway (authorize() in
+  // worker/permissions.ts), but without the enum the agent has to guess a slug,
+  // and a wrong guess costs a denial round-trip far larger than the enum.
   const input: CapabilityInput = {
     humanRegions: [
       { slug: "work", level: "write" },
@@ -32,10 +35,10 @@ test("region is a plain string field, not a per-tool enum of every accessible sl
   const tool = findTool(compile(input), "get_context_for_task");
   const region = tool!.inputSchema.properties.region as { type: string; enum?: string[] };
   assert.equal(region.type, "string");
-  assert.equal(region.enum, undefined);
+  assert.deepEqual(region.enum!.toSorted(), ["inspiration", "work"]);
 });
 
-test("revoking a region is still reflected — in the tool's registration reason, not its schema", () => {
+test("revoking a region drops it from the schema enum and the registration reason", () => {
   const before: CapabilityInput = {
     humanRegions: [
       { slug: "work", level: "write" },
@@ -52,9 +55,9 @@ test("revoking a region is still reflected — in the tool's registration reason
 
   const beforeTool = findTool(compile(before), "get_context_for_task");
   const afterTool = findTool(compile(after), "get_context_for_task");
-  assert.ok(beforeTool!.why.includes("work"));
+  assert.deepEqual(enumOf(beforeTool), ["inspiration", "work"]);
+  assert.deepEqual(enumOf(afterTool), ["work"]);
   assert.ok(beforeTool!.why.includes("inspiration"));
-  assert.ok(afterTool!.why.includes("work"));
   assert.ok(!afterTool!.why.includes("inspiration"));
 });
 
@@ -136,16 +139,16 @@ test("approval is never an agent capability, even at write with proposals pendin
   );
 });
 
-test("trace_artifact_influences is available at read tier regardless of page state, but notes an active artifact when there is one", () => {
+test("trace_artifact_influences exists only while an artifact is open", () => {
+  // Invariant #8: unregister rather than present an always-failing shell. With
+  // nothing open there is no artifact for it to trace.
   const base: CapabilityInput = {
     humanRegions: [{ slug: "work", level: "read" }],
     grants: [{ slug: "work", level: "read" }],
     task,
     pageState: noPageState,
   };
-  const withoutArtifact = findTool(compile(base), "trace_artifact_influences");
-  assert.ok(withoutArtifact, "must be callable by artifact_id/version_id even with nothing open");
-  assert.ok(!withoutArtifact!.why.includes("An artifact is open"));
+  assert.equal(findTool(compile(base), "trace_artifact_influences"), undefined);
 
   const withArtifact: CapabilityInput = {
     ...base,
@@ -153,7 +156,7 @@ test("trace_artifact_influences is available at read tier regardless of page sta
   };
   const found = findTool(compile(withArtifact), "trace_artifact_influences");
   assert.ok(found);
-  assert.ok(found!.why.includes("art1"));
+  assert.ok(found.why.includes("art1"));
 });
 
 test("Chrome WebMCP annotations: readOnlyHint / untrustedContentHint per tool", () => {
@@ -169,7 +172,6 @@ test("Chrome WebMCP annotations: readOnlyHint / untrustedContentHint per tool", 
     "get_current_context_scope",
     "get_context_for_task",
     "inspect_context_item",
-    "inspect_relationships",
     "get_taste_for_task",
     "trace_artifact_influences",
   ];
@@ -180,7 +182,6 @@ test("Chrome WebMCP annotations: readOnlyHint / untrustedContentHint per tool", 
   const untrusted = [
     "get_context_for_task",
     "inspect_context_item",
-    "inspect_relationships",
     "trace_artifact_influences",
     "get_taste_for_task",
   ];
@@ -188,7 +189,7 @@ test("Chrome WebMCP annotations: readOnlyHint / untrustedContentHint per tool", 
     assert.equal(findTool(specs, name)!.annotations?.untrustedContentHint, true, `${name} untrustedContentHint`);
   }
 
-  for (const name of ["record_feedback", "record_artifact", "propose_context_change"]) {
+  for (const name of ["record_artifact", "propose_taste_signal"]) {
     assert.notEqual(findTool(specs, name)!.annotations?.readOnlyHint, true, `${name} must not be readOnly`);
   }
 
@@ -215,8 +216,22 @@ test("registered schemas expose every input their runtime handler needs", () => 
   assert.ok(props("get_context_for_task").limit);
   assert.ok(props("trace_artifact_influences").version_id);
   assert.ok(props("trace_artifact_influences").artifact_id);
-  assert.ok(props("record_feedback").version_id);
-  assert.ok(props("record_feedback").comment);
-  assert.ok(props("propose_context_change").from_item_id);
-  assert.ok(props("propose_context_change").to_item_id);
+  assert.ok(props("propose_taste_signal").statement);
+  assert.ok(props("propose_taste_signal").annotation_ids);
+  assert.ok(props("record_artifact").content_html);
+  assert.ok(props("record_artifact").used_item_ids);
+});
+
+test("the three cut tools are never compiled, at any level", () => {
+  for (const level of ["read", "propose", "write"] as const) {
+    const specs = compile({
+      humanRegions: [{ slug: "work", level: "write" }],
+      grants: [{ slug: "work", level }],
+      task,
+      pageState: { hasPendingProposals: false, activeArtifactId: "art1" },
+    });
+    for (const gone of ["inspect_relationships", "record_feedback", "propose_context_change"]) {
+      assert.equal(findTool(specs, gone), undefined, gone + " must not be compiled at " + level);
+    }
+  }
 });

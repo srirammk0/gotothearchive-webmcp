@@ -37,6 +37,62 @@ export function rebuildFts(sql: SqlStorage): void {
   }
 }
 
+/**
+ * Widen `taste_signals.created_by` to accept 'agent'.
+ *
+ * An agent naming a preference it noticed is a different act from the
+ * derivation loop finding one in the person's own annotations, and the Taste UI
+ * labels them differently — so it needs its own value rather than being filed
+ * as 'system'. SQLite has no ALTER for a CHECK constraint; the only way is to
+ * rebuild. Idempotent: the probe below short-circuits once the constraint is
+ * already wide enough, so this costs nothing on subsequent boots.
+ */
+function widenTasteSignalCreatedBy(sql: SqlStorage): void {
+  try {
+    sql.exec(`SAVEPOINT probe_created_by`);
+    try {
+      sql.exec(
+        `INSERT INTO taste_signals (id, space_id, owner_id, statement, created_by, created_at)
+         VALUES ('__probe__', NULL, '', '', 'agent', 0)`,
+      );
+    } finally {
+      sql.exec(`ROLLBACK TO probe_created_by`);
+      sql.exec(`RELEASE probe_created_by`);
+    }
+    return; // constraint already permits 'agent'
+  } catch (e) {
+    const message = String((e as Error).message);
+    // Anything other than the CHECK we are trying to widen is not ours to fix.
+    if (!message.includes("CHECK constraint failed")) return;
+  }
+
+  sql.exec(`ALTER TABLE taste_signals RENAME TO taste_signals_old`);
+  sql.exec(`CREATE TABLE taste_signals (
+    id          TEXT PRIMARY KEY,
+    space_id    TEXT NOT NULL REFERENCES spaces(id),
+    project_id  TEXT REFERENCES projects(id),
+    owner_id    TEXT NOT NULL,
+    statement   TEXT NOT NULL,
+    dimensions  TEXT NOT NULL DEFAULT '[]',
+    scope       TEXT NOT NULL DEFAULT 'personal',
+    status      TEXT NOT NULL DEFAULT 'proposed'
+                CHECK (status IN ('proposed','confirmed','rejected','superseded')),
+    confidence  REAL NOT NULL DEFAULT 0.5,
+    created_by  TEXT NOT NULL CHECK (created_by IN ('system','human','agent')),
+    approved_by TEXT,
+    created_at  INTEGER NOT NULL,
+    supersedes  TEXT REFERENCES taste_signals(id)
+  )`);
+  sql.exec(`INSERT INTO taste_signals
+      (id, space_id, project_id, owner_id, statement, dimensions, scope, status,
+       confidence, created_by, approved_by, created_at, supersedes)
+    SELECT id, space_id, project_id, owner_id, statement, dimensions, scope, status,
+       confidence, created_by, approved_by, created_at, supersedes
+    FROM taste_signals_old`);
+  sql.exec(`DROP TABLE taste_signals_old`);
+  sql.exec(`CREATE INDEX IF NOT EXISTS idx_taste_signals_project ON taste_signals(project_id)`);
+}
+
 export function migrate(sql: SqlStorage): void {
   // Required columns are fail-closed. Serving requests against a partially
   // migrated schema produces harder-to-diagnose data failures than a visible
@@ -48,6 +104,17 @@ export function migrate(sql: SqlStorage): void {
   addColumn(sql, "annotations", "dimensions", "TEXT");
   addColumn(sql, "tasks", "project_id", "TEXT");
   addColumn(sql, "artifacts", "region_id", "TEXT");
+
+  // Supermemory is gone. Removing the table from schema.sql does nothing to a
+  // Durable Object that already exists — schema.sql is all CREATE TABLE IF NOT
+  // EXISTS — so a deployed space would keep the table and every queued row
+  // forever. Drop it explicitly.
+  sql.exec(`DROP TABLE IF EXISTS memory_outbox`);
+
+  // SQLite cannot ALTER a CHECK constraint, so widening created_by to accept
+  // 'agent' means rebuilding the table. Guarded by a probe insert: on an
+  // already-widened DO this is a no-op and costs one rolled-back statement.
+  widenTasteSignalCreatedBy(sql);
 
   // These indexes live here, not in schema.sql: they cover a column added above,
   // and schema.sql runs before this on every boot. IF NOT EXISTS keeps them

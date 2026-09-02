@@ -12,11 +12,11 @@ import { controlClass } from "../ui/primitives/Field";
 import { AgentAccess } from "../ui/AgentAccess";
 import { Capture } from "../ui/archive/Capture";
 import { CapturePreview } from "../ui/archive/CapturePreview";
-import { MemorySync } from "../ui/archive/MemorySync";
 import { ItemLightbox } from "../ui/archive/ItemLightbox";
 import { RegionSection, type ArchiveRegionView } from "../ui/archive/RegionSection";
 import { isPinned, useArchive } from "../ui/archive/useArchive";
 import { useArchiveSelection } from "../ui/archive/useArchiveSelection";
+import { usePaletteBackfill } from "../ui/archive/usePaletteBackfill";
 import { useTrail } from "../ui/Breadcrumbs";
 import { useSpace } from "../ui/hooks/useSpace";
 import { duration, ease } from "../ui/tokens";
@@ -151,6 +151,10 @@ export function Archive() {
   }, [visibleRegions, archive.items, typeFilter, query]);
 
   const flatItems = useMemo(() => regionViews.flatMap((r) => r.items), [regionViews]);
+
+  // Quietly measure exact palettes for images archived before capture-time
+  // measurement existed. Background repair; never blocks or interrupts.
+  usePaletteBackfill(archive.items ?? []);
   const lightboxId = overlay.kind === "lightbox" ? overlay.itemId : null;
   const lightboxIndex = lightboxId ? flatItems.findIndex((i) => i.id === lightboxId) : -1;
   const lightboxItem = lightboxIndex >= 0 ? flatItems[lightboxIndex] : null;
@@ -255,9 +259,6 @@ export function Archive() {
                 {visible} of {total}
               </span>
             ) : null}
-            <div className="ml-auto">
-              <MemorySync />
-            </div>
           </div>
 
           {archive.banner ? (

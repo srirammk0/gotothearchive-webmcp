@@ -5,6 +5,7 @@ import { isAgentAuthority, type ContextItem, type Region } from "@shared/contrac
 import { Menu } from "../primitives/Menu";
 import { Icon } from "../primitives/Icon";
 import { ConnectionsPanel } from "./ConnectionsPanel";
+import { DesignPanel } from "./DesignPanel";
 import { detailPreview } from "./ItemPreview";
 import { extractedImage, kind } from "./itemKind";
 import { duration, ease } from "../tokens";
@@ -316,6 +317,7 @@ export function ItemLightbox({
             </div>
 
             <span className="h-px w-full bg-line-soft" />
+            <DesignPanel item={item} />
             <ConnectionsPanel item={item} allItems={allItems} />
           </aside>
         </motion.div>

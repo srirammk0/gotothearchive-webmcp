@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import type { ContextItem } from "@shared/contract";
+import type { ContextItem, DesignProfile } from "@shared/contract";
 import { deriveEdgesForItem, rebuildSpaceEdges } from "./graph-build";
 
 function item(p: Partial<ContextItem> & { id: string }): ContextItem {
@@ -21,6 +21,22 @@ function item(p: Partial<ContextItem> & { id: string }): ContextItem {
   } as ContextItem;
 }
 
+function design(overrides: Partial<DesignProfile> = {}): DesignProfile {
+  return {
+    palette: [{ hex: "#F5E9D8", pct: 60, role: "ground" }],
+    palette_source: "measured",
+    typography: { classification: "didone_serif", case: "uppercase", scale: "hero", note: "" },
+    layout: { composition: "poster_split", density: "balanced", alignment: "center" },
+    texture: ["halftone"],
+    shape: { corner_radius: "sharp", stroke: "none" },
+    imagery: { treatment: "none" },
+    mood: ["editorial"],
+    extracted_by: "test",
+    extracted_at: 1000,
+    ...overrides,
+  };
+}
+
 interface Inserted {
   from_id: string;
   to_id: string;
@@ -35,7 +51,7 @@ function stubQ(items: ContextItem[]) {
   return {
     edges,
     // deno-lint-ignore no-explicit-any
-    listItemsBySpace: () => items,
+    listItemsBySpace: (spaceId: string) => items.filter((i) => i.space_id === spaceId),
     edgeExists: (a: string, b: string, rel: string) =>
       edges.some(
         (e) =>
@@ -128,6 +144,84 @@ test("idempotent: re-running derive / rebuild inserts nothing new", () => {
   expect(second).toBe(0);
   expect(q.edges.length).toBe(before);
   expect(first).toBeGreaterThan(0);
+});
+
+test("rule 4a/4b: shared ground hue + type classification+scale -> approved related_to", () => {
+  const a = item({ id: "a", type: "image", metadata: { design: design() } });
+  const b = item({
+    id: "b",
+    type: "image",
+    metadata: {
+      design: design({
+        palette: [{ hex: "#F2E4CE", pct: 55, role: "ground" }], // same cream/yellow hue bucket
+        layout: { composition: "centered", density: "sparse", alignment: "left" }, // different, so 4c doesn't dominate the assertion
+        texture: [],
+        mood: [],
+      }),
+    },
+  });
+  const q = stubQ([a, b]);
+  const n = deriveEdgesForItem(q, a, 5000);
+  expect(n).toBe(1);
+  expect(q.edges[0]).toMatchObject({
+    from_id: "a",
+    to_id: "b",
+    relationship: "related_to",
+    weight: 0.7,
+    approval_state: "approved",
+    created_by: "system",
+  });
+});
+
+test("rule 4c: unrelated design profiles do not get linked", () => {
+  const a = item({ id: "a", type: "image", metadata: { design: design() } });
+  const b = item({
+    id: "b",
+    type: "image",
+    metadata: {
+      design: design({
+        palette: [{ hex: "#123456", pct: 70, role: "ground" }], // blue, not the cream bucket
+        typography: { classification: "monospace", case: "lowercase", scale: "small", note: "" },
+        layout: { composition: "grid_contact_sheet", density: "dense", alignment: "justified" },
+        texture: ["photocopy"],
+        shape: { corner_radius: "pill", stroke: "heavy" },
+        imagery: { treatment: "line_drawing" },
+        mood: ["technical"],
+      }),
+    },
+  });
+  const q = stubQ([a, b]);
+  const n = deriveEdgesForItem(q, a, 5000);
+  expect(n).toBe(0);
+});
+
+test("no design profile -> no design edges, does not throw", () => {
+  const a = item({ id: "a", type: "image" }); // metadata: {} — no .design
+  const b = item({ id: "b", type: "image", metadata: { design: design() } });
+  const q = stubQ([a, b]);
+  expect(() => deriveEdgesForItem(q, a, 5000)).not.toThrow();
+  expect(deriveEdgesForItem(q, a, 5000)).toBe(0);
+});
+
+test("rule 4: idempotent, re-running creates no duplicate design edge", () => {
+  const a = item({ id: "a", type: "image", metadata: { design: design() } });
+  const b = item({ id: "b", type: "image", metadata: { design: design() } });
+  const q = stubQ([a, b]);
+  const first = deriveEdgesForItem(q, a, 5000);
+  const before = q.edges.length;
+  const second = deriveEdgesForItem(q, a, 6000);
+  expect(first).toBeGreaterThan(0);
+  expect(second).toBe(0);
+  expect(q.edges.length).toBe(before);
+});
+
+test("rule 4: items in different spaces are never linked", () => {
+  const a = item({ id: "a", type: "image", space_id: "s1", metadata: { design: design() } });
+  const b = item({ id: "b", type: "image", space_id: "s2", metadata: { design: design() } });
+  const q = stubQ([a, b]);
+  const n = deriveEdgesForItem(q, a, 5000);
+  expect(n).toBe(0);
+  expect(q.edges).toHaveLength(0);
 });
 
 test("guards: never self-edge, cap 12 per call, weights in [0,1]", () => {

@@ -22,24 +22,13 @@
  * Requires SQLite-backed Durable Objects (wrangler `new_sqlite_classes`) — the
  * only DO kind the free plan allows. This project already uses that.
  *
- * ── Recalc, 2026-09-01 (projects + Supermemory augmentation) ─────────────────
+ * ── Recalc, 2026-09-01 (projects) ─────────────────
  *  - Cloudflare row-write budget: still fine. New per-mutation writes are small
- *    and human-paced — a `projects`/`project_members` row on demand, one
- *    `memory_outbox` row + one status update per item write (bounded by the
- *    `uploads` cap). The one real regression was `migrate()` rebuilding items_fts
+ *    and human-paced — a `projects`/`project_members` row on demand, bounded by
+ *    the `uploads` cap. The one real regression was `migrate()` rebuilding items_fts
  *    on EVERY boot (~1 write/item/boot); that is now version-gated in SpaceDO
  *    (FTS_REBUILD_VERSION), so a cold boot writes nothing unless the marker is
  *    stale. No QUOTA change needed.
- *  - Supermemory is OFF the Cloudflare bill entirely (external SaaS). Its own
- *    free tier is the new ceiling to watch, NOT a hard failure:
- *      • ~10k searches/mo — only `get_context_for_task` calls search; at ~half of
- *        25×600 agent_calls that is ~7.5k/mo. On a 429 the adapter returns null
- *        and retrieval silently drops to FTS+recency+graph.
- *      • ~1M tokens/mo ingested — item text is short (title + derived body), but
- *        edits re-send. If this ceiling bites, ingestion just stalls in the
- *        outbox; retrieval still works, items are FTS-searchable immediately.
- *    Unsetting SUPERMEMORY_API_KEY reverts to pure-SQLite retrieval with no code
- *    change (mirrorMemory + the retrieve() list-D path both no-op).
  */
 export const BETA_MAX_USERS = 25;
 

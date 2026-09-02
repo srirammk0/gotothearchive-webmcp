@@ -15,7 +15,6 @@ import type {
   TasteSignal,
 } from "@shared/contract";
 import type { Queries } from "./db/queries";
-import type { MemoryIndex } from "./memory-index";
 import { authorizedItemIds, authorizedRegionIds, taskProject } from "./permissions";
 import { traverse } from "./graph";
 
@@ -29,63 +28,16 @@ export interface RetrieveInput {
 /** Contribution below this counts as taste staying silent, not lifting an item. */
 const TASTE_APPLIED_MIN = 0.1;
 
-/** Cap the semantic side-call so it never dominates the (otherwise sync) path. */
-const SEMANTIC_TIMEOUT_MS = 800;
-
-function stringMeta(value: unknown): string | null {
-  return typeof value === "string" && value.length > 0 ? value : null;
-}
-
-/**
- * Supermemory hits, resolved back to local items in the provider's rank order.
- * Anything without a resolvable `metadata.item_id` is dropped — the caller's
- * permission filter (`remember`) still runs on whatever survives, so a stale or
- * forbidden hit can never reach the result.
- */
-function semanticCandidates(
-  q: Queries,
-  result: Awaited<ReturnType<MemoryIndex["search"]>>,
-): ContextItem[] {
-  if (!result) return [];
-  const orderedIds: string[] = [];
-  for (const hit of result.hits) {
-    const id = stringMeta(hit.document?.metadata?.item_id);
-    if (id && !orderedIds.includes(id)) orderedIds.push(id);
-  }
-  const byId = new Map(q.getItems(orderedIds).map((it) => [it.id, it]));
-  return orderedIds.map((id) => byId.get(id)).filter((it): it is ContextItem => it !== undefined);
-}
-
 export async function retrieve(
   q: Queries,
   input: RetrieveInput,
   now: number,
-  memory?: MemoryIndex | null,
 ): Promise<RetrievedItem[]> {
   const task = q.getTask(input.taskId);
   if (!task) return [];
 
   const project = (task.project_id ?? null) === null ? null : taskProject(q, task);
   if ((task.project_id ?? null) !== null && project === null) return [];
-
-  // Fire the external semantic search now so it runs during the (synchronous)
-  // SQLite candidate generation below. It is a best-effort *augmentation*: any
-  // failure, timeout, or empty result just drops candidate list D. Its hits are
-  // re-checked against the permission filter like every other list.
-  const query = input.query.trim();
-  const memoryPromise =
-    memory && query.length > 0
-      ? memory
-          .search(
-            {
-              query,
-              containerTag: task.space_id,
-              limit: Math.min(20, Math.max(2, input.limit * 3)),
-            },
-            { timeoutMs: SEMANTIC_TIMEOUT_MS },
-          )
-          .catch(() => null)
-      : null;
 
   // 1. Resolve the authorized region set FIRST. Hard pre-filter.
   const allowedIds = authorizedRegionIds(q, input.taskId, now);
@@ -137,13 +89,6 @@ export async function retrieve(
   const graphList = orderGraphNodes(graph);
   remember(graphList);
 
-  // D — external semantic match, in the provider's rank order. `remember` applies
-  // the same region + project-scope filter it applies to every other list, so a
-  // hit for an item the caller can no longer see is dropped here.
-  const memoryResult = memoryPromise ? await memoryPromise : null;
-  const semanticList = semanticCandidates(q, memoryResult);
-  remember(semanticList);
-
   // B — recency ranks only the candidates already justified by text/graph (or
   // the explicit fallback set). It is a prior, never an independent source of
   // unrelated results for a successful query.
@@ -154,7 +99,6 @@ export async function retrieve(
   const ftsRank = rankMap(ftsList);
   const recencyRank = rankMap(recencyList);
   const graphRank = rankMap(graphList);
-  const semanticRank = rankMap(semanticList);
 
   // 3. Fuse with reciprocal rank fusion, then apply priors as multipliers.
   const confirmed = q.confirmedTasteSignals(task.space_id).filter((signal) => {
@@ -174,7 +118,8 @@ export async function retrieve(
     const rFts = ftsRank.get(item.id) ?? null;
     const rRecency = recencyRank.get(item.id) ?? null;
     const rGraph = graphRank.get(item.id) ?? null;
-    const rSemantic = semanticRank.get(item.id) ?? null;
+    // Re-populated from local embeddings; always null until that lands.
+    const rSemantic: number | null = null;
 
     const fused =
       (rFts === null ? 0 : 1 / (RRF_K + rFts)) +

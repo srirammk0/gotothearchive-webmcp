@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
 import type { ContextItem, ItemType, Region } from "@shared/contract";
 import { createItem, errorMessage, uploadBlob } from "../../api/client";
+import { measurePalette } from "./palette";
 import { Button } from "../primitives/Button";
 import { Spinner } from "../primitives/Spinner";
 import { Icon } from "../primitives/Icon";
@@ -65,12 +66,20 @@ export function Capture({ region, onCaptured }: CaptureProps) {
     for (const file of usable) {
       setStatus({ kind: "busy", label: `Uploading ${file.name || "image"}…` });
       try {
+        // Measure the palette HERE, while the browser still has the decoded
+        // pixels. The Worker has no image decoder, so this is the only place
+        // the exact colours can be read rather than guessed by a model. Never
+        // blocks a capture: on failure it is simply an empty list, and the item
+        // gets an estimated palette or none.
+        const kind = typeForFile(file);
+        const palette = kind === "image" ? await measurePalette(file) : [];
         const key = await uploadBlob(file);
         const { item } = await createItem({
           region_slug: region.slug,
-          type: typeForFile(file),
+          type: kind,
           title: file.name || "Pasted image",
           content_ref: key,
+          palette,
         });
         onCaptured(item);
       } catch (err) {

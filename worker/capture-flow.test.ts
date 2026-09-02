@@ -1,9 +1,8 @@
 /**
  * The capture → extract flow, end to end against a real schema:
  *  - a captured X/Twitter link becomes ONE item (no child cards for media/links)
- *  - the post text lands in semantic_text (so it reaches FTS / retrieval / memory)
+ *  - the post text lands in semantic_text (so it reaches FTS / retrieval)
  *  - the media + referenced links are kept on metadata.extracted
- *  - the item is queued to the external memory index with that text
  *
  * Mirrors the handleItems POST enrichment in worker/routes.ts. `extractUrl` is
  * stubbed with a canned cdn.syndication.twimg.com payload (the real network call
@@ -26,7 +25,7 @@ function makeQueries(): { q: Queries; db: Database } {
       return { toArray: () => rows };
     },
   } as unknown as ConstructorParameters<typeof Queries>[0];
-  const q = new Queries(sql, { mirrorMemory: true });
+  const q = new Queries(sql);
   migrate(sql);
   return { q, db };
 }
@@ -42,8 +41,8 @@ const TWEET = {
   entities: { urls: [{ expanded_url: "https://example.com/case-study" }] },
 };
 
-test("a captured tweet becomes one item; media + links go to metadata, text to semantic_text + memory", () => {
-  const { q, db } = makeQueries();
+test("a captured tweet becomes one item; media + links go to metadata, text to semantic_text", () => {
+  const { q } = makeQueries();
   q.insertSpace({ id: "s", name: "A", owner_id: "u", kind: "personal", created_at: 1 });
   q.insertRegion({ id: "r", space_id: "s", parent_id: null, name: "Work", slug: "work", created_at: 1 });
 
@@ -85,14 +84,6 @@ test("a captured tweet becomes one item; media + links go to metadata, text to s
   ]);
   expect(extracted.links).toEqual(["https://example.com/case-study"]);
   expect(extracted.author).toBe("Palakonweb");
-
-  // queued to the external memory index with the post text as content
-  const jobs = db.query("SELECT op, payload, status FROM memory_outbox WHERE item_id = ? ORDER BY updated_at").all(id) as {
-    op: string; payload: string; status: string;
-  }[];
-  expect(jobs.length).toBeGreaterThanOrEqual(1);
-  const last = JSON.parse(jobs[jobs.length - 1].payload) as { title: string; semantic_text: string };
-  expect(last.semantic_text).toBe("The design vs The image");
 });
 
 test("deleteExtractionChildren removes leftover child cards, keeps everything else", () => {

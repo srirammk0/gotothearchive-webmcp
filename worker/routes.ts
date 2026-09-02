@@ -3,6 +3,9 @@
  * SpaceDO instance; each signed-in human gets their own Space inside it.
  */
 import {
+  PALETTE_ROLES,
+  type PaletteEntry,
+  type PaletteRole,
   API,
   ITEM_TYPES,
   RELATIONSHIPS,
@@ -40,10 +43,9 @@ import { handleToolCall } from "./mcp";
 import { deriveTasteSignals, statementOverlap } from "./taste/derive";
 import { classifyAnnotationDimensions } from "./taste/classifier";
 import { extractUrl, isPublicHttpUrl } from "./extract";
-import { captionImage } from "./vision";
+import { extractDesignProfile, designSummary } from "./design";
 import { verifyBlobSignature } from "./blob-sign";
 import { deriveEdgesForItem } from "./graph-build";
-import { drainSpaceMemory, memoryIndexFor } from "./memory-drain";
 
 /**
  * Each signed-in human gets their own Space, keyed to their Clerk id.
@@ -153,8 +155,6 @@ export async function handleRoute(
       return await handleEdges(request, q, human.human_id);
     case API.itemNotes:
       return await handleItemNotes(request, q, human.human_id);
-    case API.memoryStatus:
-      return await handleMemoryStatus(request, q, human.human_id, env);
     default:
       return new Response(null, { status: 404 });
   }
@@ -202,6 +202,32 @@ const slugify = (name: string): string =>
     .slice(0, 48);
 
 /** A folder slug unique within the space; falls back to a suffix on collision. */
+const PALETTE_HEX = /^#[0-9A-F]{6}$/;
+
+/**
+ * Validate the palette the browser measured. It arrives over the wire from a
+ * client, so it is a claim like anything else in a request body: every entry is
+ * re-checked and anything malformed is dropped rather than stored. An empty
+ * result is a normal state — the profile is then marked `palette_source:
+ * "estimated"` or `"none"` instead of silently presenting a bad palette as
+ * measured.
+ */
+function cleanPalette(input: unknown): PaletteEntry[] {
+  if (!Array.isArray(input)) return [];
+  const out: PaletteEntry[] = [];
+  for (const raw of input.slice(0, 8)) {
+    if (typeof raw !== "object" || raw === null) continue;
+    const e = raw as { hex?: unknown; pct?: unknown; role?: unknown };
+    const hex = typeof e.hex === "string" ? e.hex.trim().toUpperCase() : "";
+    if (!PALETTE_HEX.test(hex) || out.some((p) => p.hex === hex)) continue;
+    const role = typeof e.role === "string" ? e.role : "";
+    if (!(PALETTE_ROLES as readonly string[]).includes(role)) continue;
+    const pct = typeof e.pct === "number" && Number.isFinite(e.pct) ? e.pct : 0;
+    out.push({ hex, pct: Math.max(0, Math.min(100, Math.round(pct))), role: role as PaletteRole });
+  }
+  return out;
+}
+
 function uniqueRegionSlug(q: Queries, spaceId: string, name: string): string {
   const base = slugify(name) || "folder";
   let slug = base;
@@ -398,6 +424,8 @@ async function handleItems(request: Request, env: Env, q: Queries, humanId: stri
       source_url?: string | null;
       content_ref?: string | null;
       semantic_text?: string | null;
+      /** Exact palette quantized from the real pixels in the browser. */
+      palette?: unknown;
     };
     const region = q.getRegionBySlug(spaceIdFor(humanId), body.region_slug);
     if (!region) return badRequest("unknown region");
@@ -459,19 +487,41 @@ async function handleItems(request: Request, env: Env, q: Queries, humanId: stri
       }
     }
 
-    // An image/screenshot with no human-written description: caption it so an
-    // agent — which never receives image bytes through WebMCP, only this text —
-    // gets something instead of nothing. A human description always wins; this
-    // only fills a gap. Best-effort and inline, same trade-off as the link
-    // enrichment above.
-    if ((body.type === "image" || body.type === "screenshot") && body.content_ref && !body.semantic_text) {
+    // Extract this image's design profile: the exact palette (measured in the
+    // browser and posted with the capture) plus typography, layout, texture and
+    // mood judged by the vision model.
+    //
+    // This replaces what used to be a separate prose-caption call. One vision
+    // call per image, not two — and structured values an agent can build with
+    // and two items can be COMPARED on, which is what makes the design graph
+    // and taste matching possible at all. `designSummary()` folds the profile
+    // back into `semantic_text` so FTS can still reach it by words like
+    // "halftone" or "condensed serif".
+    //
+    // Best-effort and inline, same trade-off as the link enrichment above: a
+    // failure leaves the item exactly as it was, title-only.
+    if ((body.type === "image" || body.type === "screenshot") && body.content_ref) {
+      const measured = cleanPalette(body.palette);
       const blob = await env.BLOBS.get(body.content_ref).catch(() => null);
-      if (blob) {
-        const caption = await captionImage(env, new Uint8Array(await blob.arrayBuffer())).catch(() => null);
-        const parent = q.getItem(id);
-        if (caption && parent) {
-          q.updateItem({ ...parent, semantic_text: caption, updated_at: now });
-        }
+      const design = blob
+        ? await extractDesignProfile(
+            env,
+            new Uint8Array(await blob.arrayBuffer()),
+            measured,
+            now,
+          ).catch(() => null)
+        : null;
+      const parent = q.getItem(id);
+      if (design && parent) {
+        // A human-written description always wins; the derived summary only
+        // ever fills a gap or appends to what the person wrote.
+        const summary = designSummary(design);
+        q.updateItem({
+          ...parent,
+          semantic_text: parent.semantic_text ? `${parent.semantic_text}\n${summary}` : summary,
+          metadata: { ...parent.metadata, design },
+          updated_at: now,
+        });
       }
     }
     deriveEdgesForItem(q, q.getItem(id)!, now);
@@ -487,6 +537,8 @@ async function handleItems(request: Request, env: Env, q: Queries, humanId: stri
       title?: string;
       semantic_text?: string;
       pinned?: boolean;
+      /** Backfill of an exact palette measured in the browser — see below. */
+      palette?: unknown;
     };
     const ids = body.ids ?? (body.id ? [body.id] : []);
     if (ids.length === 0) return badRequest("id or ids required");
@@ -496,6 +548,38 @@ async function handleItems(request: Request, env: Env, q: Queries, humanId: stri
     if (request.method === "DELETE") {
       for (const item of owned) q.deleteItem(item.id);
       return json({ ok: true, deleted: owned.map((i) => i.id) });
+    }
+
+    // A palette measured in the browser for an image that predates capture-time
+    // measurement. Colour is the one design fact we refuse to estimate — the
+    // vision model's hex guesses were hallucinated flat-UI defaults on real
+    // archive images — so the browser, which is the only place with decoded
+    // pixels, backfills them here. Stored separately from `design` so the
+    // extraction pass can pick it up whenever it next runs.
+    if (body.palette !== undefined) {
+      const measured = cleanPalette(body.palette);
+      if (measured.length > 0) {
+        for (const item of owned) {
+          // Ordering matters here and used to be wrong. The alarm extracts a
+          // design profile before the browser has measured anything, so the
+          // profile lands with palette_source "none"; the browser then measures
+          // and PATCHes — but `imagesNeedingDesign` skips items that already
+          // have a design, so the real colours would never have reached the
+          // profile. Splice them in directly. No AI call is needed: the palette
+          // IS the data, and nothing else about the profile changes.
+          const design = (item.metadata as { design?: Record<string, unknown> }).design;
+          const nextDesign =
+            design && typeof design === "object"
+              ? { ...design, palette: measured, palette_source: "measured" }
+              : design;
+          q.updateItem({
+            ...item,
+            metadata: { ...item.metadata, palette: measured, ...(nextDesign ? { design: nextDesign } : {}) },
+            updated_at: Date.now(),
+          });
+        }
+      }
+      return json({ ok: true, items: q.getItems(owned.map((i) => i.id)) });
     }
 
     // PATCH: move to another folder and/or rename (rename only makes sense for one item).
@@ -1074,16 +1158,14 @@ function handleArtifacts(request: Request, q: Queries, humanId: string): Respons
     if (!id) return badRequest("id required");
     const artifact = q.getArtifact(id);
     if (!artifact || artifact.space_id !== spaceIdFor(humanId)) return badRequest("not found");
-    // record_artifact spends one "artifacts" quota unit per version submitted
-    // this period. Deleting the artifact should give those units back, not
-    // leave the person permanently down a slot for work they undid — but
-    // only for versions actually submitted in the *current* period; anything
-    // from an earlier month has no live counter left to refund into.
+    // record_artifact spends one "artifacts" unit per ARTIFACT (revisions are
+    // free), so deleting one refunds exactly one — and only when the artifact
+    // was created in the current period, since an earlier month has no live
+    // counter left to refund into.
     const period = quotaPeriod();
-    const refund = q.listArtifactVersions(id).filter((v) => quotaPeriod(v.created_at) === period).length;
-    if (refund > 0) {
+    if (quotaPeriod(artifact.created_at) === period) {
       const used = q.usageGet(humanId, period, "artifacts");
-      q.usageAdd(humanId, period, "artifacts", -Math.min(refund, used));
+      if (used > 0) q.usageAdd(humanId, period, "artifacts", -1);
     }
     q.deleteArtifact(id);
     return json({ ok: true, deleted: id });
@@ -1566,9 +1648,17 @@ function handleStats(request: Request, q: Queries, humanId: string): Response {
     const last = versions[versions.length - 1];
     if (!last) continue;
     bumpCount(outcomeCounts, last.state);
+    // Count the ARTIFACT once per agent that worked on it, not once per
+    // version — five revisions of one poster is one artifact, and the space
+    // total right below already counts distinct artifacts, so counting
+    // versions here made the two numbers disagree.
+    const creditedHere = new Set<string>();
     for (const v of versions) {
       const agg = clientFor(v.agent_session_id);
-      if (agg) agg.artifacts += 1;
+      if (agg && !creditedHere.has(agg.label)) {
+        agg.artifacts += 1;
+        creditedHere.add(agg.label);
+      }
     }
     latest.push({ id: a.id, title: a.title, preview_html: last.content_html, updated_at: last.created_at });
   }
@@ -1755,35 +1845,6 @@ function handleQuota(q: Queries, humanId: string): Response {
       metrics: QUOTA_METRICS.map((m) => ({ metric: m, used: used[m] ?? 0, limit: QUOTA[m] })),
     },
   });
-}
-
-/* ---------------- memory sync ---------------- */
-
-async function handleMemoryStatus(request: Request, q: Queries, humanId: string, env: Env): Promise<Response> {
-  const spaceId = spaceIdFor(humanId);
-  // key_at_request: is the secret visible to the worker NOW. mirror_enabled
-  // (inside status): was it visible when the DO last constructed. A mismatch
-  // means the DO booted before the secret was set and needs a restart.
-  const keyAtRequest = Boolean(env.SUPERMEMORY_API_KEY?.trim());
-  if (request.method === "GET") {
-    return json({ ok: true, status: q.memoryStatus(spaceId), key_at_request: keyAtRequest });
-  }
-  if (request.method === "POST") {
-    // Force-queue every not-yet-synced item, then drain inline so the caller
-    // sees real progress rather than waiting on the alarm.
-    const queued = q.backfillMemoryOutbox(spaceId);
-    const index = memoryIndexFor(env);
-    let drained: unknown = null;
-    if (index) {
-      const { report } = await drainSpaceMemory(q, index, [env.SUPERMEMORY_API_KEY ?? ""], async (key) => {
-        const obj = await env.BLOBS.get(key);
-        return obj?.body ? { body: obj.body, contentType: obj.httpMetadata?.contentType ?? null } : null;
-      });
-      drained = report;
-    }
-    return json({ ok: true, queued, drained, key_at_request: keyAtRequest, status: q.memoryStatus(spaceId) });
-  }
-  return badRequest("GET or POST");
 }
 
 /* ---------------- lens ---------------- */

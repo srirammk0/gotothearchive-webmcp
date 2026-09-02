@@ -5,7 +5,7 @@ import type { Annotation, ArtifactVersion } from "@shared/contract";
 import { Button } from "../primitives/Button";
 import { Icon } from "../primitives/Icon";
 import { duration, ease } from "../tokens";
-import { isComponentPreview, previewSandbox, previewSrcDoc } from "./componentPreview";
+import { isComponentPreview, previewSandbox, previewSrcDoc, previewAspectRatio } from "./componentPreview";
 
 type Rect = { x: number; y: number; w: number; h: number };
 
@@ -99,6 +99,7 @@ export function ArtifactViewer({ version, annotations = [], onAddRegion, onAddCo
   const componentPreview = isComponentPreview(version.content_html);
   const srcDoc = previewSrcDoc(version.content_html);
   const sandbox = previewSandbox(version.content_html);
+  const aspectRatio = previewAspectRatio(version.content_html);
 
   const pointFromEvent = (e: React.PointerEvent) => {
     const box = layerRef.current!.getBoundingClientRect();
@@ -259,8 +260,13 @@ export function ArtifactViewer({ version, annotations = [], onAddRegion, onAddCo
           // the marks without moving the marks — they'd drift out of place.
           // View full screen (below) for content taller than this viewport.
           scrolling="no"
-          style={{ overflow: "hidden" }}
-          className="h-[560px] w-full rounded-[var(--radius-md)] border border-line bg-white"
+          // The artifact declares its own shape (record_artifact's `aspect`),
+          // so give it exactly that box. A fixed height cut 3:4 posters off —
+          // the dominant format in this archive — and the scroll lock above
+          // meant there was no way to see the rest. Artifacts recorded before
+          // aspects existed keep the old fixed height.
+          style={{ overflow: "hidden", ...(aspectRatio ? { aspectRatio } : { height: 560 }) }}
+          className="w-full rounded-[var(--radius-md)] border border-line bg-white"
         />
 
         {/* Review layer. Always captures pointer/wheel input (never

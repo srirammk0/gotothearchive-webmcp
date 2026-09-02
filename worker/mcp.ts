@@ -7,19 +7,19 @@
  */
 import {
   API,
+  ARTIFACT_ASPECTS,
   confidenceFrom,
   DENIAL_REASONS,
   grantAtLeast,
-  RELATIONSHIPS,
   TASTE_DIMENSIONS,
   type ContextItem,
-  type Relationship,
+  type DesignProfile,
   type TasteDimension,
   type ToolCallRequest,
   type ToolCallResponse,
 } from "@shared/contract";
 import type { Queries } from "./db/queries";
-import { consumeQuota } from "./quota";
+import { consumeQuota, quotaPeriod } from "./quota";
 import {
   authorize,
   authorizedRegionIds,
@@ -31,7 +31,6 @@ import {
   writeDenial,
 } from "./permissions";
 import { retrieve } from "./retrieval";
-import { memoryIndexFor } from "./memory-drain";
 import { signedBlobUrl } from "./blob-sign";
 import { traverse } from "./graph";
 import { deriveEdgesForItem } from "./graph-build";
@@ -64,8 +63,16 @@ export function clip(s: string, n: number): string {
 }
 
 /** Max list entries / free-text chars in any one tool result. */
-const MAX_ROWS = 8;
-const MAX_TEXT = 240;
+const MAX_ROWS = 12;
+/**
+ * Per-field text budget. Was 240, which meant an agent got a title and a
+ * truncated sentence and then designed from nothing. A retrieval listing that
+ * carries real excerpts costs fewer tokens overall than one that forces a
+ * follow-up inspect_context_item call per row.
+ */
+const MAX_TEXT = 600;
+/** Excerpt length inside a LISTING row, where several are returned at once. */
+const MAX_LIST_TEXT = 320;
 const MAX_RETRIEVAL_LIMIT = 20;
 
 export function clampRetrievalLimit(value: unknown): number {
@@ -92,6 +99,45 @@ function versionSessionBelongsToTask(
  * be safe to hand an agent directly: it's already just as fetchable by
  * anyone as the tweet/page itself was.
  */
+/**
+ * The item's extracted design profile, if it has one.
+ *
+ * This is the field that makes the difference between an agent producing
+ * generic output and producing something that belongs in THIS archive: exact
+ * hex values it must use, and the typography/layout/texture vocabulary the
+ * archive is actually built from. `palette_source` travels with it so the agent
+ * knows whether the colours were measured from pixels or estimated by a model.
+ */
+function designFor(it: ContextItem): DesignProfile | null {
+  const d = (it.metadata as { design?: unknown }).design;
+  return isDesignProfile(d) ? d : null;
+}
+
+function isDesignProfile(d: unknown): d is DesignProfile {
+  return (
+    typeof d === "object" &&
+    d !== null &&
+    "typography" in d &&
+    "layout" in d &&
+    "palette" in d
+  );
+}
+
+/** The compact form used in listings — the values, without the bookkeeping. */
+function slimDesign(d: DesignProfile | null) {
+  if (!d) return null;
+  return {
+    palette: d.palette.map((p) => ({ hex: p.hex, role: p.role, pct: p.pct })),
+    palette_source: d.palette_source,
+    typography: d.typography,
+    layout: d.layout,
+    texture: d.texture,
+    shape: d.shape,
+    imagery: d.imagery,
+    mood: d.mood,
+  };
+}
+
 function extractedImageUrl(it: ContextItem): string | null {
   if (it.type !== "link") return null;
   const extracted = (it.metadata as { extracted?: { images?: unknown } }).extracted;
@@ -141,6 +187,7 @@ async function slimItem(it: ContextItem, env: Env | undefined, origin: string | 
     source_url: it.source_url ? spotlight(clip(it.source_url, 200)) : null,
     title: spotlight(clip(it.title, 120)),
     semantic_text: it.semantic_text ? spotlight(clip(it.semantic_text, MAX_TEXT)) : null,
+    design: slimDesign(designFor(it)),
     content_url,
     embed_url,
   };
@@ -283,7 +330,6 @@ export async function handleToolCall(
         q,
         { taskId: task.id, query, regionSlugs: regionSlug ? [regionSlug] : null, limit },
         now,
-        env ? memoryIndexFor(env) : null,
       );
 
       // A confirmed signal that materially lifted a returned item is a real
@@ -311,6 +357,13 @@ export async function handleToolCall(
         id: ret.item.id,
         region: ret.region_slug,
         title: spotlight(clip(ret.item.title, 120)),
+        // The excerpt is the point. Returning id+title only forced a second
+        // round-trip per row that agents did not make, so they designed from
+        // titles alone.
+        text: ret.item.semantic_text
+          ? spotlight(clip(ret.item.semantic_text, MAX_LIST_TEXT))
+          : null,
+        design: slimDesign(designFor(ret.item)),
         why: clip(ret.why, MAX_TEXT),
         embed_url:
           extractedImageUrl(ret.item) ??
@@ -357,51 +410,34 @@ export async function handleToolCall(
         tool_name: body.tool,
         at: now,
       });
-      return { ok: true, result: { item: await slimItem(item, env, origin) } };
-    }
+      // The graph neighbourhood comes back WITH the item rather than behind a
+      // second tool. `inspect_relationships` existed for years of agent-turns
+      // and was never called: an agent that has just looked something up does
+      // not know to then go asking what it connects to. Handing it over
+      // unprompted is what makes the archive read as a graph instead of a list.
+      // traverse() re-checks access at every node (invariant #4), so an
+      // accessible edge still cannot reveal an inaccessible neighbour.
+      const neighbourhood = traverse(q, [item.id], authorizedRegionIds(q, task.id, now));
+      const byId = new Map(neighbourhood.nodes.map((n) => [n.id, n]));
+      const related: { id: string; title: string; region: string; relationship: string }[] = [];
+      for (const edge of neighbourhood.edges) {
+        const otherId = edge.from_id === item.id ? edge.to_id : edge.from_id;
+        if (otherId === item.id) continue;
+        const other = byId.get(otherId);
+        if (!other || related.some((r) => r.id === otherId)) continue;
+        if (!taskAllowsItem(q, task, other)) continue;
+        related.push({
+          id: other.id,
+          title: spotlight(clip(other.title, 100)),
+          region: q.getRegion(other.region_id)?.slug ?? "",
+          relationship: edge.relationship,
+        });
+        if (related.length === MAX_ROWS) break;
+      }
 
-    case "inspect_relationships": {
-      const itemId = typeof input.item_id === "string" ? input.item_id : "";
-      const item = q.getItem(itemId);
-      if (!item) return denyResult(DENIAL_REASONS.UNKNOWN_ITEM);
-      const region = q.getRegion(item.region_id);
-      if (!region || region.space_id !== task.space_id || item.space_id !== task.space_id) {
-        return denyResult(DENIAL_REASONS.UNKNOWN_ITEM);
-      }
-      const result = authorize(
-        q,
-        {
-          taskId: task.id,
-          agentSessionId: session.id,
-          regionSlug: region.slug,
-          need: "read",
-          toolName: body.tool,
-          requested: input,
-        },
-        now,
-      );
-      if (!result.ok) return denyResult(result.reason);
-      if (!taskAllowsItem(q, task, item)) {
-        writeDenial(
-          q,
-          { taskId: task.id, agentSessionId: session.id, toolName: body.tool, requested: input, reason: DENIAL_REASONS.OUT_OF_PROJECT_SCOPE },
-          now,
-        );
-        return denyResult(DENIAL_REASONS.OUT_OF_PROJECT_SCOPE);
-      }
-      const allowedIds = authorizedRegionIds(q, task.id, now);
-      const graphResult = traverse(q, [itemId], allowedIds);
-      // A neighborhood listing, not a deliberate look at one thing — skip the
-      // signed content_url (real tokens) here; embed_url still comes through.
-      const slimNodes = await Promise.all(
-        graphResult.nodes.slice(0, MAX_ROWS).map((node) => slimItem(node, env, origin, false)),
-      );
       return {
         ok: true,
-        result: {
-          nodes: slimNodes,
-          edges: graphResult.edges.slice(0, MAX_ROWS),
-        },
+        result: { item: await slimItem(item, env, origin), related },
       };
     }
 
@@ -577,10 +613,17 @@ export async function handleToolCall(
       // A component preview remains a review artifact, not a host-executed app.
       // The marker selects the isolated iframe policy in the Workbench.
       const placementMarker = `<meta name="gotothearchive-region" content="${authResult.region.id}">`;
+      // The viewer cannot measure a sandboxed artifact, so the artifact says
+      // what shape it is and gets exactly that box. Anything unrecognized falls
+      // back to "auto" (the old fixed height) rather than a wrong shape.
+      const aspect = (ARTIFACT_ASPECTS as readonly string[]).includes(String(input.aspect))
+        ? String(input.aspect)
+        : "auto";
+      const aspectMarker = `<meta name="gotothearchive-aspect" content="${aspect}">`;
       const contentHtml =
         input.renderer === "component"
-          ? `${placementMarker}<meta name="gotothearchive-renderer" content="component">${rawContentHtml}`
-          : `${placementMarker}${rawContentHtml}`;
+          ? `${placementMarker}${aspectMarker}<meta name="gotothearchive-renderer" content="component">${rawContentHtml}`
+          : `${placementMarker}${aspectMarker}${rawContentHtml}`;
 
       let versionNo = 1;
       if (existing) {
@@ -603,10 +646,15 @@ export async function handleToolCall(
           return denyResult(DENIAL_REASONS.INVALID_PARENT);
         }
       }
-      const budget = consumeQuota(q, human.human_id, "artifacts");
-      if (!budget.ok) return denyResult(budget.message);
+      // One unit per ARTIFACT, not per version. Revising is the core loop here —
+      // an agent reads the annotations and submits a better version — and
+      // charging each revision made a five-round review cost five slots out of
+      // a hundred, i.e. it metered exactly the behaviour the product wants.
+      // Versions are cheap (one row); it is the artifact that is the unit.
       let finalArtifactId = existing?.id ?? null;
       if (!finalArtifactId) {
+        const budget = consumeQuota(q, human.human_id, "artifacts");
+        if (!budget.ok) return denyResult(budget.message);
         finalArtifactId = crypto.randomUUID();
         q.insertArtifact({
           id: finalArtifactId,
@@ -679,65 +727,6 @@ export async function handleToolCall(
       };
     }
 
-    case "record_feedback": {
-      const regionSlug = typeof input.region === "string" ? input.region : "";
-      const authResult = authorize(
-        q,
-        {
-          taskId: task.id,
-          agentSessionId: session.id,
-          regionSlug,
-          need: "propose",
-          toolName: body.tool,
-          requested: input,
-        },
-        now,
-      );
-      if (!authResult.ok) return denyResult(authResult.reason);
-
-      const versionId = typeof input.version_id === "string" ? input.version_id : "";
-      const version = q.getArtifactVersion(versionId);
-      const artifact = version ? q.getArtifact(version.artifact_id) : null;
-      if (
-        !version ||
-        !artifact ||
-        artifact.task_id !== task.id ||
-        artifact.space_id !== task.space_id ||
-        !versionSessionBelongsToTask(q, version.agent_session_id, task.id, human.human_id)
-      ) {
-        return denyResult(DENIAL_REASONS.EXCEEDS_HUMAN);
-      }
-      const sentiment =
-        input.sentiment === "positive" || input.sentiment === "negative" ? input.sentiment : "neutral";
-      const comment = typeof input.comment === "string" ? input.comment : "";
-      const dimensions = Array.isArray(input.dimensions)
-        ? (input.dimensions.filter((d): d is TasteDimension =>
-            typeof d === "string" && (TASTE_DIMENSIONS as readonly string[]).includes(d),
-          ) as TasteDimension[])
-        : [];
-
-      const annotationId = crypto.randomUUID();
-      q.insertAnnotation({
-        id: annotationId,
-        version_id: versionId,
-        author_id: `agent:${session.id}`,
-        target: null,
-        sentiment,
-        dimensions,
-        comment,
-        status: "open",
-        created_at: now,
-      });
-
-      return {
-        ok: true,
-        result: {
-          annotation_id: annotationId,
-          next: "Recorded for review. Personal taste only learns from the person's own feedback.",
-        },
-      };
-    }
-
     // Auto-derivation only learns from the human's own annotations (by design:
     // an agent's opinion of its own work is not taste). This is the other
     // route in: an agent that has read back several annotations pointing the
@@ -754,7 +743,10 @@ export async function handleToolCall(
       if (!authResult.ok) return denyResult(authResult.reason);
 
       const statement = typeof input.statement === "string" ? input.statement.trim().slice(0, 200) : "";
-      if (!statement) return denyResult(DENIAL_REASONS.EXCEEDS_HUMAN);
+      // A malformed call is not a permission problem. Returning EXCEEDS_HUMAN
+      // here wrote "the invoking person does not have this access themselves"
+      // into Agent Lens for what is actually a missing argument.
+      if (!statement) return denyResult(DENIAL_REASONS.MISSING_INPUT);
       const dimensions = Array.isArray(input.dimensions)
         ? (input.dimensions.filter((d): d is TasteDimension =>
             typeof d === "string" && (TASTE_DIMENSIONS as readonly string[]).includes(d),
@@ -783,7 +775,7 @@ export async function handleToolCall(
         if (!item || item.space_id !== task.space_id || !reachable.has(item.region_id) || !taskAllowsItem(q, task, item)) continue;
         evidence.push({ annotation_id: null, item_id: itemId });
       }
-      if (evidence.length === 0) return denyResult(DENIAL_REASONS.EXCEEDS_HUMAN);
+      if (evidence.length === 0) return denyResult(DENIAL_REASONS.NO_USABLE_EVIDENCE);
 
       const project = taskProject(q, task);
       const signalId = crypto.randomUUID();
@@ -797,7 +789,11 @@ export async function handleToolCall(
         project_id: project?.id ?? null,
         status: "proposed",
         confidence: confidenceFrom(evidence.length, 0),
-        created_by: "system",
+        // "agent", not "system": an agent naming a pattern it noticed is a
+        // different act from the derivation loop finding one in the person's own
+        // annotations, and the Taste UI labels them differently. Both still land
+        // as `proposed` and still need a human.
+        created_by: "agent",
         approved_by: null,
         supersedes: null,
         created_at: now,
@@ -831,76 +827,6 @@ export async function handleToolCall(
           next: "Proposed for the person's review. It will not affect any future work until they confirm it.",
         },
       };
-    }
-
-    case "propose_context_change": {
-      const regionSlug = typeof input.region === "string" ? input.region : "";
-      const authResult = authorize(
-        q,
-        {
-          taskId: task.id,
-          agentSessionId: session.id,
-          regionSlug,
-          need: "propose",
-          toolName: body.tool,
-          requested: input,
-        },
-        now,
-      );
-      if (!authResult.ok) return denyResult(authResult.reason);
-
-      const fromId = typeof input.from_item_id === "string" ? input.from_item_id : "";
-      const toId = typeof input.to_item_id === "string" ? input.to_item_id : "";
-      const from = q.getItem(fromId);
-      const to = q.getItem(toId);
-      const reachable = authorizedRegionIds(q, task.id, now);
-      if (
-        !from ||
-        !to ||
-        from.space_id !== task.space_id ||
-        to.space_id !== task.space_id ||
-        from.id === to.id ||
-        from.region_id !== authResult.region.id ||
-        !reachable.has(from.region_id) ||
-        !reachable.has(to.region_id) ||
-        !taskAllowsItem(q, task, from) ||
-        !taskAllowsItem(q, task, to)
-      ) {
-        writeDenial(
-          q,
-          {
-            taskId: task.id,
-            agentSessionId: session.id,
-            toolName: body.tool,
-            requested: input,
-            reason:
-              (from && !taskAllowsItem(q, task, from)) || (to && !taskAllowsItem(q, task, to))
-                ? DENIAL_REASONS.OUT_OF_PROJECT_SCOPE
-                : DENIAL_REASONS.NO_GRANT,
-          },
-          now,
-        );
-        return denyResult(DENIAL_REASONS.NO_GRANT);
-      }
-      const relationship: Relationship =
-        typeof input.relationship === "string" &&
-        (RELATIONSHIPS as readonly string[]).includes(input.relationship)
-          ? (input.relationship as Relationship)
-          : "related_to";
-
-      const edgeId = crypto.randomUUID();
-      q.insertEdge({
-        id: edgeId,
-        from_id: fromId,
-        to_id: toId,
-        relationship,
-        weight: 1,
-        created_by: `agent:${session.id}`,
-        approval_state: "proposed",
-        created_at: now,
-      });
-
-      return { ok: true, result: { edge_id: edgeId } };
     }
 
     case "add_context_item": {
@@ -944,6 +870,144 @@ export async function handleToolCall(
       return {
         ok: true,
         result: { item_id: itemId, region: authResult.region.slug, next: "Filed into the folder — it's canonical context now and visible in the Archive." },
+      };
+    }
+
+    // The exact inverse of add_context_item, and nothing more. An agent may
+    // remove an item IT filed into a folder it has write access to — the same
+    // authority that let it create the item lets it take it back. The
+    // `created_by` check is what keeps this from becoming a tool for deleting
+    // the person's archive: a human-authored item, or one another agent added,
+    // is refused no matter what the grant says.
+    case "remove_context_item": {
+      const itemId = typeof input.item_id === "string" ? input.item_id : "";
+      const item = itemId ? q.getItem(itemId) : null;
+      if (!item || item.space_id !== task.space_id) return denyResult(DENIAL_REASONS.UNKNOWN_ITEM);
+
+      const region = q.getRegion(item.region_id);
+      if (!region || region.space_id !== task.space_id) return denyResult(DENIAL_REASONS.UNKNOWN_ITEM);
+
+      const authResult = authorize(
+        q,
+        { taskId: task.id, agentSessionId: session.id, regionSlug: region.slug, need: "write", toolName: body.tool, requested: input },
+        now,
+      );
+      if (!authResult.ok) return denyResult(authResult.reason);
+      if (!taskAllowsItem(q, task, item)) {
+        writeDenial(
+          q,
+          { taskId: task.id, agentSessionId: session.id, toolName: body.tool, requested: input, reason: DENIAL_REASONS.OUT_OF_PROJECT_SCOPE },
+          now,
+        );
+        return denyResult(DENIAL_REASONS.OUT_OF_PROJECT_SCOPE);
+      }
+
+      // Only an agent-added item, and only one added by an agent session
+      // belonging to THIS human. add_context_item stamps both fields.
+      const addedByAgent =
+        item.created_by.startsWith("agent:") && item.authority_class === "agent_authored";
+      if (!addedByAgent) return denyResult(DENIAL_REASONS.NOT_AGENT_AUTHORED);
+      const authorSession = q.getAgentSession(item.created_by.slice("agent:".length));
+      if (!authorSession || authorSession.human_id !== human.human_id) {
+        return denyResult(DENIAL_REASONS.NOT_AGENT_AUTHORED);
+      }
+
+      q.deleteItem(item.id);
+      q.insertAuditEvent({
+        id: crypto.randomUUID(),
+        actor_type: "agent",
+        actor_label: session.id,
+        agent_session_id: session.id,
+        human_id: human.human_id,
+        task_id: task.id,
+        tool_name: body.tool,
+        operation: "remove_context_item",
+        payload: { item_id: item.id, title: item.title, region: region.slug },
+        at: now,
+      });
+
+      return {
+        ok: true,
+        result: { removed: item.id, next: "Removed from the folder. Only items an agent filed can be removed this way." },
+      };
+    }
+
+    // Withdrawing agent output is not the same act as deleting human context,
+    // and only the first is offered. The guards below are the whole point:
+    // this can only remove an artifact THIS task produced, that no person has
+    // annotated or decided on. The moment a human touches it, it stops being
+    // the agent's to take back. There is deliberately no tool for deleting a
+    // context item, an annotation, or an approved artifact — that is the
+    // human's context, and an agent that could delete it would make "you own
+    // your context" a convention rather than a guarantee.
+    case "withdraw_artifact": {
+      const artifactId = typeof input.artifact_id === "string" ? input.artifact_id : "";
+      const artifact = artifactId ? q.getArtifact(artifactId) : null;
+      if (!artifact || artifact.space_id !== task.space_id || artifact.task_id !== task.id) {
+        return denyResult(DENIAL_REASONS.UNKNOWN_ARTIFACT);
+      }
+
+      const regionSlug = artifact.region_id ? q.getRegion(artifact.region_id)?.slug ?? "" : "";
+      const authResult = authorize(
+        q,
+        { taskId: task.id, agentSessionId: session.id, regionSlug, need: "propose", toolName: body.tool, requested: input },
+        now,
+      );
+      if (!authResult.ok) return denyResult(authResult.reason);
+
+      const versions = q.listArtifactVersions(artifact.id);
+      // Every version must have come from this task's own agent sessions.
+      const ownedByThisTask = versions.every((v) =>
+        versionSessionBelongsToTask(q, v.agent_session_id, task.id, human.human_id),
+      );
+      if (!ownedByThisTask) return denyResult(DENIAL_REASONS.NOT_YOURS_TO_WITHDRAW);
+
+      // Any human annotation or decision means a person has engaged with this.
+      // Withdrawing it would destroy their feedback, so it is refused and they
+      // are left to delete it themselves if they want it gone.
+      for (const version of versions) {
+        const humanAnnotations = q.listAnnotations(version.id).filter((a) => !a.author_id.startsWith("agent:"));
+        if (humanAnnotations.length > 0) return denyResult(DENIAL_REASONS.ALREADY_REVIEWED);
+        // A review decision moves the version out of ready_for_review, so the
+        // state check is also the "has anyone decided on this" check.
+        if (version.state !== "ready_for_review" && version.state !== "processing") {
+          return denyResult(DENIAL_REASONS.ALREADY_REVIEWED);
+        }
+      }
+
+      // Give the quota unit back — the artifact is being undone, not consumed.
+      // Keyed off quotaPeriod() with no argument, exactly as consumeQuota()
+      // does: the counter that was incremented is the one that must be
+      // decremented. Only refundable while the artifact's own period is still
+      // the live one; an earlier month has no counter left to refund into.
+      const period = quotaPeriod();
+      if (quotaPeriod(artifact.created_at) === period) {
+        const spent = q.usageGet(human.human_id, period, "artifacts");
+        if (spent > 0) q.usageAdd(human.human_id, period, "artifacts", -1);
+      }
+      q.deleteArtifact(artifact.id);
+
+      // The artifact is gone; the ledger of what the agent DID is not. accesses,
+      // denials and audit_events are separate records (invariant #5) and stay.
+      q.insertAuditEvent({
+        id: crypto.randomUUID(),
+        actor_type: "agent",
+        actor_label: session.id,
+        agent_session_id: session.id,
+        human_id: human.human_id,
+        task_id: task.id,
+        tool_name: body.tool,
+        operation: "withdraw_artifact",
+        payload: { artifact_id: artifact.id, title: artifact.title, versions: versions.length },
+        at: now,
+      });
+
+      return {
+        ok: true,
+        result: {
+          withdrawn: artifact.id,
+          next: "Removed before anyone reviewed it. Your quota unit was returned.",
+        },
       };
     }
 

@@ -15,6 +15,7 @@ import {
   type ContextEdge,
   type ContextItem,
   type ItemNote,
+  type PaletteEntry,
   type DenialRecord,
   type GrantLevel,
   type Grant,
@@ -67,8 +68,8 @@ export async function authHeader(): Promise<Record<string, string>> {
  * Any non-GET request clears the whole cache on success — simpler and
  * safer than per-endpoint invalidation given how cross-referenced this data
  * is (an item write can move counts on regions, stats, and taste evidence).
- * TTL is short enough that both existing polls (MemorySync ~15s, Stats
- * ~30s + focus/visibility refresh) still hit the network on every tick.
+ * TTL is short enough that existing polls (Stats ~30s + focus/visibility
+ * refresh) still hit the network on every tick.
  */
 const CACHE_TTL_MS = 10_000;
 const cache = new Map<string, { at: number; data: unknown }>();
@@ -165,7 +166,20 @@ export const createItem = (input: {
   source_url?: string | null;
   content_ref?: string | null;
   semantic_text?: string | null;
+  /** Exact colours measured from the file's own pixels — see ui/archive/palette.ts. */
+  palette?: PaletteEntry[];
 }) => req<{ item: ContextItem }>(API.items, { method: "POST", body: JSON.stringify(input) });
+
+/**
+ * Backfill an exact, browser-measured palette onto an already-archived image.
+ * Colour is never estimated server-side (the vision model hallucinates hex
+ * values), so this is the only route by which an older item gets real colours.
+ */
+export const setItemPalette = (id: string, palette: PaletteEntry[]) =>
+  req<{ items: ContextItem[] }>(API.items, {
+    method: "PATCH",
+    body: JSON.stringify({ id, palette }),
+  });
 
 /* ---------------- item links + notes ---------------- */
 
@@ -198,20 +212,6 @@ export const addItemNote = (itemId: string, body: string) =>
 
 export const deleteItemNote = (id: string) =>
   req<{ deleted: string }>(`${API.itemNotes}${qs({ id })}`, { method: "DELETE" });
-
-/* ---------------- memory sync ---------------- */
-
-export interface MemorySyncStatus {
-  mirror_enabled: boolean;
-  items: number;
-  synced: number;
-  pending: number;
-  failed: number;
-  recent_errors: string[];
-}
-
-export const getMemoryStatus = () =>
-  req<{ status: MemorySyncStatus; key_at_request: boolean }>(API.memoryStatus);
 
 /** Move one or more items to another folder, and/or rename a single item. */
 export const updateItems = (

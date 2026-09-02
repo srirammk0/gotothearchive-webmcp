@@ -68,7 +68,10 @@ test("a proposal grounded in a real annotation lands as proposed, never confirme
   const { signal_id } = (res as { result: { signal_id: string } }).result;
   const signal = q.getTasteSignal(signal_id);
   expect(signal?.status).toBe("proposed");
-  expect(signal?.created_by).toBe("system");
+  // "agent", not "system": the derivation loop reading the person's own
+  // annotations and an agent naming a pattern it noticed are different acts,
+  // and the Taste UI attributes them differently. Both stay `proposed`.
+  expect(signal?.created_by).toBe("agent");
   expect(q.listTasteEvidence(signal_id)).toHaveLength(1);
 });
 

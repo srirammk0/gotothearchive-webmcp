@@ -168,10 +168,26 @@ test("(d2) a note tagged with two dimensions feeds both groups", async () => {
   expect(dims).toContain("typography");
 });
 
-test("(e) group of one ignored", async () => {
+test("(e) a single annotation is enough to propose a tentative signal", async () => {
   const q = stubQ([ann({ id: "a1", comment: "muted palette here" })]);
   await deriveTasteSignals(q, "s1", 1000);
-  expect(q.signals).toHaveLength(0);
+  expect(q.signals).toHaveLength(1);
+  expect(q.signals[0].status).toBe("proposed");
+  // confidenceFrom(1, 0) = 1/3, below the 0.4 "tentative" cutoff (contract.ts confidenceLabel).
+  expect(q.signals[0].confidence).toBeCloseTo(1 / 3, 5);
+  expect(q.evidence).toHaveLength(1);
+  const event = q.events.find((e) => e.kind === "proposed") as { detail?: string } | undefined;
+  expect(event?.detail).toBe("Derived from 1 note on color");
+});
+
+test("(e2) event detail pluralizes correctly for more than one note", async () => {
+  const q = stubQ([
+    ann({ id: "a1", comment: "muted palette everywhere" }),
+    ann({ id: "a2", comment: "the palette feels too muted" }),
+  ]);
+  await deriveTasteSignals(q, "s1", 1000);
+  const event = q.events.find((e) => e.kind === "proposed") as { detail?: string } | undefined;
+  expect(event?.detail).toBe("Derived from 2 notes on color");
 });
 
 test("(f) matching reviews strengthen an existing confirmed signal", async () => {
@@ -220,4 +236,70 @@ test("(g) relaxed gate - two notes with no shared word still produce a signal", 
   await deriveTasteSignals(q, "s1", 1000);
   expect(q.signals).toHaveLength(1);
   expect(q.signals[0].statement).toContain("color");
+});
+
+function designProfile(classification: string) {
+  return {
+    palette: [],
+    palette_source: "none",
+    typography: { classification, case: "none", scale: "none", note: "" },
+    layout: { composition: "centered", density: "balanced", alignment: "none" },
+    texture: [],
+    shape: { corner_radius: "sharp", stroke: "none" },
+    imagery: { treatment: "none" },
+    mood: [],
+    extracted_by: "test",
+    extracted_at: 0,
+  };
+}
+
+test("(h) design grounding cites the item when its profile actually varies on the mapped field", async () => {
+  const rows = [
+    ann({ id: "a1", version_id: "v-a1", dimensions: ["typography"], comment: "serif everywhere feels heavy" }),
+    ann({ id: "a2", version_id: "v-a2", dimensions: ["typography"], comment: "still too much serif weight" }),
+  ];
+  const q = stubQ(rows);
+  const items: Record<string, { id: string; metadata: Record<string, unknown> }> = {
+    "item-a1": { id: "item-a1", metadata: { design: designProfile("slab_serif") } },
+    "item-a2": { id: "item-a2", metadata: { design: designProfile("geometric_sans") } },
+  };
+  const influences: Record<string, { item_id: string }[]> = {
+    "v-a1": [{ item_id: "item-a1" }],
+    "v-a2": [{ item_id: "item-a2" }],
+  };
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- test-only Queries extension for grounding
+  (q as any).listInfluences = (versionId: string) => influences[versionId] ?? [];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- test-only Queries extension for grounding
+  (q as any).getItem = (id: string) => items[id] ?? null;
+
+  await deriveTasteSignals(q, "s1", 1000);
+  expect(q.signals).toHaveLength(1);
+  const cited = q.evidence.map((e) => (e as unknown as { item_id: string | null }).item_id);
+  // oxlint-disable-next-line unicorn/no-array-sort -- cited is a fresh local array
+  cited.sort();
+  expect(cited).toEqual(["item-a1", "item-a2"]);
+});
+
+test("(h2) design grounding leaves item_id null when the mapped field does not vary", async () => {
+  const rows = [
+    ann({ id: "a1", version_id: "v-a1", dimensions: ["typography"], comment: "serif everywhere feels heavy" }),
+    ann({ id: "a2", version_id: "v-a2", dimensions: ["typography"], comment: "still too much serif weight" }),
+  ];
+  const q = stubQ(rows);
+  const items: Record<string, { id: string; metadata: Record<string, unknown> }> = {
+    "item-a1": { id: "item-a1", metadata: { design: designProfile("slab_serif") } },
+    "item-a2": { id: "item-a2", metadata: { design: designProfile("slab_serif") } },
+  };
+  const influences: Record<string, { item_id: string }[]> = {
+    "v-a1": [{ item_id: "item-a1" }],
+    "v-a2": [{ item_id: "item-a2" }],
+  };
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- test-only Queries extension for grounding
+  (q as any).listInfluences = (versionId: string) => influences[versionId] ?? [];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- test-only Queries extension for grounding
+  (q as any).getItem = (id: string) => items[id] ?? null;
+
+  await deriveTasteSignals(q, "s1", 1000);
+  const cited = q.evidence.map((e) => (e as unknown as { item_id: string | null }).item_id);
+  expect(cited).toEqual([null, null]);
 });

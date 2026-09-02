@@ -140,7 +140,18 @@ export function keywordFallbackDimensions(title: string, comment: string): Taste
 
   // oxlint-disable-next-line unicorn/no-array-sort -- scored is a fresh local array
   scored.sort((a, b) => b.score - a.score || a.index - b.index);
-  return scored.slice(0, MAX_DIMENSIONS).map((entry) => entry.dimension);
+  if (scored.length > 0) return scored.slice(0, MAX_DIMENSIONS).map((entry) => entry.dimension);
+
+  // No keyword matched, but a genuine note (real comment text, not just a bare
+  // sentiment click) must still land somewhere reviewable — derive.ts groups
+  // annotations strictly by dimension, so [] here means the note joins no
+  // group and silently vanishes from taste derivation forever. structure_clarity
+  // is the most defensible catch-all: unlike every other dimension it already
+  // means "a general reaction to how the thing reads overall" rather than one
+  // specific visual axis (color, type, motion, ...), so an unclassifiable note
+  // is filed as feedback on overall clarity/organization instead of being
+  // force-fit onto an axis it never mentioned.
+  return comment.trim().length > 0 ? ["structure_clarity"] : [];
 }
 
 function fenceUntrustedText(value: string): string {

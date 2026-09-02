@@ -1,3 +1,4 @@
+import { ARTIFACT_ASPECTS, ASPECT_RATIO, type ArtifactAspect } from "@shared/contract";
 /**
  * Component artifacts are an explicit, narrowly-scoped exception to the
  * default static preview. Their code runs in an opaque iframe, never in the
@@ -43,4 +44,17 @@ export function previewSrcDoc(html: string): string {
 
 export function previewSandbox(html: string): string {
   return isComponentPreview(html) ? "allow-scripts" : "";
+}
+
+const ASPECT_MARKER_RE = /<meta\s+name=["']gotothearchive-aspect["']\s+content=["']([^"']+)["']\s*\/?>/i;
+
+/**
+ * The CSS `aspect-ratio` this artifact declared, or null for "auto" and for
+ * anything recorded before artifacts declared a shape.
+ */
+export function previewAspectRatio(html: string): string | null {
+  const found = ASPECT_MARKER_RE.exec(html);
+  if (!found) return null;
+  const key = found[1] as ArtifactAspect;
+  return (ARTIFACT_ASPECTS as readonly string[]).includes(key) ? ASPECT_RATIO[key] : null;
 }

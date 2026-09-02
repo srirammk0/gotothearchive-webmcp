@@ -35,7 +35,31 @@ test("fallback is deterministic, conservative, and capped at three dimensions", 
   expect(first).toEqual(second);
   expect(first).toHaveLength(3);
   expect(new Set(first).size).toBe(3);
-  expect(keywordFallbackDimensions("A review", "This feels wrong but gives no useful dimension.")).toEqual([]);
+});
+
+test("fallback never returns empty for a genuine note, even with no keyword match", () => {
+  // No keyword rule matches this text, but it's a real comment: the catch-all
+  // must fire so the note still reaches taste derivation instead of vanishing.
+  expect(keywordFallbackDimensions("A review", "This feels wrong but gives no useful dimension.")).toEqual([
+    "structure_clarity",
+  ]);
+  expect(keywordFallbackDimensions("A review", "This feels wrong but gives no useful dimension.")).toEqual(
+    keywordFallbackDimensions("A review", "This feels wrong but gives no useful dimension."),
+  );
+});
+
+test("fallback stays empty when there is no real comment to classify", () => {
+  expect(keywordFallbackDimensions("Homepage review", "")).toEqual([]);
+  expect(keywordFallbackDimensions("Homepage review", "   ")).toEqual([]);
+});
+
+test("classifyAnnotationDimensions without a provider still returns a dimension for an unmatched note", async () => {
+  await expect(
+    classifyAnnotationDimensions(undefined, {
+      ...humanInput,
+      comment: "This feels wrong but gives no useful dimension.",
+    }),
+  ).resolves.toEqual(["structure_clarity"]);
 });
 
 test("accepts structured response, removes unknown values, deduplicates, and caps at three", async () => {
