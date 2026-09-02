@@ -157,12 +157,6 @@ export interface MemorySyncStatus {
 export const getMemoryStatus = () =>
   req<{ status: MemorySyncStatus; key_at_request: boolean }>(API.memoryStatus);
 
-export const resyncMemory = () =>
-  req<{ queued: number; drained: unknown; key_at_request: boolean; status: MemorySyncStatus }>(
-    API.memoryStatus,
-    { method: "POST" },
-  );
-
 /** Move one or more items to another folder, and/or rename a single item. */
 export const updateItems = (
   ids: string[],
