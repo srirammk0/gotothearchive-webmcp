@@ -49,7 +49,7 @@ export const QUOTA = {
   /** POST /api/upload — one R2 Class A op + storage. Pair with UPLOAD_MAX_BYTES. */
   uploads: 60,
   /** record_artifact tool — a new artifact version row. */
-  artifacts: 60,
+  artifacts: 100,
 } as const;
 
 export type QuotaMetric = keyof typeof QUOTA;
