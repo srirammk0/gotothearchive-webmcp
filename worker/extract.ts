@@ -149,7 +149,12 @@ function isSelfLink(u: string): boolean {
 /** Pure: map a cdn.syndication.twimg.com tweet-result payload to ExtractResult. */
 export function parseTweetResult(json: unknown): ExtractResult {
   const t = (json ?? {}) as Record<string, unknown>;
-  const text = typeof t.text === "string" ? t.text : null;
+  const rawText = typeof t.text === "string" ? t.text : null;
+  // display_text_range marks the human-authored span; anything after it is the
+  // auto-appended media/quote t.co link, which is noise in semantic_text.
+  const range = Array.isArray(t.display_text_range) ? t.display_text_range : null;
+  const end = range && typeof range[1] === "number" ? range[1] : null;
+  const text = rawText && end !== null ? rawText.slice(0, end).trim() || rawText : rawText;
   const user = (t.user ?? {}) as Record<string, unknown>;
   const author = typeof user.screen_name === "string" ? user.screen_name : null;
 

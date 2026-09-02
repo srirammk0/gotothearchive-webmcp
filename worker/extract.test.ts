@@ -34,6 +34,19 @@ test("parseTweetResult maps fields, dedupes images, drops self-links", () => {
   assert.deepEqual(r.links, ["https://example.com/post"]);
 });
 
+test("parseTweetResult trims the auto-appended media link via display_text_range", () => {
+  const r = parseTweetResult({
+    text: "The design vs The image https://t.co/QPou8ubm07",
+    display_text_range: [0, 23],
+    user: { screen_name: "Palakonweb" },
+    mediaDetails: [{ media_url_https: "https://pbs.twimg.com/media/HQNrjNeaUAAOkNY.jpg" }],
+    entities: { urls: [] },
+  });
+  assert.equal(r.text, "The design vs The image");
+  assert.equal(r.title, "The design vs The image");
+  assert.deepEqual(r.images, ["https://pbs.twimg.com/media/HQNrjNeaUAAOkNY.jpg"]);
+});
+
 test("parseTweetResult tolerates junk", () => {
   const r = parseTweetResult(null);
   assert.equal(r.text, null);
