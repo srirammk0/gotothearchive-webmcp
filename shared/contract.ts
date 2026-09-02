@@ -229,6 +229,8 @@ export interface Artifact {
   task_id: Id;
   kind: "visual_brief";
   title: string;
+  /** Set once at creation, never moved — an artifact belongs to exactly one folder. */
+  region_id: Id | null;
   created_at: number;
 }
 

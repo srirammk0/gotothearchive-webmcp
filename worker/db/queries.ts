@@ -138,6 +138,7 @@ interface ArtifactRow {
   task_id: string;
   kind: string;
   title: string;
+  region_id: string | null;
   created_at: number;
 }
 interface ArtifactVersionRow {
@@ -1249,12 +1250,13 @@ export class Queries {
 
   insertArtifact(a: Artifact): void {
     this.sql.exec(
-      `INSERT INTO artifacts (id, space_id, task_id, kind, title, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO artifacts (id, space_id, task_id, kind, title, region_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
       a.id,
       a.space_id,
       a.task_id,
       a.kind,
       a.title,
+      a.region_id,
       a.created_at,
     );
   }

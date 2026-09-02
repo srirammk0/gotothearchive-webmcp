@@ -263,8 +263,6 @@ export interface WorkbenchArtifact extends Artifact {
   updated_at: number;
   preview_html: string;
   influence_count: number;
-  /** Slugs of the archive folders whose material shaped the latest version. */
-  regions: string[];
 }
 
 export const listArtifacts = () => req<{ artifacts: WorkbenchArtifact[] }>(API.artifacts);

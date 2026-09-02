@@ -461,7 +461,30 @@ export async function handleToolCall(
     }
 
     case "record_artifact": {
-      const regionSlug = typeof input.region === "string" ? input.region : "";
+      const artifactId = typeof input.artifact_id === "string" ? input.artifact_id : null;
+      const parentVersionId =
+        typeof input.parent_version_id === "string" ? input.parent_version_id : null;
+
+      let existing: ReturnType<typeof q.getArtifact> = null;
+      if (artifactId) {
+        existing = q.getArtifact(artifactId);
+        if (!existing || existing.task_id !== task.id || existing.space_id !== task.space_id) {
+          return denyResult(DENIAL_REASONS.EXCEEDS_HUMAN);
+        }
+      } else if (parentVersionId) {
+        return denyResult(DENIAL_REASONS.INVALID_PARENT);
+      }
+
+      // An artifact's folder is set once, at creation, and never moves — a
+      // revision is authorized and placed against the artifact's OWN existing
+      // region, never whatever `region` this particular call happens to send.
+      // That's what stops the same artifact from ever landing in a second
+      // folder: there's no code path that writes a different one later.
+      const regionSlug = existing
+        ? q.getRegion(existing.region_id ?? "")?.slug ?? ""
+        : typeof input.region === "string"
+          ? input.region
+          : "";
       const authResult = authorize(
         q,
         {
@@ -485,23 +508,14 @@ export async function handleToolCall(
         input.renderer === "component"
           ? `${placementMarker}<meta name="gotothearchive-renderer" content="component">${rawContentHtml}`
           : `${placementMarker}${rawContentHtml}`;
-      const parentVersionId =
-        typeof input.parent_version_id === "string" ? input.parent_version_id : null;
 
-      let artifactId = typeof input.artifact_id === "string" ? input.artifact_id : null;
       let versionNo = 1;
-      if (artifactId) {
-        const existing = q.getArtifact(artifactId);
-        if (!existing || existing.task_id !== task.id || existing.space_id !== task.space_id) {
-          return denyResult(DENIAL_REASONS.EXCEEDS_HUMAN);
-        }
-        const latest = q.latestArtifactVersion(artifactId);
+      if (existing) {
+        const latest = q.latestArtifactVersion(existing.id);
         if (!latest || parentVersionId !== latest.id) {
           return denyResult(DENIAL_REASONS.INVALID_PARENT);
         }
         versionNo = latest.version_no + 1;
-      } else if (parentVersionId) {
-        return denyResult(DENIAL_REASONS.INVALID_PARENT);
       }
       // A revision must chain to a real version of this same artifact — never a
       // stray id or one from another artifact/task.
@@ -509,8 +523,8 @@ export async function handleToolCall(
         const parent = q.getArtifactVersion(parentVersionId);
         if (
           !parent ||
-          !artifactId ||
-          parent.artifact_id !== artifactId ||
+          !existing ||
+          parent.artifact_id !== existing.id ||
           !versionSessionBelongsToTask(q, parent.agent_session_id, task.id, human.human_id)
         ) {
           return denyResult(DENIAL_REASONS.INVALID_PARENT);
@@ -518,14 +532,16 @@ export async function handleToolCall(
       }
       const budget = consumeQuota(q, human.human_id, "artifacts");
       if (!budget.ok) return denyResult(budget.message);
-      if (!artifactId) {
-        artifactId = crypto.randomUUID();
+      let finalArtifactId = existing?.id ?? null;
+      if (!finalArtifactId) {
+        finalArtifactId = crypto.randomUUID();
         q.insertArtifact({
-          id: artifactId,
+          id: finalArtifactId,
           space_id: task.space_id,
           task_id: task.id,
           kind: "visual_brief",
           title,
+          region_id: authResult.region.id,
           created_at: now,
         });
       }
@@ -533,7 +549,7 @@ export async function handleToolCall(
       const versionId = crypto.randomUUID();
       q.insertArtifactVersion({
         id: versionId,
-        artifact_id: artifactId,
+        artifact_id: finalArtifactId,
         version_no: versionNo,
         parent_version_id: parentVersionId,
         content_html: contentHtml,
@@ -583,7 +599,7 @@ export async function handleToolCall(
       return {
         ok: true,
         result: {
-          artifact_id: artifactId,
+          artifact_id: finalArtifactId,
           version_id: versionId,
           next: "Awaiting human review in the Workbench. Call trace_artifact_influences to read annotations before submitting a revision.",
         },

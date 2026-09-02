@@ -121,16 +121,17 @@ function ArtifactList({ regions }: { regions: Region[] }) {
 
   useTrail([{ label: "Workbench" }]);
 
+  // An artifact belongs to exactly one folder (its region_id, set once at
+  // creation — see worker/mcp.ts's record_artifact), so this groups into
+  // exactly one bucket per artifact, never more.
   const groups = useMemo(() => {
-    const nameBySlug = new Map(regions.map((r) => [r.slug, r.name]));
+    const nameById = new Map(regions.map((r) => [r.id, r.name]));
     const bucket = new Map<string, { name: string; items: WorkbenchArtifact[] }>();
     for (const a of artifacts) {
-      const slugs = a.regions.length ? a.regions : ["_none"];
-      for (const slug of slugs) {
-        const name = slug === "_none" ? "Not yet attributed" : (nameBySlug.get(slug) ?? slug);
-        if (!bucket.has(slug)) bucket.set(slug, { name, items: [] });
-        bucket.get(slug)!.items.push(a);
-      }
+      const key = a.region_id ?? "_none";
+      const name = a.region_id ? (nameById.get(a.region_id) ?? "Unknown folder") : "Not yet attributed";
+      if (!bucket.has(key)) bucket.set(key, { name, items: [] });
+      bucket.get(key)!.items.push(a);
     }
     const regionGroups = [...bucket.values()];
     // oxlint-disable-next-line unicorn/no-array-sort -- regionGroups is a fresh local array

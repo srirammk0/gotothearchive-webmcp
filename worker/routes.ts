@@ -1004,12 +1004,6 @@ async function handleMcpCall(
   return json(result, { status: result.ok ? 200 : 403 });
 }
 
-/** Server-written submission placement. Separate from influence provenance. */
-function submittedRegionId(contentHtml: string): string | null {
-  const match = contentHtml.match(/<meta\s+name=["']gotothearchive-region["']\s+content=["']([^"']+)["']\s*\/?>/i);
-  return match?.[1] ?? null;
-}
-
 /* ---------------- artifacts ---------------- */
 
 function handleArtifacts(request: Request, q: Queries, humanId: string): Response {
@@ -1029,18 +1023,10 @@ function handleArtifacts(request: Request, q: Queries, humanId: string): Respons
     return json({ ok: true, artifact, versions: q.listArtifactVersions(id) });
   }
   const spaceId = spaceIdFor(humanId);
-  const regionsBySlug = q.listRegions(spaceId);
-  const regionById = new Map(regionsBySlug.map((r) => [r.id, r.slug]));
   const artifacts = q.listArtifacts(spaceId).map((a) => {
     const versions = q.listArtifactVersions(a.id);
     const latest = versions[versions.length - 1];
     const influences = latest ? q.listInfluences(latest.id) : [];
-    const items = q.getItems(influences.map((i) => i.item_id));
-    const influencedRegions = items.map((it) => regionById.get(it.region_id)).filter((slug): slug is string => Boolean(slug));
-    // Placement never masquerades as provenance: use the submitted folder only
-    // when an artifact has no real influences to group by.
-    const submittedRegion = latest ? regionById.get(submittedRegionId(latest.content_html) ?? "") : undefined;
-    const regions = [...new Set(influencedRegions.length > 0 ? influencedRegions : submittedRegion ? [submittedRegion] : [])];
     return {
       ...a,
       version_count: versions.length,
@@ -1048,7 +1034,6 @@ function handleArtifacts(request: Request, q: Queries, humanId: string): Respons
       updated_at: latest?.created_at ?? a.created_at,
       preview_html: latest?.content_html ?? "",
       influence_count: influences.length,
-      regions,
     };
   });
   return json({ ok: true, artifacts });
@@ -1204,7 +1189,7 @@ async function handleDecisions(request: Request, q: Queries, humanId: string, en
   if ((nextState === "approved" || nextState === "approved_with_notes") && version.agent_session_id) {
     const influences = q.listInfluences(version.id);
     const influencedDestination = influences.length > 0 ? q.getItem(influences[0].item_id) : null;
-    const destinationRegion = submittedRegionId(version.content_html) ?? influencedDestination?.region_id;
+    const destinationRegion = artifact.region_id ?? influencedDestination?.region_id;
     const alreadyPromoted = q
       .listItemsBySpace(artifact.space_id)
       .some((item) => item.metadata.artifact_version_id === version.id);
