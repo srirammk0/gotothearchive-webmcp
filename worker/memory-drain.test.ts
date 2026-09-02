@@ -94,6 +94,39 @@ test("deleteItem queues a delete op that the drain sends on", async () => {
   expect(statuses).toEqual([{ op: "delete", status: "done" }, { op: "upsert", status: "done" }]);
 });
 
+test("backfillMemoryOutbox queues only items that never synced", async () => {
+  const { q, db } = makeQueries();
+  seedItem(q, "i1"); // insertItem already queued an upsert for i1
+  q.insertItem({
+    id: "i2", space_id: "s", region_id: "r", owner_id: "u", type: "note", title: "Item i2",
+    source_url: null, content_ref: null, semantic_text: "body", metadata: {},
+    authority_class: "human_authored", created_by: "u", created_at: 1, updated_at: 1,
+  });
+  await drainSpaceMemory(q, stubIndex(), ["s"]); // i1 + i2 both -> done
+
+  // simulate an old item with no outbox history at all
+  db.run(
+    `INSERT INTO items (id, space_id, region_id, owner_id, type, title, source_url, content_ref, semantic_text, metadata, authority_class, created_by, created_at, updated_at)
+     VALUES ('old', 's', 'r', 'u', 'note', 'Old item', NULL, NULL, 'never synced', '{}', 'human_authored', 'u', 1, 1)`,
+  );
+  // and one whose only history is a failed attempt
+  db.run(
+    `INSERT INTO items (id, space_id, region_id, owner_id, type, title, source_url, content_ref, semantic_text, metadata, authority_class, created_by, created_at, updated_at)
+     VALUES ('flaky', 's', 'r', 'u', 'note', 'Flaky item', NULL, NULL, 'text', '{}', 'human_authored', 'u', 1, 1)`,
+  );
+  db.run(
+    `INSERT INTO memory_outbox (id, space_id, op, item_id, custom_id, container_tag, payload, status, attempts, created_at, updated_at)
+     VALUES ('j', 's', 'upsert', 'flaky', 'flaky', 's', '{}', 'failed', 5, 1, 1)`,
+  );
+
+  const queued = q.backfillMemoryOutbox("s");
+  expect(queued).toBe(2); // 'old' and 'flaky', not i1 / i2 (already done)
+  const pendingIds = (db.query("SELECT item_id FROM memory_outbox WHERE status = 'pending'").all() as { item_id: string }[])
+    .map((r) => r.item_id)
+    .toSorted();
+  expect(pendingIds).toEqual(["flaky", "old"]);
+});
+
 test("memoryContent joins title and body, trims when body is absent", () => {
   expect(memoryContent({ title: "T", semantic_text: "B", region_id: "r", authority_class: "human_authored" })).toBe("T\nB");
   expect(memoryContent({ title: "T", semantic_text: null, region_id: "r", authority_class: "human_authored" })).toBe("T");

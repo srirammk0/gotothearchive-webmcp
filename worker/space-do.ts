@@ -47,6 +47,19 @@ export class SpaceDO extends DurableObject<Env> {
         console.error("space-do: extraction-child cleanup failed", e);
       }
 
+      // Catch the external memory index up on anything not yet synced (captured
+      // before the mirror, or before the API key was set). Idempotent; the
+      // alarm below drains whatever this queues.
+      try {
+        let queued = 0;
+        for (const space of this.queries.listSpaces()) {
+          queued += this.queries.backfillMemoryOutbox(space.id);
+        }
+        if (queued > 0) await this.ctx.storage.setAlarm(Date.now() + MEMORY_DRAIN_DELAY_MS);
+      } catch (e) {
+        console.error("space-do: memory backfill failed", e);
+      }
+
       // Derived graph rules are versioned. A marker avoids repeated O(n²)
       // rescans while a version bump deliberately reruns derivation. The
       // backfill only inserts missing system edges; human-created edges remain.

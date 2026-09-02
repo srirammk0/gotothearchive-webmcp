@@ -456,6 +456,30 @@ export class Queries {
     });
   }
 
+  /**
+   * Catch the external index up: queue an upsert for every item that has never
+   * successfully synced (no 'done' row) and isn't already pending. Covers items
+   * captured before the mirror existed or before the API key was set. Cheap and
+   * idempotent — safe to run on every boot; the alarm drains the backlog.
+   */
+  backfillMemoryOutbox(spaceId: string): number {
+    if (!this.opts.mirrorMemory) return 0;
+    const now = Date.now();
+    let queued = 0;
+    for (const item of this.listItemsBySpace(spaceId)) {
+      const seen = this.sql
+        .exec<{ n: number }>(
+          `SELECT COUNT(*) AS n FROM memory_outbox WHERE item_id = ? AND status IN ('done', 'pending')`,
+          item.id,
+        )
+        .toArray()[0]?.n ?? 0;
+      if (seen > 0) continue;
+      this.mirrorItem("upsert", item, now);
+      queued++;
+    }
+    return queued;
+  }
+
   /* ---------------- spaces ---------------- */
 
   insertSpace(s: Space): void {
