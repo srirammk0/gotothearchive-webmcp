@@ -7,6 +7,7 @@
  */
 import {
   API,
+  confidenceFrom,
   DENIAL_REASONS,
   grantAtLeast,
   RELATIONSHIPS,
@@ -733,6 +734,101 @@ export async function handleToolCall(
         result: {
           annotation_id: annotationId,
           next: "Recorded for review. Personal taste only learns from the person's own feedback.",
+        },
+      };
+    }
+
+    // Auto-derivation only learns from the human's own annotations (by design:
+    // an agent's opinion of its own work is not taste). This is the other
+    // route in: an agent that has read back several annotations pointing the
+    // same way can name the pattern explicitly, grounded in the annotations
+    // that support it. It still lands as "proposed" and still requires a
+    // human to confirm — proposing is not learning.
+    case "propose_taste_signal": {
+      const regionSlug = typeof input.region === "string" ? input.region : "";
+      const authResult = authorize(
+        q,
+        { taskId: task.id, agentSessionId: session.id, regionSlug, need: "propose", toolName: body.tool, requested: input },
+        now,
+      );
+      if (!authResult.ok) return denyResult(authResult.reason);
+
+      const statement = typeof input.statement === "string" ? input.statement.trim().slice(0, 200) : "";
+      if (!statement) return denyResult(DENIAL_REASONS.EXCEEDS_HUMAN);
+      const dimensions = Array.isArray(input.dimensions)
+        ? (input.dimensions.filter((d): d is TasteDimension =>
+            typeof d === "string" && (TASTE_DIMENSIONS as readonly string[]).includes(d),
+          ) as TasteDimension[])
+        : [];
+
+      // Every cited annotation is re-verified: it must belong to an artifact
+      // version in this task and space, same as record_feedback's own check.
+      const annotationIds = Array.isArray(input.annotation_ids)
+        ? input.annotation_ids.filter((v): v is string => typeof v === "string").slice(0, 8)
+        : [];
+      const evidence: { annotation_id: string | null; item_id: string | null }[] = [];
+      for (const annotationId of annotationIds) {
+        const annotation = q.getAnnotation(annotationId);
+        const version = annotation ? q.getArtifactVersion(annotation.version_id) : null;
+        const artifact = version ? q.getArtifact(version.artifact_id) : null;
+        if (!annotation || !artifact || artifact.task_id !== task.id || artifact.space_id !== task.space_id) continue;
+        evidence.push({ annotation_id: annotationId, item_id: null });
+      }
+      const itemIds = Array.isArray(input.item_ids)
+        ? input.item_ids.filter((v): v is string => typeof v === "string").slice(0, 8)
+        : [];
+      const reachable = authorizedRegionIds(q, task.id, now);
+      for (const itemId of itemIds) {
+        const item = q.getItem(itemId);
+        if (!item || item.space_id !== task.space_id || !reachable.has(item.region_id) || !taskAllowsItem(q, task, item)) continue;
+        evidence.push({ annotation_id: null, item_id: itemId });
+      }
+      if (evidence.length === 0) return denyResult(DENIAL_REASONS.EXCEEDS_HUMAN);
+
+      const project = taskProject(q, task);
+      const signalId = crypto.randomUUID();
+      q.insertTasteSignal({
+        id: signalId,
+        space_id: task.space_id,
+        owner_id: human.human_id,
+        statement,
+        dimensions,
+        scope: project ? "project" : "personal",
+        project_id: project?.id ?? null,
+        status: "proposed",
+        confidence: confidenceFrom(evidence.length, 0),
+        created_by: "system",
+        approved_by: null,
+        supersedes: null,
+        created_at: now,
+      });
+      for (const e of evidence) {
+        q.insertTasteEvidence({
+          id: crypto.randomUUID(),
+          signal_id: signalId,
+          kind: "supports",
+          annotation_id: e.annotation_id,
+          version_id: null,
+          item_id: e.item_id,
+        });
+      }
+      q.insertTasteEvent({
+        id: crypto.randomUUID(),
+        signal_id: signalId,
+        kind: "proposed",
+        actor_type: "agent",
+        actor_label: session.id,
+        agent_session_id: session.id,
+        detail: "Proposed from agent-observed feedback.",
+        version_id: null,
+        at: now,
+      });
+
+      return {
+        ok: true,
+        result: {
+          signal_id: signalId,
+          next: "Proposed for the person's review. It will not affect any future work until they confirm it.",
         },
       };
     }

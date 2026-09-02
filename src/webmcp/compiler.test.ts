@@ -136,20 +136,24 @@ test("approval is never an agent capability, even at write with proposals pendin
   );
 });
 
-test("trace_artifact_influences appears only when an artifact is active", () => {
+test("trace_artifact_influences is available at read tier regardless of page state, but notes an active artifact when there is one", () => {
   const base: CapabilityInput = {
     humanRegions: [{ slug: "work", level: "read" }],
     grants: [{ slug: "work", level: "read" }],
     task,
     pageState: noPageState,
   };
-  assert.equal(findTool(compile(base), "trace_artifact_influences"), undefined);
+  const withoutArtifact = findTool(compile(base), "trace_artifact_influences");
+  assert.ok(withoutArtifact, "must be callable by artifact_id/version_id even with nothing open");
+  assert.ok(!withoutArtifact!.why.includes("An artifact is open"));
 
   const withArtifact: CapabilityInput = {
     ...base,
     pageState: { hasPendingProposals: false, activeArtifactId: "art1" },
   };
-  assert.ok(findTool(compile(withArtifact), "trace_artifact_influences"));
+  const found = findTool(compile(withArtifact), "trace_artifact_influences");
+  assert.ok(found);
+  assert.ok(found!.why.includes("art1"));
 });
 
 test("Chrome WebMCP annotations: readOnlyHint / untrustedContentHint per tool", () => {

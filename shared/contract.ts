@@ -479,6 +479,7 @@ export const TOOL_NAMES = [
   "trace_artifact_influences",
   "record_artifact",
   "record_feedback",
+  "propose_taste_signal",
   "propose_context_change",
   "add_context_item",
   "approve_proposed_changes",
