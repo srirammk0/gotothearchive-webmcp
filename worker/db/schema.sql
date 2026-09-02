@@ -146,12 +146,15 @@ CREATE TABLE IF NOT EXISTS agent_sessions (
   created_at  INTEGER NOT NULL
 );
 
+-- region_id is set once at creation and never moved — an artifact belongs to
+-- exactly one folder, ever. See record_artifact in worker/mcp.ts.
 CREATE TABLE IF NOT EXISTS artifacts (
   id          TEXT PRIMARY KEY,
   space_id    TEXT NOT NULL REFERENCES spaces(id),
   task_id     TEXT NOT NULL REFERENCES tasks(id),
   kind        TEXT NOT NULL,
   title       TEXT NOT NULL,
+  region_id   TEXT REFERENCES regions(id),
   created_at  INTEGER NOT NULL
 );
 

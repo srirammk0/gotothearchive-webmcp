@@ -47,6 +47,7 @@ export function migrate(sql: SqlStorage): void {
   addColumn(sql, "accesses", "applied_signal_ids", "TEXT NOT NULL DEFAULT '[]'");
   addColumn(sql, "annotations", "dimensions", "TEXT");
   addColumn(sql, "tasks", "project_id", "TEXT");
+  addColumn(sql, "artifacts", "region_id", "TEXT");
 
   // These indexes live here, not in schema.sql: they cover a column added above,
   // and schema.sql runs before this on every boot. IF NOT EXISTS keeps them
@@ -74,6 +75,19 @@ export function migrate(sql: SqlStorage): void {
     backfillUsage(sql);
   } catch (e) {
     console.error("migrate: backfillUsage failed", e);
+  }
+
+  // Before artifacts.region_id existed, placement lived only as a meta tag
+  // burned into a version's content_html (worker/mcp.ts's placementMarker) —
+  // and nothing stopped a later record_artifact call from writing a
+  // *different* region on a revision, so the same artifact could read as
+  // belonging to more than one folder. Backfill from each artifact's FIRST
+  // version (its true original placement, not whatever a later revision
+  // claimed) so existing artifacts get the same one-folder guarantee.
+  try {
+    backfillArtifactRegions(sql);
+  } catch (e) {
+    console.error("migrate: backfillArtifactRegions failed", e);
   }
 }
 
@@ -156,4 +170,22 @@ function backfillUsage(sql: SqlStorage): void {
     period,
     period,
   );
+}
+
+const REGION_MARKER_RE = /<meta\s+name=["']gotothearchive-region["']\s+content=["']([^"']+)["']\s*\/?>/i;
+
+/** One-time, idempotent: fills artifacts.region_id from each artifact's first version's placement marker. */
+function backfillArtifactRegions(sql: SqlStorage): void {
+  const rows = sql
+    .exec<{ id: string; content_html: string }>(
+      `SELECT a.id AS id, v.content_html AS content_html
+       FROM artifacts a
+       JOIN artifact_versions v ON v.artifact_id = a.id AND v.version_no = 1
+       WHERE a.region_id IS NULL`,
+    )
+    .toArray();
+  for (const row of rows) {
+    const regionId = row.content_html.match(REGION_MARKER_RE)?.[1];
+    if (regionId) sql.exec(`UPDATE artifacts SET region_id = ? WHERE id = ?`, regionId, row.id);
+  }
 }
