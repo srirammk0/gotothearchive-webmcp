@@ -139,7 +139,7 @@ export function CapturePreview({
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
         transition={{ duration: duration.fast, ease }}
-        className="fixed inset-0 z-50 flex items-center justify-center bg-canvas/80 p-3 backdrop-blur-lg sm:p-5"
+        className="fixed inset-0 z-50 flex items-center justify-center bg-canvas/80 px-3 py-3 backdrop-blur-lg sm:px-5"
         onMouseDown={(e) => e.target === e.currentTarget && done()}
       >
         <motion.div
@@ -147,7 +147,7 @@ export function CapturePreview({
           animate={{ opacity: 1, y: 0, scale: 1 }}
           exit={{ opacity: 0, y: 10, scale: 0.985 }}
           transition={{ duration: duration.base, ease }}
-          className="relative flex max-h-[93vh] w-full max-w-[min(1440px,96vw)] flex-col overflow-hidden rounded-[var(--radius-lg)] border border-line bg-surface shadow-2xl shadow-black/50 md:flex-row"
+          className="relative flex h-[94vh] max-h-[94vh] w-full max-w-[min(1440px,96vw)] flex-col overflow-hidden rounded-[var(--radius-lg)] border border-line bg-surface shadow-2xl shadow-black/50 md:flex-row"
         >
           <button
             type="button"
