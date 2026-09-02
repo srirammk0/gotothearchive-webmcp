@@ -1074,6 +1074,17 @@ function handleArtifacts(request: Request, q: Queries, humanId: string): Respons
     if (!id) return badRequest("id required");
     const artifact = q.getArtifact(id);
     if (!artifact || artifact.space_id !== spaceIdFor(humanId)) return badRequest("not found");
+    // record_artifact spends one "artifacts" quota unit per version submitted
+    // this period. Deleting the artifact should give those units back, not
+    // leave the person permanently down a slot for work they undid — but
+    // only for versions actually submitted in the *current* period; anything
+    // from an earlier month has no live counter left to refund into.
+    const period = quotaPeriod();
+    const refund = q.listArtifactVersions(id).filter((v) => quotaPeriod(v.created_at) === period).length;
+    if (refund > 0) {
+      const used = q.usageGet(humanId, period, "artifacts");
+      q.usageAdd(humanId, period, "artifacts", -Math.min(refund, used));
+    }
     q.deleteArtifact(id);
     return json({ ok: true, deleted: id });
   }
