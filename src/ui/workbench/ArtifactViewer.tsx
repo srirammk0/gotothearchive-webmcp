@@ -253,6 +253,13 @@ export function ArtifactViewer({ version, annotations = [], onAddRegion, onAddCo
           srcDoc={srcDoc}
           sandbox={sandbox}
           referrerPolicy="no-referrer"
+          // No internal scroll: the region marks below are positioned as a %
+          // of this iframe's own box, computed once at draw time. Left
+          // scrollable, scrolling *inside* the iframe moves the content under
+          // the marks without moving the marks — they'd drift out of place.
+          // View full screen (below) for content taller than this viewport.
+          scrolling="no"
+          style={{ overflow: "hidden" }}
           className="h-[560px] w-full rounded-[var(--radius-md)] border border-line bg-white"
         />
 
