@@ -41,6 +41,7 @@ import { deriveTasteSignals, statementOverlap } from "./taste/derive";
 import { classifyAnnotationDimensions } from "./taste/classifier";
 import { extractUrl, isPublicHttpUrl } from "./extract";
 import { deriveEdgesForItem } from "./graph-build";
+import { drainSpaceMemory, memoryIndexFor } from "./memory-drain";
 
 /**
  * Each signed-in human gets their own Space, keyed to their Clerk id.
@@ -141,7 +142,7 @@ export async function handleRoute(
     case API.itemNotes:
       return await handleItemNotes(request, q, human.human_id);
     case API.memoryStatus:
-      return handleMemoryStatus(request, q, human.human_id);
+      return await handleMemoryStatus(request, q, human.human_id, env);
     default:
       return new Response(null, { status: 404 });
   }
@@ -1701,16 +1702,29 @@ function handleQuota(q: Queries, humanId: string): Response {
 
 /* ---------------- memory sync ---------------- */
 
-function handleMemoryStatus(request: Request, q: Queries, humanId: string): Response {
+async function handleMemoryStatus(request: Request, q: Queries, humanId: string, env: Env): Promise<Response> {
   const spaceId = spaceIdFor(humanId);
+  // key_at_request: is the secret visible to the worker NOW. mirror_enabled
+  // (inside status): was it visible when the DO last constructed. A mismatch
+  // means the DO booted before the secret was set and needs a restart.
+  const keyAtRequest = Boolean(env.SUPERMEMORY_API_KEY?.trim());
   if (request.method === "GET") {
-    return json({ ok: true, status: q.memoryStatus(spaceId) });
+    return json({ ok: true, status: q.memoryStatus(spaceId), key_at_request: keyAtRequest });
   }
   if (request.method === "POST") {
-    // Force-queue every not-yet-synced item. SpaceDO.fetch() arms the drain
-    // alarm after this non-GET request returns, so the backlog flushes shortly.
+    // Force-queue every not-yet-synced item, then drain inline so the caller
+    // sees real progress rather than waiting on the alarm.
     const queued = q.backfillMemoryOutbox(spaceId);
-    return json({ ok: true, queued, status: q.memoryStatus(spaceId) });
+    const index = memoryIndexFor(env);
+    let drained: unknown = null;
+    if (index) {
+      const { report } = await drainSpaceMemory(q, index, [env.SUPERMEMORY_API_KEY ?? ""], async (key) => {
+        const obj = await env.BLOBS.get(key);
+        return obj?.body ? { body: obj.body, contentType: obj.httpMetadata?.contentType ?? null } : null;
+      });
+      drained = report;
+    }
+    return json({ ok: true, queued, drained, key_at_request: keyAtRequest, status: q.memoryStatus(spaceId) });
   }
   return badRequest("GET or POST");
 }
