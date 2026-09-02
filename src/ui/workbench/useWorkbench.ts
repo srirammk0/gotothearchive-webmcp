@@ -3,10 +3,12 @@ import type { Annotation, Artifact, ArtifactVersion, ReviewDecision } from "@sha
 import {
   ApiError,
   createAnnotation,
+  errorMessage,
   getArtifact,
   getProvenance,
   listAnnotations,
   recordDecision,
+  updateAnnotation,
   type Provenance,
 } from "../../api/client";
 
@@ -28,17 +30,19 @@ export function useWorkbench(artifactId: string | undefined) {
   const [selectedVersionId, setSelectedVersionId] = useState<string | null>(null);
 
   const load = useCallback(
-    async (versionOverride?: string) => {
+    async (versionOverride?: string, opts?: { silent?: boolean }) => {
       if (!artifactId) {
         setStatus("ready");
         setData(null);
         return;
       }
-      setStatus("loading");
-      setError(null);
+      if (!opts?.silent) setStatus("loading");
+        setError(null);
       try {
         const { artifact, versions } = await getArtifact(artifactId);
-        const sorted = versions.slice().sort((a, b) => a.version_no - b.version_no);
+        const sorted = versions.slice();
+        // oxlint-disable-next-line unicorn/no-array-sort -- sorted is a fresh copy
+        sorted.sort((a, b) => a.version_no - b.version_no);
         const target = versionOverride ? sorted.find((v) => v.id === versionOverride) : undefined;
         const current = target ?? sorted[sorted.length - 1];
         if (!current) throw new ApiError("This artifact has no versions", 404);
@@ -56,7 +60,7 @@ export function useWorkbench(artifactId: string | undefined) {
           return;
         }
         setStatus("error");
-        setError(e instanceof Error ? e.message : "Something went wrong loading this artifact.");
+        setError(errorMessage(e, "Something went wrong loading this artifact."));
       }
     },
     [artifactId],
@@ -75,15 +79,20 @@ export function useWorkbench(artifactId: string | undefined) {
 
   /** Annotations render optimistically; comment creation is low-risk per product spec. */
   const addAnnotation = useCallback(
-    async (input: { sentiment: Annotation["sentiment"]; comment: string; dimension: string | null }) => {
+    async (input: {
+      sentiment: Annotation["sentiment"];
+      comment: string;
+      target?: Annotation["target"];
+    }) => {
       if (!data) return;
+      const target = input.target ?? null;
       const optimistic: Annotation = {
         id: `optimistic_${crypto.randomUUID()}`,
         version_id: data.version.id,
         author_id: "me",
-        target: null,
+        target,
         sentiment: input.sentiment,
-        dimension: input.dimension,
+        dimensions: [],
         comment: input.comment,
         status: "open",
         created_at: Date.now(),
@@ -94,8 +103,7 @@ export function useWorkbench(artifactId: string | undefined) {
           version_id: data.version.id,
           sentiment: input.sentiment,
           comment: input.comment,
-          dimension: input.dimension,
-          target: null,
+          target,
         });
         const { annotations } = await listAnnotations(data.version.id);
         setData((prev) => (prev ? { ...prev, annotations } : prev));
@@ -109,15 +117,33 @@ export function useWorkbench(artifactId: string | undefined) {
     [data],
   );
 
-  /** Decisions are never optimistic: wait for confirmed persistence, then reflect state. */
-  const decide = useCallback(
-    async (decision: ReviewDecision, note?: string) => {
+  const editAnnotation = useCallback(
+    async (
+      id: string,
+      changes: { comment?: string; sentiment?: Annotation["sentiment"] },
+    ) => {
       if (!data) return;
-      const { version } = await recordDecision(data.version.id, decision, note);
-      setData((prev) => (prev ? { ...prev, version } : prev));
+      await updateAnnotation(id, changes);
+      const { annotations } = await listAnnotations(data.version.id);
+      setData((prev) => (prev ? { ...prev, annotations } : prev));
     },
     [data],
   );
 
-  return { status, error, data, selectedVersionId, selectVersion, addAnnotation, decide, reload: load };
+  /**
+   * Decisions are never optimistic. After the state lands, silently re-pull the
+   * whole artifact so the version badges, provenance, and any promoted item all
+   * reflect the new state without a spinner or a manual refresh.
+   */
+  const decide = useCallback(
+    async (decision: ReviewDecision, note?: string) => {
+      if (!data) return;
+      const viewing = data.version.id;
+      await recordDecision(viewing, decision, note);
+      await load(viewing, { silent: true });
+    },
+    [data, load],
+  );
+
+  return { status, error, data, selectedVersionId, selectVersion, addAnnotation, editAnnotation, decide, reload: load };
 }

@@ -12,8 +12,13 @@ import type { ToolSpec } from "@shared/contract";
 interface ModelContextTool {
   name: string;
   description: string;
+  title?: string;
+  annotations?: ToolSpec["annotations"];
   inputSchema: ToolSpec["inputSchema"];
-  execute: (input: unknown, ctx: { signal: AbortSignal }) => Promise<string>;
+  execute: (
+    input: unknown,
+    ctx?: { signal?: AbortSignal },
+  ) => Promise<string>;
 }
 
 interface ModelContextLike {
@@ -43,9 +48,25 @@ function getModelContext(): ModelContextLike | null {
 interface Registered {
   spec: ToolSpec;
   controller: AbortController;
+  execute: Executor;
 }
 
-export type Executor = (spec: ToolSpec, input: unknown) => Promise<string>;
+export type Executor = (spec: ToolSpec, input: unknown, signal?: AbortSignal) => Promise<string>;
+
+function sameJson(a: unknown, b: unknown): boolean {
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
+/** Fields that change what an agent sees or what the Lens reports. */
+function sameMaterialSpec(a: ToolSpec, b: ToolSpec): boolean {
+  return (
+    a.title === b.title &&
+    a.description === b.description &&
+    a.why === b.why &&
+    sameJson(a.annotations, b.annotations) &&
+    sameJson(a.inputSchema, b.inputSchema)
+  );
+}
 
 export class Registrar {
   private registered = new Map<string, Registered>();
@@ -65,16 +86,32 @@ export class Registrar {
   }
 
   /** Diff `specs` against what's live and register/unregister/re-register the delta. */
+  private subscribed = false;
+
   async sync(specs: ToolSpec[], execute: Executor): Promise<void> {
     const mc = getModelContext();
+
+    // Chrome fires `toolchange` on the model-context object whenever the live
+    // tool set shifts (including changes we didn't make). Subscribe once.
+    if (mc?.addEventListener && !this.subscribed) {
+      this.subscribed = true;
+      mc.addEventListener("toolchange", () => this.emit());
+    }
     const nextByName = new Map<string, ToolSpec>(specs.map((s) => [s.name, s]));
 
-    // removed or changed → abort
+    // Removed or materially changed tools must be unregistered. Aborting the
+    // registration signal is the WebMCP unregister operation; it also makes
+    // any in-flight registration or browser-side work cancellable.
     for (const [name, entry] of this.registered) {
       const next = nextByName.get(name);
-      if (!next || JSON.stringify(next.inputSchema) !== JSON.stringify(entry.spec.inputSchema)) {
+      if (!next || !sameMaterialSpec(next, entry.spec)) {
         entry.controller.abort();
         this.registered.delete(name);
+      } else {
+        // Keep non-material state and the executor current without churning an
+        // otherwise identical browser registration.
+        entry.spec = next;
+        entry.execute = execute;
       }
     }
 
@@ -82,18 +119,27 @@ export class Registrar {
     for (const spec of specs) {
       if (this.registered.has(spec.name)) continue;
       const controller = new AbortController();
+      const entry: Registered = { spec, controller, execute };
       if (mc) {
         await mc.registerTool(
           {
             name: spec.name,
             description: spec.description,
+            title: spec.title,
+            annotations: spec.annotations,
             inputSchema: spec.inputSchema,
-            execute: (input) => execute(spec, input),
+            execute: async (input, ctx) => {
+              const current = this.registered.get(spec.name);
+              if (!current) {
+                return `Unknown tool "${spec.name}". It is not currently registered.`;
+              }
+              return current.execute(current.spec, input, ctx?.signal);
+            },
           },
           { signal: controller.signal },
         );
       }
-      this.registered.set(spec.name, { spec, controller });
+      this.registered.set(spec.name, entry);
     }
 
     this.emit();

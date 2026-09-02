@@ -7,6 +7,7 @@
  * denial.
  */
 import { DENIAL_REASONS, grantAtLeast, type GrantLevel } from "@shared/contract";
+import type { ContextItem, Project, Task } from "@shared/contract";
 import type { Queries } from "./db/queries";
 
 export interface HumanRegionAccess {
@@ -37,10 +38,19 @@ export interface LiveGrant {
   level: GrantLevel;
 }
 
-/** Grants for a task that are not revoked, not expired, and whose task is still open. */
+/** A task is live only while it is open and before its optional expiry. */
+export function taskIsLive(task: Task | null, now: number): task is Task {
+  return Boolean(
+    task &&
+      task.status === "open" &&
+      (task.expires_at === null || task.expires_at > now),
+  );
+}
+
+/** Grants for a task that are not revoked, not expired, and whose task is still live. */
 export function liveGrants(q: Queries, taskId: string, now: number): LiveGrant[] {
   const task = q.getTask(taskId);
-  if (!task || task.status !== "open") return [];
+  if (!taskIsLive(task, now)) return [];
   const live = q
     .grantsForTask(taskId)
     .filter((g) => g.revoked_at === null)
@@ -125,8 +135,7 @@ export function authorize(q: Queries, input: AuthorizeInput, now: number): Autho
   };
 
   const task = q.getTask(input.taskId);
-  if (!task) return deny(DENIAL_REASONS.TASK_CLOSED);
-  if (task.status !== "open") return deny(DENIAL_REASONS.TASK_CLOSED);
+  if (!taskIsLive(task, now)) return deny(DENIAL_REASONS.TASK_CLOSED);
 
   const region = q.getRegionBySlug(task.space_id, input.regionSlug);
   if (!region) return deny(DENIAL_REASONS.UNKNOWN_REGION);
@@ -164,7 +173,7 @@ export function authorize(q: Queries, input: AuthorizeInput, now: number): Autho
 }
 
 /** The set of region ids an authorized (human ∩ grant ∩ task) actor may touch for a task, at >= level. */
-export function authorizedRegionIdsAtLevel(
+function authorizedRegionIdsAtLevel(
   q: Queries,
   taskId: string,
   level: GrantLevel,
@@ -187,4 +196,32 @@ export function authorizedRegionIdsAtLevel(
 /** The set of region ids an authorized (human ∩ grant ∩ task) actor may touch for a task, at >= "read". */
 export function authorizedRegionIds(q: Queries, taskId: string, now: number): Set<string> {
   return authorizedRegionIdsAtLevel(q, taskId, "read", now);
+}
+
+/** Resolve a task project only when it still belongs to the task's owner/space. */
+export function taskProject(q: Queries, task: Task): Project | null {
+  const projectId = task.project_id ?? null;
+  if (projectId === null) return null;
+  const project = q.getProject(projectId);
+  return project && project.space_id === task.space_id && project.owner_id === task.human_id ? project : null;
+}
+
+/** Project membership is an additional scope filter; graphs never widen it. */
+export function taskAllowsItem(q: Queries, task: Task, item: ContextItem): boolean {
+  if ((task.project_id ?? null) === null) return true;
+  const project = taskProject(q, task);
+  return project !== null && q.projectContainsItem(project.id, item.id);
+}
+
+/** Readable item ids are the intersection of live grants and the task project. */
+export function authorizedItemIds(q: Queries, taskId: string, now: number): Set<string> {
+  const task = q.getTask(taskId);
+  if (!task) return new Set();
+  const regionIds = authorizedRegionIds(q, taskId, now);
+  return new Set(
+    q
+      .listItemsByRegions([...regionIds])
+      .filter((item) => taskAllowsItem(q, task, item))
+      .map((item) => item.id),
+  );
 }

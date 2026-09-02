@@ -16,6 +16,7 @@ dist-ssr
 .vscode/*
 !.vscode/extensions.json
 .idea
+.claude/
 .DS_Store
 *.suo
 *.ntvs*
@@ -35,3 +36,7 @@ dist-ssr
 
 .vite
 .dev.vars
+
+# graphify knowledge graph (regenerate with `graphify update .`)
+graphify-out/
+.logo-originals/

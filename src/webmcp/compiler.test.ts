@@ -125,3 +125,68 @@ test("trace_artifact_influences appears only when an artifact is active", () => 
   };
   assert.ok(findTool(compile(withArtifact), "trace_artifact_influences"));
 });
+
+test("Chrome WebMCP annotations: readOnlyHint / untrustedContentHint per tool", () => {
+  const input: CapabilityInput = {
+    humanRegions: [{ slug: "work", level: "propose" }],
+    grants: [{ slug: "work", level: "propose" }],
+    task,
+    pageState: { hasPendingProposals: false, activeArtifactId: "art1" },
+  };
+  const specs = compile(input);
+
+  const readOnly = [
+    "get_current_context_scope",
+    "get_context_for_task",
+    "inspect_context_item",
+    "inspect_relationships",
+    "get_taste_for_task",
+    "trace_artifact_influences",
+  ];
+  for (const name of readOnly) {
+    assert.equal(findTool(specs, name)!.annotations?.readOnlyHint, true, `${name} readOnlyHint`);
+  }
+
+  const untrusted = [
+    "get_context_for_task",
+    "inspect_context_item",
+    "inspect_relationships",
+    "trace_artifact_influences",
+    "get_taste_for_task",
+  ];
+  for (const name of untrusted) {
+    assert.equal(findTool(specs, name)!.annotations?.untrustedContentHint, true, `${name} untrustedContentHint`);
+  }
+
+  for (const name of ["record_feedback", "record_artifact", "propose_context_change"]) {
+    assert.notEqual(findTool(specs, name)!.annotations?.readOnlyHint, true, `${name} must not be readOnly`);
+  }
+
+  for (const spec of specs) {
+    assert.ok(spec.description.length <= 500, `${spec.name} description <= 500`);
+    assert.ok(spec.name.length <= 30, `${spec.name} name <= 30`);
+  }
+
+  assert.equal(findTool(specs, "approve_proposed_changes"), undefined);
+  assert.equal(findTool(specs, "reject_proposed_changes"), undefined);
+});
+
+test("registered schemas expose every input their runtime handler needs", () => {
+  const input: CapabilityInput = {
+    humanRegions: [{ slug: "work", level: "propose" }],
+    grants: [{ slug: "work", level: "propose" }],
+    task,
+    pageState: { hasPendingProposals: false, activeArtifactId: "art1" },
+  };
+  const specs = compile(input);
+  const props = (name: string) => findTool(specs, name)!.inputSchema.properties;
+
+  assert.ok(props("get_context_for_task").query);
+  assert.ok(props("get_context_for_task").limit);
+  assert.ok(props("trace_artifact_influences").version_id);
+  assert.ok(props("trace_artifact_influences").artifact_id);
+  assert.ok(props("record_feedback").version_id);
+  assert.ok(props("record_feedback").comment);
+  assert.ok(props("propose_context_change").from_item_id);
+  assert.ok(props("propose_context_change").to_item_id);
+});

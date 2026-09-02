@@ -8,6 +8,7 @@
  * session, human access, task, and live grant.
  */
 import { API, type Id } from "@shared/contract";
+import { authHeader } from "../api/client";
 
 export interface DeclaredIdentity {
   provider?: string;
@@ -38,7 +39,7 @@ export async function startSession(
 ): Promise<SessionState> {
   const res = await fetch(API.session, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", ...(await authHeader()) },
     credentials: "same-origin",
     body: JSON.stringify({ task_id: taskId, declared }),
   });
@@ -46,12 +47,6 @@ export async function startSession(
   const data = (await res.json()) as { agent_session_id: Id };
   current = { agentSessionId: data.agent_session_id, taskId, declared };
   return current;
-}
-
-export function declareIdentity(declared: DeclaredIdentity): void {
-  if (!current) return;
-  // Attribution only — see file header. Never read for authorization decisions.
-  current = { ...current, declared };
 }
 
 export function getSession(): SessionState | null {

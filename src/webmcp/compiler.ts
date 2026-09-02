@@ -9,6 +9,8 @@
  */
 import {
   GRANT_LEVELS,
+  RELATIONSHIPS,
+  TASTE_DIMENSIONS,
   type CapabilityInput,
   type GrantLevel,
   type ToolSpec,
@@ -38,19 +40,32 @@ function eligibleSlugs(regions: { slug: string; level: GrantLevel }[], requires:
   return regions.filter((r) => levelIndex(r.level) >= levelIndex(requires)).map((r) => r.slug);
 }
 
-function regionSchema(slugs: string[]): ToolSpec["inputSchema"] {
-  return {
-    type: "object",
-    properties: {
-      region: { type: "string", enum: slugs },
-    },
-    required: ["region"],
-  };
-}
-
 export function compile(input: CapabilityInput): ToolSpec[] {
   const regions = effectiveRegions(input);
-  const specs: ToolSpec[] = [];
+
+  // Always offered, before anything else: the client should say which product
+  // it is (Claude, Cursor, ChatGPT, Copilot, …) so its work is attributed
+  // correctly in this space's stats. Declared identity is ATTRIBUTION ONLY and
+  // never influences authorization (BUILD-CONTRACT invariant #9).
+  const specs: ToolSpec[] = [
+    {
+      name: "identify_agent",
+      requires: "read",
+      title: "Identify agent",
+      description:
+        "Identify which agent product you are so your contributions are attributed correctly. Call this once at the start of the session. Example: { client: \"Cursor\", provider: \"anthropic\", model: \"claude-sonnet-4\" }.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          client: { type: "string", description: "Product name, e.g. Claude, Cursor, ChatGPT, Copilot." },
+          provider: { type: "string", description: "Model vendor, e.g. anthropic, openai." },
+          model: { type: "string", description: "Model id, if known." },
+        },
+        required: ["client"],
+      },
+      why: "Attribution only — never used for access decisions.",
+    },
+  ];
 
   const push = (requires: GrantLevel, build: (slugs: string[]) => Omit<ToolSpec, "requires"> | null) => {
     const slugs = eligibleSlugs(regions, requires);
@@ -62,6 +77,8 @@ export function compile(input: CapabilityInput): ToolSpec[] {
 
   push("read", (slugs) => ({
     name: "get_current_context_scope",
+    title: "Context scope",
+    annotations: { readOnlyHint: true },
     description: input.pageState.hasPendingProposals
       ? "List the regions currently accessible for this task, with their access level. Something you submitted is currently awaiting human review; it is not yet canonical, and there is no tool to approve it yourself."
       : "List the regions currently accessible for this task, with their access level.",
@@ -71,13 +88,24 @@ export function compile(input: CapabilityInput): ToolSpec[] {
 
   push("read", (slugs) => ({
     name: "get_context_for_task",
-    description: "Retrieve context items relevant to the current task, scoped to accessible regions.",
-    inputSchema: regionSchema(slugs),
+    title: "Get context for task",
+    annotations: { readOnlyHint: true, untrustedContentHint: true },
+    description: "Retrieve context items relevant to the current task, scoped to accessible regions. Omit region to search every accessible region.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        region: { type: "string", enum: slugs },
+        query: { type: "string", description: "What context is useful for the current task." },
+        limit: { type: "number", description: "Maximum items to return, from 1 to 20." },
+      },
+    },
     why: `Read access is live on: ${slugs.join(", ")}.`,
   }));
 
   push("read", (slugs) => ({
     name: "inspect_context_item",
+    title: "Inspect context item",
+    annotations: { readOnlyHint: true, untrustedContentHint: true },
     description: "Look up the full detail of a single context item you already have access to.",
     inputSchema: {
       type: "object",
@@ -89,6 +117,8 @@ export function compile(input: CapabilityInput): ToolSpec[] {
 
   push("read", (slugs) => ({
     name: "inspect_relationships",
+    title: "Inspect relationships",
+    annotations: { readOnlyHint: true, untrustedContentHint: true },
     description: "Traverse the context graph around an item, within accessible regions only.",
     inputSchema: {
       type: "object",
@@ -100,8 +130,11 @@ export function compile(input: CapabilityInput): ToolSpec[] {
 
   push("read", (slugs) => ({
     name: "get_taste_for_task",
-    description: "Retrieve confirmed and proposed taste signals relevant to this task.",
-    inputSchema: regionSchema(slugs),
+    title: "Get taste for task",
+    annotations: { readOnlyHint: true, untrustedContentHint: true },
+    description:
+      "Retrieve confirmed and proposed taste signals for this task. Each confirmed signal lists the archive items it is grounded in — inspect those to see concretely what the preference means before applying it.",
+    inputSchema: { type: "object", properties: {} },
     why: `Read access is live on: ${slugs.join(", ")}.`,
   }));
 
@@ -109,11 +142,16 @@ export function compile(input: CapabilityInput): ToolSpec[] {
     input.pageState.activeArtifactId
       ? {
           name: "trace_artifact_influences",
-          description: "Show which context items and taste signals influenced the active artifact.",
+          title: "Trace artifact influences",
+          annotations: { readOnlyHint: true, untrustedContentHint: true },
+          description:
+            "Get the active artifact's current version, human annotations (including marked regions), and the context that influenced it. Use this before submitting a revision.",
           inputSchema: {
             type: "object",
-            properties: { region: { type: "string", enum: slugs }, artifact_id: { type: "string" } },
-            required: ["artifact_id"],
+            properties: {
+              version_id: { type: "string", description: "A specific immutable version to inspect." },
+              artifact_id: { type: "string", description: "Optional; defaults to the artifact open in Workbench." },
+            },
           },
           why: `An artifact is open (${input.pageState.activeArtifactId}) and you can view: ${slugs.join(", ")}.`,
         }
@@ -122,15 +160,36 @@ export function compile(input: CapabilityInput): ToolSpec[] {
 
   push("propose", (slugs) => ({
     name: "propose_context_change",
+    title: "Propose context change",
     description: "Suggest a new or changed context item or relationship. Stays proposed until a human accepts it.",
-    inputSchema: regionSchema(slugs),
+    inputSchema: {
+      type: "object",
+      properties: {
+        region: { type: "string", enum: slugs },
+        from_item_id: { type: "string" },
+        to_item_id: { type: "string" },
+        relationship: { type: "string", enum: RELATIONSHIPS },
+      },
+      required: ["region", "from_item_id", "to_item_id"],
+    },
     why: `You can suggest changes on: ${slugs.join(", ")}.`,
   }));
 
   push("propose", (slugs) => ({
     name: "record_feedback",
+    title: "Record feedback",
     description: "Attach feedback or an annotation to an artifact under review.",
-    inputSchema: regionSchema(slugs),
+    inputSchema: {
+      type: "object",
+      properties: {
+        region: { type: "string", enum: slugs },
+        version_id: { type: "string" },
+        sentiment: { type: "string", enum: ["positive", "negative", "neutral"] },
+        dimensions: { type: "array", items: { type: "string", enum: TASTE_DIMENSIONS } },
+        comment: { type: "string" },
+      },
+      required: ["region", "version_id", "comment"],
+    },
     why: `You can suggest changes on: ${slugs.join(", ")}.`,
   }));
 
@@ -140,6 +199,7 @@ export function compile(input: CapabilityInput): ToolSpec[] {
   // gated at "propose", not "write". Approving it remains a human act.
   push("propose", (slugs) => ({
     name: "record_artifact",
+    title: "Record artifact",
     description:
       "Submit a new artifact version for human review in an accessible region. It does not become canonical until a person approves it. List the items that shaped the work in used_item_ids so the person reviewing can see what informed it.",
     inputSchema: {
@@ -147,7 +207,17 @@ export function compile(input: CapabilityInput): ToolSpec[] {
       properties: {
         region: { type: "string", enum: slugs },
         title: { type: "string" },
-        content_html: { type: "string" },
+        content_html: {
+          type: "string",
+          description:
+            "A complete preview document. For component, include React/ReactDOM UMD scripts from unpkg.com and the Tailwind Play CDN; JSX may use @babel/standalone. The preview has no access to the host app, storage, forms, navigation, or arbitrary network requests.",
+        },
+        renderer: {
+          type: "string",
+          enum: ["static_html", "component"],
+          description:
+            "Use component for a self-contained React/Tailwind UI preview. It runs only in an isolated iframe with no host, storage, navigation, form, or network access.",
+        },
         used_item_ids: {
           type: "array",
           items: { type: "string" },
@@ -160,6 +230,28 @@ export function compile(input: CapabilityInput): ToolSpec[] {
       required: ["region", "title", "content_html"],
     },
     why: `You can suggest changes on: ${slugs.join(", ")}.`,
+  }));
+
+  // Write access is the human saying "this folder is yours to fill" — so the
+  // agent can add material straight into it, no review step. Workbench
+  // (record_artifact) stays for making something new; this is for filing.
+  push("write", (slugs) => ({
+    name: "add_context_item",
+    title: "Add context item",
+    description:
+      "Add a note, link, or document straight into a folder you have write access to. It becomes canonical context immediately — no human review. Use record_artifact instead when you're producing something new to be reviewed.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        region: { type: "string", enum: slugs },
+        type: { type: "string", enum: ["note", "link", "document"] },
+        title: { type: "string" },
+        body: { type: "string", description: "The note text or document body. Plain text." },
+        source_url: { type: "string", description: "For a link: the URL." },
+      },
+      required: ["region", "type", "title"],
+    },
+    why: `You have write access on: ${slugs.join(", ")}.`,
   }));
 
   // `approve_proposed_changes` and `reject_proposed_changes` are deliberately

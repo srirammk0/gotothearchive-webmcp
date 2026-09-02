@@ -1,56 +1,30 @@
 /**
  * Resolves the invoking human for a request.
  *
- * For now: a guest human id carried in a signed cookie, minted on first visit.
- * Clerk hook: when CLERK_SECRET_KEY is wired up, verify the session token from
- * the Authorization header/cookie here and return the Clerk user id instead —
- * everything downstream (permissions, grants, sessions) only needs `human_id`.
+ * Clerk is the only identity. A request without a verifiable session token has
+ * no human behind it, so it gets nothing — every downstream authority check
+ * (spaces, permissions, grants, sessions) is anchored to `human_id`, and an
+ * anonymous caller would be an unbounded one.
  */
-
-const COOKIE_NAME = "gta_human";
-const GUEST_SECRET = "gotothearchive-guest-cookie"; // ponytail: static demo secret, swap for env-bound key if guest cookies need to resist forgery
+import { verifyToken } from "@clerk/backend";
 
 export interface ResolvedHuman {
   human_id: string;
-  kind: "guest" | "clerk";
 }
 
-export function resolveHuman(request: Request): ResolvedHuman {
-  // Clerk hook (inactive): if request has a verifiable Clerk session, return
-  // { human_id: clerkUserId, kind: "clerk" } here instead of falling through.
-
-  const cookie = request.headers.get("Cookie") ?? "";
-  const match = cookie.match(new RegExp(`${COOKIE_NAME}=([^;]+)`));
-  if (match) {
-    const verified = verify(decodeURIComponent(match[1]));
-    if (verified) return { human_id: verified, kind: "guest" };
+export async function resolveHuman(request: Request, env: Env): Promise<ResolvedHuman | null> {
+  const bearer = request.headers.get("Authorization")?.match(/^Bearer (.+)$/)?.[1];
+  // Fall back to Clerk's `__session` cookie so browser-initiated subresource
+  // loads (<img>, <iframe> for blobs) authenticate too — those can't carry an
+  // Authorization header. The cookie is SameSite=Lax, so it's safe against
+  // cross-site POSTs; every blob key is still confined to the caller's space.
+  const cookie = request.headers.get("Cookie")?.match(/(?:^|;\s*)__session=([^;]+)/)?.[1];
+  const token = bearer ?? (cookie ? decodeURIComponent(cookie) : null);
+  if (!token) return null;
+  try {
+    const claims = await verifyToken(token, { secretKey: env.CLERK_SECRET_KEY });
+    return claims.sub ? { human_id: claims.sub } : null;
+  } catch {
+    return null; // expired, forged, or issued by another instance
   }
-  return { human_id: `guest-${crypto.randomUUID()}`, kind: "guest" };
-}
-
-/** Mint a Set-Cookie header for a fresh or existing guest id. */
-export function guestCookie(humanId: string): string {
-  const signed = sign(humanId);
-  return `${COOKIE_NAME}=${encodeURIComponent(signed)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=31536000`;
-}
-
-function sign(humanId: string): string {
-  return `${humanId}.${fnv1a(humanId + GUEST_SECRET)}`;
-}
-
-function verify(token: string): string | null {
-  const idx = token.lastIndexOf(".");
-  if (idx === -1) return null;
-  const humanId = token.slice(0, idx);
-  const sig = token.slice(idx + 1);
-  return sig === fnv1a(humanId + GUEST_SECRET) ? humanId : null;
-}
-
-function fnv1a(input: string): string {
-  let hash = 0x811c9dc5;
-  for (let i = 0; i < input.length; i++) {
-    hash ^= input.charCodeAt(i);
-    hash = Math.imul(hash, 0x01000193);
-  }
-  return (hash >>> 0).toString(16);
 }

@@ -18,7 +18,7 @@ The highest-level ownership boundary. A space is personal or shared.
 
 ### Region
 
-A meaningful area inside a space, such as Work, Inspiration, Research, Personal, or a user-defined category. Regions are important permission boundaries.
+A meaningful area inside a space, such as Work, Inspiration, Research, Personal, or a user-defined category. Regions may be nested into a folder tree; moving an item while inside a region is scoped to that region's direct children. Regions are important permission boundaries.
 
 ### Item
 

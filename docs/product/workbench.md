@@ -26,14 +26,10 @@ The artifact system uses a shared review model with format-specific viewers and 
 
 ## Layout
 
-The default desktop composition contains:
-
-1. A large central artifact viewer.
-2. A right-side annotation rail.
-3. An expandable provenance and influence strip.
-4. Nearby version history.
-5. Anchored review controls.
-6. A collapsible Agent Access panel for the originating task.
+The default desktop composition contains a large central artifact viewer,
+nearby version history, one compact **Annotate** control, expandable feedback
+and context, and anchored review decisions. The artifact stays dominant; a
+permanent form, dense metadata rail, and duplicate activity feed do not.
 
 The artifact remains visually dominant. Metadata and controls should not shrink it into a dashboard card.
 
@@ -54,6 +50,17 @@ optional revised version
 ```
 
 Every state transition records actor, time, previous state, and optional note. Low-risk actions such as adding a comment can be optimistic. Decisions and version replacement require confirmed persistence.
+
+The artifact owner may delete an artifact through an explicit confirmation. This
+removes its review history and provenance records as one unit; it is never an
+agent capability.
+
+An agent-authored artifact stays in the Workbench until a human approves it. On
+approval, it is promoted into the explicit Archive region selected when the
+agent submitted it. Real Archive influences remain separate provenance; they
+are never invented merely to choose a folder. Only approved artifacts with real
+Archive influences contribute annotations to future Taste proposals. Drafts,
+rejected work, and ungrounded agent output do not become Taste context.
 
 ## Review decisions
 
@@ -103,9 +110,9 @@ Suggested dimensions include typography, composition, hierarchy, density, color,
 - Image: normalized rectangle or point.
 - Entire artifact: no local target.
 
-Annotations support two related interaction modes:
+Annotations support two related interaction modes from one **Annotate** control:
 
-- **Select and comment:** select a precise region, text range, slide element, code line, or whole artifact, then attach a threaded comment.
+- **Comment on version:** attach a concise note to the whole artifact version.
 - **Draw and comment:** draw freehand or shape overlays above the artifact, with color, stroke, and normalized coordinates, then attach a comment to the overlay.
 
 Overlays are review metadata, never edits to the canonical artifact. They render in a separate annotation layer and remain tied to the artifact version that received them.
@@ -139,6 +146,12 @@ Influence records should link directly back to Archive items and include role or
 
 ## Collaboration
 
+When an artifact is open, its active WebMCP review context includes the
+immutable version, exact annotations and marked-region coordinates, review
+state, and permitted influences. An agent uses this context before creating a
+new version with the current version as its parent. The human still approves
+every revision through Workbench controls.
+
 - Annotations identify their human or agent author.
 - Collaborators can reply and resolve threads according to human role.
 - Review decisions show who made them.
@@ -156,6 +169,17 @@ Artifact viewers treat content as untrusted.
 - Preview network, storage, clipboard, navigation, and download behavior must be explicit.
 
 The Workbench is a product-level review sandbox, not permission to execute arbitrary agent code on the user's machine.
+
+### Current component-preview path
+
+Agents may submit a self-contained React/Tailwind UI preview as an artifact.
+It runs only when the artifact explicitly requests the component renderer, in
+an opaque iframe that permits scripts but denies same-origin access, host
+communication, navigation, forms, storage, and arbitrary network connections.
+React and Tailwind may load only from the preview's approved library CDNs.
+Static HTML artifacts remain fully inert. This is for reviewing a UI component, not
+for running a project, terminal, server, package installer, or arbitrary code
+environment.
 
 ## Notifications and Inbox
 

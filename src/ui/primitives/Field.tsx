@@ -1,28 +1,11 @@
-import type { InputHTMLAttributes, ReactNode } from "react";
-import { useId } from "react";
+/**
+ * One control surface for every input and textarea in the product. Quiet by
+ * default — no ring or border shift on focus, only a hover tint. Selects are
+ * built from the Menu primitive, not native <select>.
+ */
+export const controlClass =
+  "w-full rounded-[var(--radius-md)] border border-line bg-surface px-3 py-2 text-body " +
+  "text-text outline-none transition-colors duration-[var(--duration-fast)] placeholder:text-faint " +
+  "hover:border-hover";
 
-export interface FieldProps extends InputHTMLAttributes<HTMLInputElement> {
-  label: string;
-  hint?: ReactNode;
-}
-
-export function Field({ label, hint, id, className = "", ...props }: FieldProps) {
-  const autoId = useId();
-  const fieldId = id ?? autoId;
-  return (
-    <div className="flex flex-col gap-1.5">
-      <label
-        htmlFor={fieldId}
-        className="font-sans text-[length:var(--text-micro)] uppercase tracking-[0.14em] text-stone"
-      >
-        {label}
-      </label>
-      <input
-        id={fieldId}
-        className={`border-b border-hairline bg-transparent py-1.5 font-sans text-[length:var(--text-body)] text-ink outline-none placeholder:text-stone-soft focus:border-ink ${className}`}
-        {...props}
-      />
-      {hint ? <p className="font-sans text-[length:var(--text-micro)] text-stone">{hint}</p> : null}
-    </div>
-  );
-}
+export const labelClass = "text-micro text-faint";

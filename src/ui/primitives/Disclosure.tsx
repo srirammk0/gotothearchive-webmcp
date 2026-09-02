@@ -1,4 +1,7 @@
 import { useId, useState, type ReactNode } from "react";
+import { AnimatePresence, motion } from "motion/react";
+import { Icon } from "./Icon";
+import { duration, ease } from "../tokens";
 
 export interface DisclosureProps {
   summary: ReactNode;
@@ -26,24 +29,31 @@ export function Disclosure({ summary, children, defaultOpen = false, className =
             return !o;
           });
         }}
-        className="flex w-full items-center justify-between gap-3 py-2 text-left font-sans text-[length:var(--text-meta)] text-ink-soft hover:text-ink"
+        className="flex w-full items-center justify-between gap-3 rounded-[var(--radius-sm)] py-2 text-left text-meta text-muted transition-colors duration-[var(--duration-fast)] hover:text-text"
       >
         <span>{summary}</span>
-        <span
-          aria-hidden="true"
-          className="text-stone transition-transform duration-[var(--duration-fast)]"
-          style={{ transform: open ? "rotate(90deg)" : "rotate(0deg)" }}
-        >
-          &rsaquo;
-        </span>
+        <Icon
+          name="chevronDown"
+          size={14}
+          className={`shrink-0 text-faint transition-transform duration-[var(--duration-base)] ${
+            open ? "rotate-180" : "rotate-0"
+          }`}
+        />
       </button>
-      <div
-        id={panelId}
-        className="grid overflow-hidden transition-[grid-template-rows] duration-[var(--duration-base)]"
-        style={{ gridTemplateRows: open ? "1fr" : "0fr" }}
-      >
-        <div className="min-h-0">{children}</div>
-      </div>
+      <AnimatePresence initial={false}>
+        {open ? (
+          <motion.div
+            id={panelId}
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: duration.base, ease }}
+            className="overflow-hidden"
+          >
+            {children}
+          </motion.div>
+        ) : null}
+      </AnimatePresence>
     </div>
   );
 }

@@ -4,11 +4,35 @@
  * decision, it only shapes the request and turns the response (including
  * denials and network failures) into a string the agent can read.
  */
-import { API, type Id, type ToolCallResponse, type ToolName } from "@shared/contract";
+import { API, DENIAL_REASONS, type Id, type ToolCallResponse, type ToolName } from "@shared/contract";
+import { authHeader } from "../api/client";
 import { getSession } from "./session";
-import { recordDenial } from "./lens";
 
-export async function callTool(name: ToolName, input: Record<string, unknown>): Promise<string> {
+function isAbortError(error: unknown, signal?: AbortSignal): boolean {
+  return signal?.aborted === true || (error instanceof Error && error.name === "AbortError");
+}
+
+function makeAbortError(): Error {
+  const error = new Error("The operation was aborted");
+  error.name = "AbortError";
+  return error;
+}
+
+function isUnknownTool(reason: unknown, status: number): boolean {
+  if (status === 404) return true;
+  if (typeof reason !== "string") return false;
+  // Only a genuine "tool not recognized" from the server maps to the
+  // not-registered message. UNKNOWN_REGION / UNKNOWN_ITEM are ordinary denials
+  // (bad id, no access) and must pass through as such — mapping them here made
+  // every stale item id read as "the tool vanished".
+  return reason === "UNKNOWN_TOOL" || reason === DENIAL_REASONS.UNKNOWN_TOOL;
+}
+
+export async function callTool(
+  name: ToolName,
+  input: Record<string, unknown>,
+  signal?: AbortSignal,
+): Promise<string> {
   const session = getSession();
   if (!session) {
     return "Denied: no active agent session. The task must be opened before tools can be called.";
@@ -18,7 +42,9 @@ export async function callTool(name: ToolName, input: Record<string, unknown>): 
   try {
     response = await fetch(API.toolCall, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...(await authHeader()) },
+      credentials: "same-origin",
+      ...(signal ? { signal } : {}),
       body: JSON.stringify({
         tool: name,
         input,
@@ -26,19 +52,25 @@ export async function callTool(name: ToolName, input: Record<string, unknown>): 
         task_id: session.taskId,
       }),
     });
-  } catch {
+  } catch (error) {
+    if (isAbortError(error, signal)) throw error;
     return `Could not reach the server to call "${name}". Try again.`;
   }
 
   let body: ToolCallResponse;
   try {
     body = (await response.json()) as ToolCallResponse;
-  } catch {
+  } catch (error) {
+    if (isAbortError(error, signal)) throw error;
     return `The server returned an unreadable response for "${name}" (HTTP ${response.status}).`;
   }
 
+  if (signal?.aborted) throw makeAbortError();
+
   if (!body.ok) {
-    recordDenial(name, input, body.reason);
+    if (isUnknownTool(body.reason, response.status)) {
+      return `Unknown tool "${name}". It is not currently registered.`;
+    }
     return `Denied: ${body.reason}`;
   }
 

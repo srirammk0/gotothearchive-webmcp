@@ -41,8 +41,9 @@ bun run dev
 Enable WebMCP in Chrome via `chrome://flags/#enable-webmcp-testing`, or open the site in
 the ChatGPT desktop app browser, which supports it without a flag.
 
-Add `VITE_CLERK_PUBLISHABLE_KEY` to `.env.local` for sign-in. Without it the app runs in
-guest mode, which is also how the public demo works.
+Add `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` to `.env.local` and `CLERK_SECRET_KEY` to
+`.dev.vars` for local sign-in. The application is intentionally unavailable
+without a verified Clerk session; there is no guest-mode data path.
 
 ## Checks
 
