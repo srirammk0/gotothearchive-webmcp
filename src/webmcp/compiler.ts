@@ -132,7 +132,8 @@ export function compile(input: CapabilityInput): ToolSpec[] {
     name: "get_taste_for_task",
     title: "Get taste for task",
     annotations: { readOnlyHint: true, untrustedContentHint: true },
-    description: "Retrieve confirmed and proposed taste signals relevant to this task.",
+    description:
+      "Retrieve confirmed and proposed taste signals for this task. Each confirmed signal lists the archive items it is grounded in — inspect those to see concretely what the preference means before applying it.",
     inputSchema: { type: "object", properties: {} },
     why: `Read access is live on: ${slugs.join(", ")}.`,
   }));

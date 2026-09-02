@@ -182,8 +182,14 @@ test("the full collaboration loop runs against a real schema", async () => {
   q.setTasteSignalStatus(colorSignal.id, "confirmed", HUMAN);
   const forAgent = await call(q, "get_taste_for_task", {});
   expect(forAgent.ok).toBe(true);
-  const signals = (forAgent as { result: { signals: { status: string }[] } }).result.signals;
-  expect(signals.some((s) => s.status === "confirmed")).toBe(true);
+  const signals = (forAgent as {
+    result: { signals: { status: string; grounded_in: { id: string; title: string; region: string }[] }[] };
+  }).result.signals;
+  const confirmed = signals.find((s) => s.status === "confirmed");
+  expect(confirmed).toBeDefined();
+  // the confirmed signal is grounded in the item that influenced the annotated artifact
+  expect(confirmed!.grounded_in.map((g) => g.id)).toContain("i_brief");
+  expect(confirmed!.grounded_in[0]?.region).toBe("work");
 
   // 7. retrieval now reflects the confirmed taste on a colour-relevant item.
   const withTaste = await retrieve(q, { taskId: "t1", query: "colour", regionSlugs: null, limit: 10 }, now + 4);

@@ -352,6 +352,30 @@ export async function handleToolCall(
         return denyResult(DENIAL_REASONS.NO_GRANT);
       }
       const project = taskProject(q, task);
+      const tasteRegionSlug = new Map(q.listRegions(task.space_id).map((r) => [r.id, r.slug]));
+
+      // The archive items behind a confirmed signal — walk evidence → the
+      // annotation's artifact version → its influences. Permission-filtered and
+      // deduped, capped at 3. Turns "leans toward X" into things the agent can
+      // actually inspect.
+      const groundingFor = (signalId: string) => {
+        const ids = new Set<string>();
+        for (const ev of q.listTasteEvidence(signalId)) {
+          if (ev.kind !== "supports") continue;
+          if (ev.item_id) ids.add(ev.item_id);
+          else if (ev.annotation_id) {
+            const ann = q.getAnnotation(ev.annotation_id);
+            if (ann) for (const inf of q.listInfluences(ann.version_id)) ids.add(inf.item_id);
+          }
+        }
+        return q
+          .getItems([...ids])
+          .filter((it) => it.space_id === task.space_id && allowedIds.has(it.region_id))
+          .filter((it) => taskAllowsItem(q, task, it))
+          .slice(0, 3)
+          .map((it) => ({ id: it.id, title: clip(it.title, 100), region: tasteRegionSlug.get(it.region_id) ?? "" }));
+      };
+
       const signals = q
         .listTasteSignals(task.space_id)
         .filter((s) => s.owner_id === task.human_id)
@@ -372,6 +396,8 @@ export async function handleToolCall(
           // untrusted input. A proposed one is still raw derived-from-annotation
           // text, so it stays spotlighted.
           statement: s.status === "proposed" ? spotlight(clip(s.statement, MAX_TEXT)) : clip(s.statement, MAX_TEXT),
+          // Only confirmed signals carry grounding — a proposal isn't a directive yet.
+          grounded_in: s.status === "confirmed" ? groundingFor(s.id) : [],
         }));
       return { ok: true, result: { signals } };
     }
