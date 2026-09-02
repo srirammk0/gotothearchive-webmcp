@@ -15,7 +15,7 @@ import { Capture } from "../ui/archive/Capture";
 import { CapturePreview } from "../ui/archive/CapturePreview";
 import { ItemLightbox } from "../ui/archive/ItemLightbox";
 import { Tweet } from "../ui/archive/Tweet";
-import { FileCard, kind, tweetId } from "../ui/archive/itemKind";
+import { extractedImage, FileCard, kind, tweetId } from "../ui/archive/itemKind";
 import { ArtifactThumb } from "../ui/workbench/ArtifactThumb";
 import { useTrail } from "../ui/Breadcrumbs";
 import { useSpace } from "../ui/hooks/useSpace";
@@ -136,25 +136,48 @@ function Preview({ item }: { item: ContextItem }) {
       </div>
     );
   }
-  if (render === "link") {
-    return (
-      <div className="flex flex-col gap-1.5 self-start">
-        {host(item) ? (
-          <span className="inline-flex w-fit items-center gap-1.5 rounded-[var(--radius-sm)] bg-raised px-2 py-1 text-[length:var(--text-micro)] text-muted">
-            <Icon name="arrowRight" size={12} />
-            {host(item)}
-          </span>
-        ) : null}
-        <p className="line-clamp-5 text-[length:var(--text-meta)] leading-relaxed text-muted">
-          {item.semantic_text ?? item.title}
-        </p>
-      </div>
-    );
-  }
+  if (render === "link") return <LinkPreview item={item} />;
   return (
     <p className="line-clamp-6 self-start text-[length:var(--text-meta)] leading-relaxed text-muted">
       {item.semantic_text ?? item.title}
     </p>
+  );
+}
+
+/** A captured link leads with its extracted preview image; falls back to host + excerpt. */
+function LinkPreview({ item }: { item: ContextItem }) {
+  const [failed, setFailed] = useState(false);
+  const img = extractedImage(item);
+  const chip = host(item) ? (
+    <span className="inline-flex w-fit shrink-0 items-center gap-1.5 rounded-[var(--radius-sm)] bg-raised px-2 py-1 text-[length:var(--text-micro)] text-muted">
+      <Icon name="arrowRight" size={12} />
+      {host(item)}
+    </span>
+  ) : null;
+
+  if (img && !failed) {
+    return (
+      <div className="flex h-full w-full flex-col gap-2">
+        <img
+          src={img}
+          alt=""
+          loading="lazy"
+          decoding="async"
+          onError={() => setFailed(true)}
+          className="min-h-0 flex-1 rounded-[var(--radius-sm)] object-cover"
+        />
+        {chip}
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-1.5 self-start">
+      {chip}
+      <p className="line-clamp-5 text-[length:var(--text-meta)] leading-relaxed text-muted">
+        {item.semantic_text ?? item.title}
+      </p>
+    </div>
   );
 }
 
