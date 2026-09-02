@@ -110,8 +110,17 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
     if (!res.ok || body.ok === false) {
       throw new ApiError(body.message ?? body.error ?? `Request to ${path} failed`, res.status);
     }
-    if (isGet) cache.set(path, { at: Date.now(), data });
-    else cache.clear();
+    if (isGet) {
+      cache.set(path, { at: Date.now(), data });
+    } else {
+      cache.clear();
+      // Server state just changed in this tab (an artifact deleted, quota
+      // refunded, etc.) — components with their own local copy of something
+      // quota-shaped (Rail's beta badge, Stats) would otherwise sit stale
+      // until their next poll or remount. typeof-guarded: this file also
+      // runs under bun:test, no DOM.
+      if (typeof window !== "undefined") window.dispatchEvent(new Event("api:mutated"));
+    }
     return data as T;
   };
 

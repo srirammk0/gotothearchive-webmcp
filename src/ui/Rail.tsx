@@ -64,9 +64,12 @@ function BetaBadge() {
   const [quota, setQuota] = useState<QuotaInfo | null>(null);
 
   useEffect(() => {
-    getQuota()
-      .then((r) => setQuota(r.quota))
-      .catch(() => undefined);
+    const refresh = () => getQuota().then((r) => setQuota(r.quota)).catch(() => undefined);
+    refresh();
+    // A same-tab mutation (e.g. deleting an artifact refunds quota) should
+    // reflect here right away, not wait for a remount.
+    window.addEventListener("api:mutated", refresh);
+    return () => window.removeEventListener("api:mutated", refresh);
   }, []);
 
   return (

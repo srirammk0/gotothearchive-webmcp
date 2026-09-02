@@ -240,11 +240,15 @@ export function Stats() {
     const onVisible = () => document.visibilityState === "visible" && refresh();
     document.addEventListener("visibilitychange", onVisible);
     window.addEventListener("focus", refresh);
+    // A same-tab mutation (e.g. deleting an artifact refunds quota) should
+    // reflect here right away, not wait for the 30s poll.
+    window.addEventListener("api:mutated", refresh);
     const poll = window.setInterval(refresh, 30_000);
     return () => {
       cancelled = true;
       document.removeEventListener("visibilitychange", onVisible);
       window.removeEventListener("focus", refresh);
+      window.removeEventListener("api:mutated", refresh);
       window.clearInterval(poll);
     };
   }, []);
