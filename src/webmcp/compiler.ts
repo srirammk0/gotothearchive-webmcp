@@ -144,25 +144,42 @@ export function compile(input: CapabilityInput): ToolSpec[] {
     why: `Read access is live on: ${slugs.join(", ")}.`,
   }));
 
-  push("read", (slugs) =>
-    input.pageState.activeArtifactId
-      ? {
-          name: "trace_artifact_influences",
-          title: "Trace artifact influences",
-          annotations: { readOnlyHint: true, untrustedContentHint: true },
-          description:
-            "Get the active artifact's current version, human annotations (including marked regions), and the context that influenced it. Use this before submitting a revision.",
-          inputSchema: {
-            type: "object",
-            properties: {
-              version_id: { type: "string", description: "A specific immutable version to inspect." },
-              artifact_id: { type: "string", description: "Optional; defaults to the artifact open in Workbench." },
-            },
-          },
-          why: `An artifact is open (${input.pageState.activeArtifactId}) and you can view: ${slugs.join(", ")}.`,
-        }
-      : null,
-  );
+  push("read", (slugs) => ({
+    name: "trace_artifact_influences",
+    title: "Trace artifact influences",
+    annotations: { readOnlyHint: true, untrustedContentHint: true },
+    description:
+      "Get an artifact's current version, its human annotations and feedback (including marked regions), and the context that influenced it. Pass artifact_id or version_id explicitly, or omit both to use the artifact currently open in Workbench, if any. Use this before submitting a revision, or to check whether feedback you recorded has been reviewed.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        version_id: { type: "string", description: "A specific immutable version to inspect." },
+        artifact_id: { type: "string", description: "An artifact you already know the id of. Defaults to the artifact open in Workbench if omitted." },
+      },
+    },
+    why: input.pageState.activeArtifactId
+      ? `An artifact is open (${input.pageState.activeArtifactId}) and you can view: ${slugs.join(", ")}.`
+      : `You can view: ${slugs.join(", ")}.`,
+  }));
+
+  push("propose", (slugs) => ({
+    name: "propose_taste_signal",
+    title: "Propose taste signal",
+    description:
+      "Name a preference you've noticed from the person's own feedback (via trace_artifact_influences), grounded in the annotations or context items that show it. Stays proposed until a person confirms it — this does not teach get_taste_for_task anything by itself. Cite at least one annotation_id or item_id as evidence.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        region: { type: "string", description: "One of your accessible regions — see get_current_context_scope." },
+        statement: { type: "string", description: "Specific and contextual, e.g. \"prefers left-aligned headings over centered\". Not a vague label." },
+        dimensions: { type: "array", items: { type: "string", enum: TASTE_DIMENSIONS } },
+        annotation_ids: { type: "array", items: { type: "string" }, description: "Human annotations that support this pattern." },
+        item_ids: { type: "array", items: { type: "string" }, description: "Context items that support this pattern." },
+      },
+      required: ["region", "statement"],
+    },
+    why: `You can suggest changes on: ${slugs.join(", ")}.`,
+  }));
 
   push("propose", (slugs) => ({
     name: "propose_context_change",
