@@ -216,13 +216,13 @@ export function compile(input: CapabilityInput): ToolSpec[] {
         content_html: {
           type: "string",
           description:
-            "A complete preview document. For component, include React/ReactDOM UMD scripts from unpkg.com and the Tailwind Play CDN; JSX may use @babel/standalone. The preview has no access to the host app, storage, forms, navigation, or arbitrary network requests. To use an existing image (a logo, a real photo) rather than a placeholder, drop its embed_url — from get_context_for_task or inspect_context_item — straight into an <img src>.",
+            "A complete preview document. For component, include React/ReactDOM UMD scripts from unpkg.com and the Tailwind Play CDN; JSX may use @babel/standalone. static_html runs no JavaScript at all, but nothing else is restricted — a real web font (a Google Fonts <link>) and full CSS (grid, gradients, custom properties) both work, and are usually enough for a high-fidelity static visual. Either renderer can use an existing image (a logo, a real photo) instead of a placeholder: drop its embed_url — from get_context_for_task or inspect_context_item — straight into an <img src>. The preview has no access to the host app, storage, forms, navigation, or arbitrary network requests beyond what's named here.",
         },
         renderer: {
           type: "string",
           enum: ["static_html", "component"],
           description:
-            "Use component for a self-contained React/Tailwind UI preview. It runs only in an isolated iframe with no host, storage, navigation, form, or network access.",
+            "static_html (default): a pure visual document — real fonts and full CSS, no JavaScript. Usually the highest-fidelity choice when nothing needs to actually run. component: a self-contained React/Tailwind UI preview, for genuine interactivity or Tailwind's utility classes specifically. Runs only in an isolated iframe with no host, storage, navigation, form, or network access beyond its approved CDNs.",
         },
         used_item_ids: {
           type: "array",
