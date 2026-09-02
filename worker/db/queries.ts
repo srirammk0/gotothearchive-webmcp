@@ -383,6 +383,11 @@ export interface MemoryOutboxPayload {
   semantic_text: string | null;
   region_id: string;
   authority_class: string;
+  /** R2 key of the item's canonical file, when it has one — the drain sends the
+   * bytes to the memory index so image / PDF content becomes searchable. */
+  content_ref: string | null;
+  /** Coarse file class for the index: "image" | "pdf" | "document" | null. */
+  file_type: string | null;
 }
 interface MemoryOutboxRow {
   [key: string]: SqlStorageValue;
@@ -412,6 +417,7 @@ export interface MemoryOutboxJob {
   doc_id: string | null;
 }
 function toMemoryOutboxJob(r: MemoryOutboxRow): MemoryOutboxJob {
+  const raw = JSON.parse(r.payload) as Partial<MemoryOutboxPayload>;
   return {
     id: r.id,
     space_id: r.space_id,
@@ -419,7 +425,14 @@ function toMemoryOutboxJob(r: MemoryOutboxRow): MemoryOutboxJob {
     item_id: r.item_id,
     custom_id: r.custom_id,
     container_tag: r.container_tag,
-    payload: JSON.parse(r.payload) as MemoryOutboxPayload,
+    payload: {
+      title: raw.title ?? "",
+      semantic_text: raw.semantic_text ?? null,
+      region_id: raw.region_id ?? "",
+      authority_class: raw.authority_class ?? "",
+      content_ref: raw.content_ref ?? null,
+      file_type: raw.file_type ?? null,
+    },
     attempts: r.attempts,
     doc_id: r.doc_id ?? null,
   };
@@ -451,6 +464,15 @@ export class Queries {
         semantic_text: item.semantic_text,
         region_id: item.region_id,
         authority_class: item.authority_class,
+        content_ref: item.content_ref,
+        file_type:
+          item.type === "image" || item.type === "screenshot"
+            ? "image"
+            : item.type === "pdf"
+              ? "pdf"
+              : item.content_ref
+                ? "document"
+                : null,
       },
       now,
     });

@@ -91,9 +91,15 @@ export class SpaceDO extends DurableObject<Env> {
     const index = memoryIndexFor(this.env);
     if (!index) return;
     try {
-      const { morePending } = await drainSpaceMemory(this.queries, index, [
-        this.env.SUPERMEMORY_API_KEY ?? "",
-      ]);
+      const { morePending } = await drainSpaceMemory(
+        this.queries,
+        index,
+        [this.env.SUPERMEMORY_API_KEY ?? ""],
+        async (key) => {
+          const obj = await this.env.BLOBS.get(key);
+          return obj?.body ? { body: obj.body, contentType: obj.httpMetadata?.contentType ?? null } : null;
+        },
+      );
       if (morePending) await this.ctx.storage.setAlarm(Date.now() + MEMORY_DRAIN_RETRY_MS);
     } catch (e) {
       console.error("space-do: memory drain failed", e);

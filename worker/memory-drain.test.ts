@@ -54,6 +54,53 @@ test("insertItem with mirrorMemory queues an upsert; a successful drain marks it
   expect(row.doc_id).toBe("doc_x");
 });
 
+test("a file-backed item sends its bytes via addFile, with title/desc as context", async () => {
+  const { q } = makeQueries();
+  q.insertSpace({ id: "s", name: "A", owner_id: "u", kind: "personal", created_at: 1 });
+  q.insertRegion({ id: "r", space_id: "s", parent_id: null, name: "w", slug: "w", created_at: 1 });
+  q.insertItem({
+    id: "img1", space_id: "s", region_id: "r", owner_id: "u", type: "image", title: "Palette shot",
+    source_url: null, content_ref: "space-s/abc", semantic_text: "warm terracotta swatches", metadata: {},
+    authority_class: "human_authored", created_by: "u", created_at: 1, updated_at: 1,
+  });
+
+  let addFileArg: Record<string, unknown> | null = null;
+  let addTextCalled = false;
+  const index = stubIndex({
+    addFile: (input) => { addFileArg = input as Record<string, unknown>; return Promise.resolve({ id: "file_doc", status: "queued" }); },
+    addText: () => { addTextCalled = true; return Promise.resolve(null); },
+  });
+  const { report } = await drainSpaceMemory(q, index, ["s"], () =>
+    Promise.resolve({ body: new Response("PNGBYTES").body!, contentType: "image/png" }),
+  );
+  expect(report).toMatchObject({ completed: 1 });
+  expect(addTextCalled).toBe(false);
+  expect(addFileArg).toMatchObject({
+    customId: "img1",
+    containerTag: "s",
+    fileType: "image",
+    mimeType: "image/png",
+    entityContext: "Palette shot\nwarm terracotta swatches",
+  });
+});
+
+test("a file-backed item falls back to text when the blob can't be fetched", async () => {
+  const { q } = makeQueries();
+  q.insertSpace({ id: "s", name: "A", owner_id: "u", kind: "personal", created_at: 1 });
+  q.insertRegion({ id: "r", space_id: "s", parent_id: null, name: "w", slug: "w", created_at: 1 });
+  q.insertItem({
+    id: "img2", space_id: "s", region_id: "r", owner_id: "u", type: "image", title: "Lost blob",
+    source_url: null, content_ref: "space-s/gone", semantic_text: "desc", metadata: {},
+    authority_class: "human_authored", created_by: "u", created_at: 1, updated_at: 1,
+  });
+  let addTextArg: Record<string, unknown> | null = null;
+  const index = stubIndex({ addText: (i) => { addTextArg = i as Record<string, unknown>; return Promise.resolve({ id: "t", status: "queued" }); } });
+
+  const { report } = await drainSpaceMemory(q, index, ["s"], () => Promise.resolve(null));
+  expect(report).toMatchObject({ completed: 1 });
+  expect(addTextArg).toMatchObject({ customId: "img2", content: "Lost blob\ndesc" });
+});
+
 test("a provider that is unavailable (null) keeps the job pending and counts a retry", async () => {
   const { q, db } = makeQueries();
   seedItem(q, "i1");
