@@ -143,6 +143,22 @@ export const addItemNote = (itemId: string, body: string) =>
 export const deleteItemNote = (id: string) =>
   req<{ deleted: string }>(`${API.itemNotes}${qs({ id })}`, { method: "DELETE" });
 
+/* ---------------- memory sync ---------------- */
+
+export interface MemorySyncStatus {
+  mirror_enabled: boolean;
+  items: number;
+  synced: number;
+  pending: number;
+  failed: number;
+  recent_errors: string[];
+}
+
+export const getMemoryStatus = () => req<{ status: MemorySyncStatus }>(API.memoryStatus);
+
+export const resyncMemory = () =>
+  req<{ queued: number; status: MemorySyncStatus }>(API.memoryStatus, { method: "POST" });
+
 /** Move one or more items to another folder, and/or rename a single item. */
 export const updateItems = (
   ids: string[],

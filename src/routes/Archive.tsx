@@ -13,6 +13,7 @@ import { controlClass } from "../ui/primitives/Field";
 import { AgentAccess } from "../ui/AgentAccess";
 import { Capture } from "../ui/archive/Capture";
 import { CapturePreview } from "../ui/archive/CapturePreview";
+import { MemorySync } from "../ui/archive/MemorySync";
 import { ItemLightbox } from "../ui/archive/ItemLightbox";
 import { Tweet } from "../ui/archive/Tweet";
 import { extractedImage, FileCard, kind, tweetId } from "../ui/archive/itemKind";
@@ -747,6 +748,9 @@ export function Archive() {
                 {visible} of {total}
               </span>
             ) : null}
+            <div className="ml-auto">
+              <MemorySync />
+            </div>
           </div>
 
           {banner ? (
