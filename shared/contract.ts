@@ -30,13 +30,6 @@ export const GRANT_LABEL: Record<GrantLevel, string> = {
   write: "Can edit directly",
 };
 
-export const GRANT_GLYPH: Record<GrantLevel, string> = {
-  none: "\u{1F512}", // 🔒
-  read: "◷", // ◷
-  propose: "✦", // ✦
-  write: "✎", // ✎
-};
-
 /** Authority classes, ranked. Lower index = more authoritative. */
 export const AUTHORITY_CLASSES = [
   "human_authored",

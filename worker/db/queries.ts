@@ -31,7 +31,6 @@ import type {
   Relationship,
   ItemType,
   ArtifactState,
-  ReviewDecision,
 } from "@shared/contract";
 
 /* Row shapes as stored in sqlite (json columns are TEXT). */
@@ -195,16 +194,6 @@ interface AnnotationRow {
   status: string;
   created_at: number;
 }
-interface DecisionRow {
-  [key: string]: SqlStorageValue;
-  id: string;
-  version_id: string;
-  actor_id: string;
-  decision: string;
-  note: string | null;
-  prev_state: string;
-  at: number;
-}
 interface TasteSignalRow {
   [key: string]: SqlStorageValue;
   id: string;
@@ -341,13 +330,6 @@ function toAnnotation(r: AnnotationRow): Annotation {
     comment: r.comment,
     status: r.status as Annotation["status"],
     created_at: r.created_at,
-  };
-}
-function toDecision(r: DecisionRow): DecisionRecord {
-  return {
-    ...r,
-    decision: r.decision as ReviewDecision,
-    prev_state: r.prev_state as ArtifactState,
   };
 }
 function toTasteSignal(r: TasteSignalRow): TasteSignal {
@@ -695,14 +677,6 @@ export class Queries {
     this.sql.exec(`DELETE FROM grants WHERE region_id = ?`, id);
     this.sql.exec(`DELETE FROM project_members WHERE region_id = ?`, id);
     this.sql.exec(`DELETE FROM regions WHERE id = ?`, id);
-  }
-
-  countItemsByRegion(regionId: string): number {
-    return (
-      this.sql
-        .exec<{ n: number }>(`SELECT COUNT(*) AS n FROM items WHERE region_id = ?`, regionId)
-        .toArray()[0]?.n ?? 0
-    );
   }
 
   /* ---------------- items (+ FTS sync) ---------------- */
@@ -1078,19 +1052,6 @@ export class Queries {
       .map(toEdge);
   }
 
-  listEdgesForItems(itemIds: string[]): ContextEdge[] {
-    if (itemIds.length === 0) return [];
-    const placeholders = itemIds.map(() => "?").join(",");
-    return this.sql
-      .exec<EdgeRow>(
-        `SELECT * FROM edges WHERE from_id IN (${placeholders}) OR to_id IN (${placeholders})`,
-        ...itemIds,
-        ...itemIds,
-      )
-      .toArray()
-      .map(toEdge);
-  }
-
   /** Every edge touching an item, any approval state — for the item's Connections panel. */
   allEdgesForItem(itemId: string): ContextEdge[] {
     return this.sql
@@ -1176,10 +1137,6 @@ export class Queries {
       .exec<TaskRow>(`SELECT * FROM tasks WHERE space_id = ?`, spaceId)
       .toArray()
       .map(toTask);
-  }
-
-  setTaskStatus(id: string, status: Task["status"]): void {
-    this.sql.exec(`UPDATE tasks SET status = ? WHERE id = ?`, status, id);
   }
 
   updateTask(
@@ -1431,18 +1388,6 @@ export class Queries {
       .map(toAccess);
   }
 
-  /** Every access across the space (joined through tasks), newest first. */
-  spaceAccesses(spaceId: string, limit = 500): AccessRecord[] {
-    return this.sql
-      .exec<AccessRow>(
-        `SELECT a.* FROM accesses a JOIN tasks t ON t.id = a.task_id WHERE t.space_id = ? ORDER BY a.at DESC LIMIT ?`,
-        spaceId,
-        limit,
-      )
-      .toArray()
-      .map(toAccess);
-  }
-
   /** Every audit event across the space (joined through tasks), newest first. */
   spaceAuditEvents(spaceId: string, limit = 500): AuditEvent[] {
     return this.sql
@@ -1535,15 +1480,6 @@ export class Queries {
       .map(toAnnotation);
   }
 
-  setItemContentRef(id: string, contentRef: string): void {
-    this.sql.exec(
-      `UPDATE items SET content_ref = ?, updated_at = ? WHERE id = ?`,
-      contentRef,
-      Date.now(),
-      id,
-    );
-  }
-
   getAnnotation(id: string): Annotation | null {
     const row = this.sql
       .exec<AnnotationRow>(`SELECT * FROM annotations WHERE id = ?`, id)
@@ -1562,13 +1498,6 @@ export class Queries {
       d.prev_state,
       d.at,
     );
-  }
-
-  listDecisions(versionId: string): DecisionRecord[] {
-    return this.sql
-      .exec<DecisionRow>(`SELECT * FROM decisions WHERE version_id = ?`, versionId)
-      .toArray()
-      .map(toDecision);
   }
 
   /* ---------------- taste ---------------- */

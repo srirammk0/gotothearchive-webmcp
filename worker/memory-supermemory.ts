@@ -1,7 +1,5 @@
 import type {
-  MemoryDocument,
   MemoryDocumentRef,
-  MemoryDocumentUpdate,
   MemoryFileInput,
   MemoryIndex,
   MemoryMetadata,
@@ -68,41 +66,6 @@ function parseDocumentRef(value: unknown): MemoryDocumentRef | null {
     return null;
   }
   return { id: value.id, status: value.status };
-}
-
-function parseStringArray(value: unknown): readonly string[] {
-  if (!Array.isArray(value)) return [];
-  return value.filter((item): item is string => typeof item === "string");
-}
-
-function parseTaskType(value: unknown): "memory" | "superrag" | null {
-  return value === "memory" || value === "superrag" ? value : null;
-}
-
-function parseDocument(value: unknown): MemoryDocument | null {
-  if (!isRecord(value)) return null;
-  const id = nonEmptyString(value.id);
-  const status = nonEmptyString(value.status);
-  if (!id || !status) return null;
-  return {
-    id,
-    customId: stringOrNull(value.customId),
-    content: stringOrNull(value.content),
-    createdAt: stringOrNull(value.createdAt),
-    updatedAt: stringOrNull(value.updatedAt),
-    metadata: parseMetadata(value.metadata),
-    raw: stringOrNull(value.raw),
-    source: stringOrNull(value.source),
-    taskType: parseTaskType(value.taskType),
-    status,
-    dreamingStatus: stringOrNull(value.dreamingStatus),
-    summary: stringOrNull(value.summary),
-    title: stringOrNull(value.title),
-    type: stringOrNull(value.type),
-    filepath: stringOrNull(value.filepath),
-    url: stringOrNull(value.url),
-    containerTags: parseStringArray(value.containerTags),
-  };
 }
 
 function parseSearchDocument(value: unknown): MemorySearchDocument | null {
@@ -261,28 +224,6 @@ export class SupermemoryMemoryIndex implements MemoryIndex {
     addJsonFormValue(form, "metadata", input.metadata);
     addJsonFormValue(form, "filterByMetadata", input.filterByMetadata);
     return this.postForm("/v3/documents/file", form, options, parseDocumentRef);
-  }
-
-  async updateDocument(
-    id: string,
-    input: MemoryDocumentUpdate,
-    options?: MemoryRequestOptions,
-  ): Promise<MemoryDocumentRef | null> {
-    if (id.trim().length === 0) return null;
-    const body: Record<string, unknown> = { taskType: "superrag" };
-    addIfDefined(body, "content", input.content);
-    addIfDefined(body, "containerTag", input.containerTag);
-    addIfDefined(body, "customId", input.customId);
-    addIfDefined(body, "filepath", input.filepath);
-    addIfDefined(body, "entityContext", input.entityContext);
-    if (input.metadata !== undefined) body.metadata = input.metadata;
-    if (input.filterByMetadata !== undefined) body.filterByMetadata = input.filterByMetadata;
-    return this.requestJson("PATCH", `/v3/documents/${encodeURIComponent(id)}`, body, options, parseDocumentRef);
-  }
-
-  async getDocument(id: string, options?: MemoryRequestOptions): Promise<MemoryDocument | null> {
-    if (id.trim().length === 0) return null;
-    return this.requestJson("GET", `/v3/documents/${encodeURIComponent(id)}`, undefined, options, parseDocument);
   }
 
   async deleteDocument(id: string, options?: MemoryRequestOptions): Promise<boolean | null> {

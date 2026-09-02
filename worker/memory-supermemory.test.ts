@@ -60,26 +60,12 @@ test("addFile sends multipart fields without a content-type override", async () 
   expect((call.init.headers as Headers).get("Content-Type")).toBeNull();
 });
 
-test("update, get, and delete use the documented document id routes", async () => {
-  const responses = [
-    new Response(JSON.stringify({ id: "doc_1", status: "queued" }), { status: 200 }),
-    new Response(JSON.stringify({ id: "doc_1", status: "done", title: "Note", metadata: { rank: 2 }, taskType: "superrag" }), { status: 200 }),
-    new Response(null, { status: 204 }),
-  ];
-  const mock = mockFetch(() => responses.shift() ?? new Response(null, { status: 500 }));
+test("delete uses the documented document id route", async () => {
+  const mock = mockFetch(() => new Response(null, { status: 204 }));
   const index = new SupermemoryMemoryIndex({ apiKey: "key", fetchImpl: mock.fetch });
 
-  expect(await index.updateDocument("doc/1", { content: "revised" })).toEqual({ id: "doc_1", status: "queued" });
-  expect(await index.getDocument("doc/1")).toMatchObject({
-    id: "doc_1",
-    title: "Note",
-    metadata: { rank: 2 },
-    taskType: "superrag",
-  });
   expect(await index.deleteDocument("doc/1")).toBe(true);
   expect(mock.calls.map((call) => `${call.init.method} ${call.url}`)).toEqual([
-    "PATCH https://api.supermemory.ai/v3/documents/doc%2F1",
-    "GET https://api.supermemory.ai/v3/documents/doc%2F1",
     "DELETE https://api.supermemory.ai/v3/documents/doc%2F1",
   ]);
 });
@@ -166,15 +152,15 @@ test("malformed, unavailable, and aborted provider calls return null", async () 
     throw new Error("Bearer key should never escape");
   });
   const unavailableIndex = new SupermemoryMemoryIndex({ apiKey: "key", fetchImpl: unavailable.fetch });
-  expect(await unavailableIndex.getDocument("doc")).toBeNull();
+  expect(await unavailableIndex.deleteDocument("doc")).toBeNull();
 
   const controller = new AbortController();
   controller.abort();
   expect(await index.search({ query: "note" }, { signal: controller.signal })).toBeNull();
 
-  const malformedGet = mockFetch(() => new Response(JSON.stringify({ id: "doc_without_status" }), { status: 200 }));
-  const malformedGetIndex = new SupermemoryMemoryIndex({ apiKey: "key", fetchImpl: malformedGet.fetch });
-  expect(await malformedGetIndex.getDocument("doc_without_status")).toBeNull();
+  const malformedDelete = mockFetch(() => new Response(null, { status: 500 }));
+  const malformedDeleteIndex = new SupermemoryMemoryIndex({ apiKey: "key", fetchImpl: malformedDelete.fetch });
+  expect(await malformedDeleteIndex.deleteDocument("doc_without_status")).toBeNull();
 });
 
 test("a timeout aborts the injected fetch", async () => {
@@ -186,13 +172,13 @@ test("a timeout aborts the injected fetch", async () => {
     });
   }));
   const index = new SupermemoryMemoryIndex({ apiKey: "key", timeoutMs: 5, fetchImpl: mock.fetch });
-  expect(await index.getDocument("slow")).toBeNull();
+  expect(await index.deleteDocument("slow")).toBeNull();
   expect(aborted).toBe(true);
 });
 
 test("a timeout also covers response body JSON parsing", async () => {
   let signal: AbortSignal | undefined;
-  const response = new Response("ignored", { status: 200 });
+  const response = new Response(JSON.stringify({ id: "doc_1", status: "queued" }), { status: 200 });
   Object.defineProperty(response, "json", { value: () => new Promise<unknown>(() => undefined) });
   const mock = mockFetch((_url, init) => {
     signal = init.signal;
@@ -200,6 +186,6 @@ test("a timeout also covers response body JSON parsing", async () => {
   });
   const index = new SupermemoryMemoryIndex({ apiKey: "key", timeoutMs: 5, fetchImpl: mock.fetch });
 
-  expect(await index.getDocument("slow-body")).toBeNull();
+  expect(await index.addText({ content: "slow-body" })).toBeNull();
   expect(signal?.aborted).toBe(true);
 });

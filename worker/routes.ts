@@ -561,7 +561,7 @@ const INLINE_BLOB_MIMES = new Set([
   "text/csv",
 ]);
 
-export function normalizeMime(contentType: string | null | undefined): string {
+function normalizeMime(contentType: string | null | undefined): string {
   return (contentType ?? "").split(";", 1)[0].trim().toLowerCase();
 }
 

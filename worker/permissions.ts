@@ -173,7 +173,7 @@ export function authorize(q: Queries, input: AuthorizeInput, now: number): Autho
 }
 
 /** The set of region ids an authorized (human ∩ grant ∩ task) actor may touch for a task, at >= level. */
-export function authorizedRegionIdsAtLevel(
+function authorizedRegionIdsAtLevel(
   q: Queries,
   taskId: string,
   level: GrantLevel,

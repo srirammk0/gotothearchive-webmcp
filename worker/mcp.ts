@@ -60,7 +60,7 @@ export function clip(s: string, n: number): string {
 /** Max list entries / free-text chars in any one tool result. */
 const MAX_ROWS = 8;
 const MAX_TEXT = 240;
-export const MAX_RETRIEVAL_LIMIT = 20;
+const MAX_RETRIEVAL_LIMIT = 20;
 
 export function clampRetrievalLimit(value: unknown): number {
   if (typeof value !== "number" || !Number.isFinite(value)) return 10;

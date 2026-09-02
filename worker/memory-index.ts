@@ -13,26 +13,6 @@ export interface MemoryDocumentRef {
   status: string;
 }
 
-export interface MemoryDocument {
-  id: string;
-  customId: string | null;
-  content: string | null;
-  createdAt: string | null;
-  updatedAt: string | null;
-  metadata: MemoryMetadata;
-  raw: string | null;
-  source: string | null;
-  taskType: "memory" | "superrag" | null;
-  status: string | null;
-  dreamingStatus: string | null;
-  summary: string | null;
-  title: string | null;
-  type: string | null;
-  filepath: string | null;
-  url: string | null;
-  containerTags: readonly string[];
-}
-
 export interface MemorySearchDocument {
   id: string;
   createdAt: string | null;
@@ -82,16 +62,6 @@ export interface MemoryFileInput {
   mimeType?: string;
 }
 
-export interface MemoryDocumentUpdate {
-  content?: string;
-  containerTag?: string;
-  customId?: string;
-  metadata?: MemoryMetadata;
-  filepath?: string;
-  entityContext?: string;
-  filterByMetadata?: MemoryMetadata;
-}
-
 export interface MemorySearchInput {
   query: string;
   containerTag?: string;
@@ -108,12 +78,6 @@ export interface MemoryIndex {
     input: MemoryFileInput,
     options?: MemoryRequestOptions,
   ): Promise<MemoryDocumentRef | null>;
-  updateDocument(
-    id: string,
-    input: MemoryDocumentUpdate,
-    options?: MemoryRequestOptions,
-  ): Promise<MemoryDocumentRef | null>;
-  getDocument(id: string, options?: MemoryRequestOptions): Promise<MemoryDocument | null>;
   deleteDocument(id: string, options?: MemoryRequestOptions): Promise<boolean | null>;
   search(
     input: MemorySearchInput,
