@@ -15,13 +15,11 @@ import { Capture } from "../ui/archive/Capture";
 import { CapturePreview } from "../ui/archive/CapturePreview";
 import { MemorySync } from "../ui/archive/MemorySync";
 import { ItemLightbox } from "../ui/archive/ItemLightbox";
-import { Tweet } from "../ui/archive/Tweet";
-import { extractedImage, FileCard, kind, tweetId } from "../ui/archive/itemKind";
-import { ArtifactThumb } from "../ui/workbench/ArtifactThumb";
+import { ItemPreview } from "../ui/archive/ItemPreview";
+import { host, kind } from "../ui/archive/itemKind";
 import { useTrail } from "../ui/Breadcrumbs";
 import { useSpace } from "../ui/hooks/useSpace";
 import {
-  blobUrl,
   createRegion,
   deleteItems,
   deleteRegion,
@@ -82,111 +80,6 @@ function itemDate(item: ContextItem): string {
   return new Date(item.created_at).toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
-function host(item: ContextItem): string | null {
-  return item.source_url ? new URL(item.source_url).hostname.replace(/^www\./, "") : null;
-}
-
-/**
- * The in-tile preview. Images and PDFs render their real bytes (cached hard by
- * the blob route); links lead with their host; text items become a quiet
- * excerpt so a wall of notes never reads as a wall of empty boxes.
- */
-function Preview({ item }: { item: ContextItem }) {
-  const { render } = kind(item);
-
-  if (render === "image" && item.content_ref) {
-    return (
-      <img
-        src={blobUrl(item.content_ref)}
-        alt=""
-        loading="lazy"
-        decoding="async"
-        className="max-h-full max-w-full object-contain"
-      />
-    );
-  }
-  if (render === "pdf" && item.content_ref) {
-    return (
-      <iframe
-        title={item.title}
-        src={`${blobUrl(item.content_ref)}#toolbar=0&navpanes=0&scrollbar=0&view=FitH`}
-        tabIndex={-1}
-        className="pointer-events-none absolute inset-0 h-full w-full bg-white"
-      />
-    );
-  }
-  if (render === "text" && item.content_ref) {
-    return (
-      <iframe
-        title={item.title}
-        src={blobUrl(item.content_ref)}
-        tabIndex={-1}
-        className="pointer-events-none absolute inset-0 h-full w-full bg-white text-black"
-      />
-    );
-  }
-  if (render === "artifact") {
-    return (
-      <ArtifactThumb
-        html={String(item.metadata?.preview_html ?? "")}
-        className="pointer-events-none absolute inset-0 h-full w-full"
-      />
-    );
-  }
-  if (render === "office") return <FileCard item={item} />;
-  if (render === "tweet") {
-    const tw = tweetId(item.source_url);
-    return (
-      <div className="pointer-events-none absolute inset-0 flex justify-center overflow-hidden">
-        {tw ? <Tweet id={tw} className="max-w-full" /> : null}
-      </div>
-    );
-  }
-  if (render === "link") return <LinkPreview item={item} />;
-  return (
-    <p className="line-clamp-6 self-start text-meta leading-relaxed text-muted">
-      {item.semantic_text ?? item.title}
-    </p>
-  );
-}
-
-/** A captured link leads with its extracted preview image; falls back to host + excerpt. */
-function LinkPreview({ item }: { item: ContextItem }) {
-  const [failed, setFailed] = useState(false);
-  const img = extractedImage(item);
-  const chip = host(item) ? (
-    <span className="inline-flex w-fit shrink-0 items-center gap-1.5 rounded-[var(--radius-sm)] bg-raised px-2 py-1 text-micro text-muted">
-      <Icon name="arrowRight" size={12} />
-      {host(item)}
-    </span>
-  ) : null;
-
-  if (img && !failed) {
-    return (
-      <div className="flex h-full w-full flex-col gap-2">
-        <img
-          src={img}
-          alt=""
-          loading="lazy"
-          decoding="async"
-          onError={() => setFailed(true)}
-          className="min-h-0 flex-1 rounded-[var(--radius-sm)] object-cover"
-        />
-        {chip}
-      </div>
-    );
-  }
-
-  return (
-    <div className="flex flex-col gap-1.5 self-start">
-      {chip}
-      <p className="line-clamp-5 text-meta leading-relaxed text-muted">
-        {item.semantic_text ?? item.title}
-      </p>
-    </div>
-  );
-}
-
 function Tile({
   item,
   index,
@@ -230,7 +123,7 @@ function Tile({
           selected ? "border-accent" : "border-line-soft group-hover:border-line"
         }`}
       >
-        <Preview item={item} />
+        <ItemPreview item={item} size="tile" />
 
         {/* Checkbox — always in the DOM, shown on hover or whenever a selection is active. */}
         <button

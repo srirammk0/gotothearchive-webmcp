@@ -12,7 +12,7 @@ import {
 } from "../../api/client";
 import { Button } from "../primitives/Button";
 import { Icon } from "../primitives/Icon";
-import { blobUrl } from "../../api/client";
+import { ItemPreview } from "./ItemPreview";
 import { kind } from "./itemKind";
 
 function relTime(at: number): string {
@@ -21,13 +21,6 @@ function relTime(at: number): string {
   if (s < 3600) return `${Math.floor(s / 60)}m`;
   if (s < 86400) return `${Math.floor(s / 3600)}h`;
   return `${Math.floor(s / 86400)}d`;
-}
-
-function Thumb({ item }: { item: ContextItem }) {
-  if ((item.type === "image" || item.type === "screenshot") && item.content_ref) {
-    return <img src={blobUrl(item.content_ref)} alt="" className="h-full w-full object-cover" />;
-  }
-  return <Icon name="file" size={14} className="text-faint" />;
 }
 
 /**
@@ -121,7 +114,7 @@ export function ConnectionsPanel({ item, allItems }: { item: ContextItem; allIte
                     className="flex shrink-0 items-center gap-2 rounded-[var(--radius-sm)] px-1.5 py-1 text-left text-meta text-muted transition-colors hover:bg-hover hover:text-text"
                   >
                     <span className="flex h-6 w-6 shrink-0 items-center justify-center overflow-hidden rounded-[2px] border border-line-soft bg-canvas">
-                      <Thumb item={c} />
+                      <ItemPreview item={c} size="chip" />
                     </span>
                     <span className="truncate">{c.title}</span>
                   </button>
@@ -177,7 +170,7 @@ export function ConnectionsPanel({ item, allItems }: { item: ContextItem; allIte
                 className="group/link flex items-center gap-2 border-b border-line-soft py-2 last:border-0"
               >
                 <span className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-[var(--radius-sm)] border border-line-soft bg-canvas">
-                  {l.other ? <Thumb item={l.other} /> : <Icon name="file" size={14} className="text-faint" />}
+                  {l.other ? <ItemPreview item={l.other} size="chip" /> : <Icon name="file" size={14} className="text-faint" />}
                 </span>
                 <span className="flex min-w-0 flex-1 flex-col">
                   <span className="truncate text-meta text-text">

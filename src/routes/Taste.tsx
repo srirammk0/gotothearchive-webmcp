@@ -2,7 +2,6 @@ import { useCallback, useEffect, useState } from "react";
 import { confidenceLabel, dimensionLabel, type ContextItem, type TasteSignal } from "@shared/contract";
 import {
   ApiError,
-  blobUrl,
   getTasteEvidence,
   listTasteSignals,
   updateTasteSignal,
@@ -14,8 +13,8 @@ import { motion } from "motion/react";
 import { Button } from "../ui/primitives/Button";
 import { Disclosure } from "../ui/primitives/Disclosure";
 import { controlClass } from "../ui/primitives/Field";
-import { FileCard, kind, tweetId } from "../ui/archive/itemKind";
-import { Tweet } from "../ui/archive/Tweet";
+import { kind } from "../ui/archive/itemKind";
+import { ItemPreview } from "../ui/archive/ItemPreview";
 import { ArtifactThumb } from "../ui/workbench/ArtifactThumb";
 import { useTrail } from "../ui/Breadcrumbs";
 import { duration, ease } from "../ui/tokens";
@@ -23,22 +22,6 @@ import { EmptyState } from "../ui/primitives/EmptyState";
 import { EmptyRow } from "../ui/primitives/EmptyRow";
 import { SidePanel } from "../ui/primitives/SidePanel";
 import { Spinner } from "../ui/primitives/Spinner";
-
-/** A thumbnail for an archived item cited as taste evidence. */
-function ItemThumb({ item }: { item: ContextItem }) {
-  const { render } = kind(item);
-  if (render === "image" && item.content_ref) {
-    return <img src={blobUrl(item.content_ref)} alt="" className="h-full w-full object-cover" />;
-  }
-  const tw = render === "tweet" ? tweetId(item.source_url) : null;
-  if (tw) return <Tweet id={tw} className="scale-90" />;
-  if (render === "office" || render === "pdf") return <FileCard item={item} />;
-  return (
-    <p className="line-clamp-4 p-2 text-micro leading-relaxed text-muted">
-      {item.semantic_text ?? item.title}
-    </p>
-  );
-}
 
 /** One piece of evidence — an archived item or a recorded annotation. */
 function EvidenceCard({ record }: { record: EvidenceRecord }) {
@@ -55,7 +38,7 @@ function EvidenceCard({ record }: { record: EvidenceRecord }) {
       {record.item ? (
         <div className="flex min-w-0 flex-1 items-center gap-3">
           <div className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-[var(--radius-sm)] border border-line-soft bg-canvas">
-            <ItemThumb item={record.item} />
+            <ItemPreview item={record.item} size="thumb" />
           </div>
           <div className="min-w-0">
             <p className="truncate text-meta text-text">{record.item.title}</p>
@@ -204,7 +187,7 @@ function SignalCard({
               title={it.title}
               className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-[var(--radius-sm)] border border-line-soft bg-canvas"
             >
-              <ItemThumb item={it} />
+              <ItemPreview item={it} size="thumb" />
             </div>
           ))}
           {sourceItems.length > 6 ? (
@@ -444,7 +427,7 @@ export function Taste() {
                     ) : e.item ? (
                       <div className="mt-1 flex items-center gap-2 rounded-[var(--radius-sm)] border border-line-soft bg-canvas p-1.5">
                         <div className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-[2px]">
-                          <ItemThumb item={e.item} />
+                          <ItemPreview item={e.item} size="thumb" />
                         </div>
                         <span className="truncate text-micro text-muted">{e.item.title}</span>
                       </div>

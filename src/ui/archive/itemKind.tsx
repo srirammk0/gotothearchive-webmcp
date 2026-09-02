@@ -14,6 +14,11 @@ export function extractedImage(item: ContextItem): string | null {
   return typeof imgs[0] === "string" && /^https?:\/\//i.test(imgs[0]) ? imgs[0] : null;
 }
 
+/** The item's source hostname, stripped of a leading www. */
+export function host(item: ContextItem): string | null {
+  return item.source_url ? new URL(item.source_url).hostname.replace(/^www\./, "") : null;
+}
+
 /** The file extension carried by an item's title or source URL, lowercased. */
 export function ext(item: ContextItem): string {
   const m = /\.([a-z0-9]+)(?:[?#]|$)/i.exec(item.title || item.source_url || "");
