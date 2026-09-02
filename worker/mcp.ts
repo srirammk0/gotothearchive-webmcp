@@ -6,6 +6,7 @@
  * trusted except as input to a fresh authorization check.
  */
 import {
+  API,
   DENIAL_REASONS,
   grantAtLeast,
   RELATIONSHIPS,
@@ -30,9 +31,13 @@ import {
 } from "./permissions";
 import { retrieve } from "./retrieval";
 import { memoryIndexFor } from "./memory-drain";
+import { signedBlobUrl } from "./blob-sign";
 import { traverse } from "./graph";
 import { deriveEdgesForItem } from "./graph-build";
 import type { ResolvedHuman } from "./auth";
+
+/** Item kinds a signed content_url is worth minting for — genuinely viewable bytes. */
+const VIEWABLE_TYPES = new Set(["image", "screenshot", "pdf"]);
 
 function denyResult(reason: string): ToolCallResponse {
   return { ok: false, error: reason, denial: true, reason };
@@ -78,8 +83,22 @@ function versionSessionBelongsToTask(
   return session !== null && session.task_id === taskId && session.human_id === humanId;
 }
 
-/** Trimmed view of an archive item for a tool result; every free-text field is fenced. */
-function slimItem(it: ContextItem) {
+/**
+ * Trimmed view of an archive item for a tool result; every free-text field is
+ * fenced. `content_url`, when present, is a signed URL good for ~15 minutes
+ * that an agent can fetch independently of this session — the mechanism that
+ * actually lets an agent view an image/screenshot/PDF, since WebMCP's
+ * tool-call transport itself is string-only and can't carry the bytes (see
+ * webmcp-capability-layer.md's rule against overclaiming multimodal
+ * transport). Minting it here, only for an item the caller already resolved
+ * through this tool's own authorization check, means the signature inherits
+ * that same access decision — this never re-derives grants on its own.
+ */
+async function slimItem(it: ContextItem, env: Env | undefined, origin: string | undefined) {
+  const content_url =
+    env && origin && it.content_ref && VIEWABLE_TYPES.has(it.type)
+      ? await signedBlobUrl(env.BLOB_SIGNING_SECRET, origin, API.blob, it.content_ref)
+      : null;
   return {
     id: it.id,
     type: it.type,
@@ -87,6 +106,7 @@ function slimItem(it: ContextItem) {
     source_url: it.source_url ? spotlight(clip(it.source_url, 200)) : null,
     title: spotlight(clip(it.title, 120)),
     semantic_text: it.semantic_text ? spotlight(clip(it.semantic_text, MAX_TEXT)) : null,
+    content_url,
   };
 }
 
@@ -96,6 +116,7 @@ export async function handleToolCall(
   human: ResolvedHuman,
   now: number,
   env?: Env,
+  origin?: string,
 ): Promise<ToolCallResponse> {
   // Re-resolve session, task, and their linkage. Never trust body.task_id / body.agent_session_id alone.
   const session = q.getAgentSession(body.agent_session_id);
@@ -247,12 +268,18 @@ export async function handleToolCall(
         }
       }
 
-      const compact = items.slice(0, MAX_ROWS).map((ret) => ({
-        id: ret.item.id,
-        region: ret.region_slug,
-        title: spotlight(clip(ret.item.title, 120)),
-        why: clip(ret.why, MAX_TEXT),
-      }));
+      const compact = await Promise.all(
+        items.slice(0, MAX_ROWS).map(async (ret) => ({
+          id: ret.item.id,
+          region: ret.region_slug,
+          title: spotlight(clip(ret.item.title, 120)),
+          why: clip(ret.why, MAX_TEXT),
+          content_url:
+            env && origin && ret.item.content_ref && VIEWABLE_TYPES.has(ret.item.type)
+              ? await signedBlobUrl(env.BLOB_SIGNING_SECRET, origin, API.blob, ret.item.content_ref)
+              : null,
+        })),
+      );
       return { ok: true, result: { items: compact } };
     }
 
@@ -292,7 +319,7 @@ export async function handleToolCall(
         tool_name: body.tool,
         at: now,
       });
-      return { ok: true, result: { item: slimItem(item) } };
+      return { ok: true, result: { item: await slimItem(item, env, origin) } };
     }
 
     case "inspect_relationships": {
@@ -326,10 +353,13 @@ export async function handleToolCall(
       }
       const allowedIds = authorizedRegionIds(q, task.id, now);
       const graphResult = traverse(q, [itemId], allowedIds);
+      const slimNodes = await Promise.all(
+        graphResult.nodes.slice(0, MAX_ROWS).map((node) => slimItem(node, env, origin)),
+      );
       return {
         ok: true,
         result: {
-          nodes: graphResult.nodes.slice(0, MAX_ROWS).map(slimItem),
+          nodes: slimNodes,
           edges: graphResult.edges.slice(0, MAX_ROWS),
         },
       };
@@ -435,6 +465,12 @@ export async function handleToolCall(
       // This is the revision handoff: the current artifact's immutable version,
       // exact human annotations, and real influences travel together. It gives
       // an agent actionable feedback without exposing unrelated workspace data.
+      const slimInfluences = await Promise.all(
+        influences.slice(0, MAX_ROWS).map(async (inf) => ({
+          influence: inf.influence,
+          item: inf.item ? await slimItem(inf.item, env, origin) : null,
+        })),
+      );
       return {
         ok: true,
         result: {
@@ -452,10 +488,7 @@ export async function handleToolCall(
             status: a.status,
             comment: spotlight(clip(a.comment, MAX_TEXT)),
           })),
-          influences: influences.slice(0, MAX_ROWS).map((inf) => ({
-            influence: inf.influence,
-            item: inf.item ? slimItem(inf.item) : null,
-          })),
+          influences: slimInfluences,
         },
       };
     }

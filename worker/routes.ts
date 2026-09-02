@@ -41,6 +41,7 @@ import { deriveTasteSignals, statementOverlap } from "./taste/derive";
 import { classifyAnnotationDimensions } from "./taste/classifier";
 import { extractUrl, isPublicHttpUrl } from "./extract";
 import { captionImage } from "./vision";
+import { verifyBlobSignature } from "./blob-sign";
 import { deriveEdgesForItem } from "./graph-build";
 import { drainSpaceMemory, memoryIndexFor } from "./memory-drain";
 
@@ -76,6 +77,16 @@ export async function handleRoute(
   q: Queries,
 ): Promise<Response> {
   const url = new URL(request.url);
+
+  // A signed blob request carries its own authorization (a signature this
+  // server already minted for that key) and deliberately has no session —
+  // that's the whole point, an agent fetching independently of the tab the
+  // tool call came from. Checked before the session gate below, and only for
+  // this one path; every other route is unaffected.
+  if (url.pathname === API.blob && url.searchParams.has("sig")) {
+    return handleSignedBlob(request, env);
+  }
+
   const human = await resolveHuman(request, env);
   if (!human) return json({ ok: false, error: "Sign in required" }, { status: 401 });
 
@@ -635,17 +646,34 @@ function blobMime(contentType: string | null | undefined): string {
   return KNOWN_BLOB_MIMES.has(mime) ? mime : "application/octet-stream";
 }
 
-function blobHeaders(mime: string, etag?: string): Headers {
+function blobHeaders(mime: string, etag?: string, crossOrigin = false): Headers {
   const headers = new Headers({
     "content-type": mime,
     "content-disposition": INLINE_BLOB_MIMES.has(mime) ? "inline" : "attachment",
     "cache-control": "private, max-age=31536000, immutable",
-    "cross-origin-resource-policy": "same-origin",
+    // A signed URL exists specifically to be fetched from outside this
+    // origin (an agent's own HTTP client, or an in-browser image render on a
+    // different host) — CORP: same-origin would defeat that on the browser
+    // paths, so the signed route asks for cross-origin instead.
+    "cross-origin-resource-policy": crossOrigin ? "cross-origin" : "same-origin",
     "referrer-policy": "no-referrer",
     "x-content-type-options": "nosniff",
   });
   if (etag) headers.set("etag", etag);
   return headers;
+}
+
+/** Fetches `key` from R2 and streams it back, 304-aware. Shared by the session- and signature-authorized blob routes. */
+async function streamBlobResponse(env: Env, key: string, request: Request, crossOrigin: boolean): Promise<Response> {
+  // Keys are content-addressed (random UUID, never reused), so a hit is safe to
+  // cache hard. `onlyIf` lets R2 answer 304 when the caller already holds it.
+  const object = await env.BLOBS.get(key, { onlyIf: request.headers });
+  if (!object) return new Response("Not found", { status: 404 });
+  const mime = blobMime(object.httpMetadata?.contentType);
+  if (!("body" in object) || object.body === undefined) {
+    return new Response(null, { status: 304, headers: blobHeaders(mime, object.httpEtag, crossOrigin) });
+  }
+  return new Response(object.body, { headers: blobHeaders(mime, object.httpEtag, crossOrigin) });
 }
 
 async function handleUpload(request: Request, env: Env, q: Queries, humanId: string): Promise<Response> {
@@ -677,11 +705,13 @@ async function handleUpload(request: Request, env: Env, q: Queries, humanId: str
 }
 
 /**
- * Streams a canonical original back out of R2.
+ * Streams a canonical original back out of R2, for this app's own signed-in UI.
  *
  * Keys are confined to this visitor's own space prefix, so a caller can neither
  * walk out of the bucket with a crafted key nor read another visitor's uploads. The agent never receives a bucket
- * credential or a raw R2 URL — it only ever sees this path.
+ * credential or a raw R2 URL — it only ever sees this path (or, for an agent
+ * fetching independently of a session, handleSignedBlob below — same path,
+ * an expiring signature instead of a cookie).
  */
 async function handleBlob(request: Request, env: Env, humanId: string): Promise<Response> {
   if (request.method !== "GET") return badRequest("GET required");
@@ -690,17 +720,31 @@ async function handleBlob(request: Request, env: Env, humanId: string): Promise<
   if (!key.startsWith(`${spaceIdFor(humanId)}/`) || key.includes("..")) {
     return new Response("Not found", { status: 404 });
   }
-  // Keys are content-addressed (random UUID, never reused), so a hit is safe to
-  // cache hard. `onlyIf` lets R2 answer 304 when the browser already holds it.
-  const object = await env.BLOBS.get(key, { onlyIf: request.headers });
-  if (!object) return new Response("Not found", { status: 404 });
-  const mime = blobMime(object.httpMetadata?.contentType);
-  if (!("body" in object) || object.body === undefined) {
-    return new Response(null, { status: 304, headers: blobHeaders(mime, object.httpEtag) });
-  }
-  return new Response(object.body, {
-    headers: blobHeaders(mime, object.httpEtag),
-  });
+  return streamBlobResponse(env, key, request, false);
+}
+
+/**
+ * The same canonical blob, for a caller with no session — an agent fetching
+ * a content_url it received from a tool result, independently of the
+ * browser tab the tool call came from. Authorization here is possession of
+ * a valid, unexpired signature: the server only ever mints one for a key it
+ * already decided this agent could see, at the moment a tool call resolved
+ * that item (worker/mcp.ts's slimItem) — this route re-derives nothing about
+ * grants or task scope, it only checks the signature and expiry.
+ */
+async function handleSignedBlob(request: Request, env: Env): Promise<Response> {
+  if (request.method !== "GET") return badRequest("GET required");
+  const url = new URL(request.url);
+  const key = url.searchParams.get("key");
+  if (!key || key.includes("..")) return new Response("Not found", { status: 404 });
+  const ok = await verifyBlobSignature(
+    env.BLOB_SIGNING_SECRET,
+    key,
+    url.searchParams.get("exp"),
+    url.searchParams.get("sig"),
+  );
+  if (!ok) return new Response("Not found", { status: 404 });
+  return streamBlobResponse(env, key, request, true);
 }
 
 /**
@@ -1002,7 +1046,7 @@ async function handleMcpCall(
   const over = meter(q, human.human_id, "agent_calls");
   if (over) return over;
   const body = (await request.json()) as ToolCallRequest;
-  const result = await handleToolCall(body, q, human, Date.now(), env);
+  const result = await handleToolCall(body, q, human, Date.now(), env, new URL(request.url).origin);
   if (result.ok) {
     const session = q.getAgentSession(body.agent_session_id);
     q.insertAuditEvent({

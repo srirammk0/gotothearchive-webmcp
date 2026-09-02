@@ -37,13 +37,13 @@ test("no AI binding -> null, so the item is left title-only same as today", asyn
   expect(await captionImage({}, bytes)).toBeNull();
 });
 
-test("a description response is trimmed and returned", async () => {
-  const env = { AI: { run: () => Promise.resolve({ description: "  A minimal poster, high contrast.  " }) } };
+test("the confirmed response field is trimmed and returned", async () => {
+  const env = { AI: { run: () => Promise.resolve({ response: "  A minimal poster, high contrast.  " }) } };
   expect(await captionImage(env, bytes)).toBe("A minimal poster, high contrast.");
 });
 
-test("falls back to a response field when description is absent", async () => {
-  const env = { AI: { run: () => Promise.resolve({ response: "Dense editorial layout." }) } };
+test("falls back to a description field if response is absent", async () => {
+  const env = { AI: { run: () => Promise.resolve({ description: "Dense editorial layout." }) } };
   expect(await captionImage(env, bytes)).toBe("Dense editorial layout.");
 });
 

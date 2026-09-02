@@ -24,19 +24,34 @@ const PROMPT =
   "prose, no preamble, no markdown, 2-4 sentences.";
 
 /**
+ * @cf/meta/llama-3.2-11b-vision-instruct: llava-1.5-7b-hf (the model this
+ * used to call) isn't in Cloudflare's current priced/documented model
+ * catalog — likely stale. This one is: confirmed input shape (image as a
+ * plain byte array, alongside `prompt`) and output shape ({response: string})
+ * against Cloudflare's own docs and a working community example, not guessed.
+ * ~$0.0003/image at published token pricing — the 10,000 free Neurons/day
+ * covers roughly 370 captions before any billing kicks in.
+ *
+ * One-time setup this needs and cannot do for itself: Meta's license for
+ * Llama vision models must be accepted once per account by calling this
+ * model with {"prompt": "agree"} (via the dashboard playground, or a single
+ * curl) before any real call succeeds. Until that happens every caption call
+ * fails closed exactly like a missing binding — silently to the item, logged
+ * via the console.warn below.
+ *
  * `bytes` is the raw file (not yet type-checked) — callers are responsible for
  * only calling this on an image/screenshot content type.
  */
 export async function captionImage(env: VisionAiLike | undefined, bytes: Uint8Array): Promise<string | null> {
   if (!env?.AI?.run) return null;
   try {
-    const result = await env.AI.run("@cf/llava-hf/llava-1.5-7b-hf", {
+    const result = await env.AI.run("@cf/meta/llama-3.2-11b-vision-instruct", {
       image: Array.from(bytes),
       prompt: PROMPT,
       max_tokens: 512,
     });
-    const text = (result as { description?: string; response?: string }).description
-      ?? (result as { description?: string; response?: string }).response;
+    const text = (result as { response?: string; description?: string }).response
+      ?? (result as { response?: string; description?: string }).description;
     if (typeof text !== "string") {
       console.warn(`vision: unexpected caption response shape — ${JSON.stringify(result).slice(0, 200)}`);
       return null;
