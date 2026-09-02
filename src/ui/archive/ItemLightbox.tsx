@@ -7,7 +7,7 @@ import { Menu } from "../primitives/Menu";
 import { Icon } from "../primitives/Icon";
 import { Tweet } from "./Tweet";
 import { ConnectionsPanel } from "./ConnectionsPanel";
-import { FileCard, kind, tweetId } from "./itemKind";
+import { extractedImage, FileCard, kind, tweetId } from "./itemKind";
 import { ArtifactThumb } from "../workbench/ArtifactThumb";
 import { blobUrl } from "../../api/client";
 import { duration, ease } from "../tokens";
@@ -52,6 +52,8 @@ export function ItemLightbox({
 }) {
   const [editing, setEditing] = useState<"title" | "desc" | null>(null);
   const [draft, setDraft] = useState("");
+  const [linkImgFailed, setLinkImgFailed] = useState(false);
+  useEffect(() => setLinkImgFailed(false), [item.id]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -171,13 +173,34 @@ export function ItemLightbox({
                 placeholder="Write a note…"
                 className="no-scrollbar h-full w-full max-w-prose resize-none bg-transparent text-[length:var(--text-body)] leading-relaxed text-text placeholder:text-faint"
               />
+            ) : render === "link" && extractedImage(item) && !linkImgFailed ? (
+              <a
+                href={item.source_url ?? undefined}
+                target="_blank"
+                rel="noreferrer"
+                className="flex h-full w-full items-center justify-center"
+              >
+                <img
+                  src={extractedImage(item) ?? ""}
+                  alt=""
+                  onError={() => setLinkImgFailed(true)}
+                  className="max-h-full max-w-full rounded-[var(--radius-sm)] object-contain"
+                />
+              </a>
             ) : (
-              <div className="flex flex-col items-center gap-3 text-center">
-                <p className="text-[length:var(--text-body)] text-muted">{item.title}</p>
+              <div className="flex max-w-prose flex-col gap-3">
+                <p className="text-[length:var(--text-body)] leading-relaxed text-muted">
+                  {item.semantic_text?.trim() || item.title}
+                </p>
                 {item.source_url ? (
-                  <span className="text-[length:var(--text-meta)] text-faint">
+                  <a
+                    href={item.source_url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-[length:var(--text-meta)] text-faint underline-offset-2 hover:text-muted hover:underline"
+                  >
                     {new URL(item.source_url).hostname.replace(/^www\./, "")}
-                  </span>
+                  </a>
                 ) : null}
               </div>
             )}
