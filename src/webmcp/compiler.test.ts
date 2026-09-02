@@ -10,7 +10,32 @@ function findTool(specs: ReturnType<typeof compile>, name: string) {
   return specs.find((s) => s.name === name);
 }
 
-test("revoking a region removes that slug from the enum", () => {
+test("region is a plain string field, not a per-tool enum of every accessible slug", () => {
+  // The enum used to repeat the full accessible-region list in every one of
+  // ~7 tools' inputSchema — real, duplicated tokens sent to the calling
+  // model on every capability refresh, scaling with region count × tool
+  // count. Region names are still validated server-side either way (see
+  // authorize() in worker/permissions.ts); the schema now just points at
+  // get_current_context_scope instead of re-enumerating.
+  const input: CapabilityInput = {
+    humanRegions: [
+      { slug: "work", level: "write" },
+      { slug: "inspiration", level: "write" },
+    ],
+    grants: [
+      { slug: "work", level: "read" },
+      { slug: "inspiration", level: "read" },
+    ],
+    task,
+    pageState: noPageState,
+  };
+  const tool = findTool(compile(input), "get_context_for_task");
+  const region = tool!.inputSchema.properties.region as { type: string; enum?: string[] };
+  assert.equal(region.type, "string");
+  assert.equal(region.enum, undefined);
+});
+
+test("revoking a region is still reflected — in the tool's registration reason, not its schema", () => {
   const before: CapabilityInput = {
     humanRegions: [
       { slug: "work", level: "write" },
@@ -27,9 +52,10 @@ test("revoking a region removes that slug from the enum", () => {
 
   const beforeTool = findTool(compile(before), "get_context_for_task");
   const afterTool = findTool(compile(after), "get_context_for_task");
-  assert.ok(beforeTool);
-  assert.deepEqual(beforeTool!.inputSchema.properties.region, { type: "string", enum: ["work", "inspiration"] });
-  assert.deepEqual(afterTool!.inputSchema.properties.region, { type: "string", enum: ["work"] });
+  assert.ok(beforeTool!.why.includes("work"));
+  assert.ok(beforeTool!.why.includes("inspiration"));
+  assert.ok(afterTool!.why.includes("work"));
+  assert.ok(!afterTool!.why.includes("inspiration"));
 });
 
 test("revoking the last granted region removes the tool entirely", () => {

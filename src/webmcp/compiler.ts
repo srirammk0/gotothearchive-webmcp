@@ -94,7 +94,7 @@ export function compile(input: CapabilityInput): ToolSpec[] {
     inputSchema: {
       type: "object",
       properties: {
-        region: { type: "string", enum: slugs },
+        region: { type: "string", description: "One of your accessible regions — see get_current_context_scope." },
         query: { type: "string", description: "What context is useful for the current task." },
         limit: { type: "number", description: "Maximum items to return, from 1 to 20." },
       },
@@ -109,7 +109,10 @@ export function compile(input: CapabilityInput): ToolSpec[] {
     description: "Look up the full detail of a single context item you already have access to.",
     inputSchema: {
       type: "object",
-      properties: { region: { type: "string", enum: slugs }, item_id: { type: "string" } },
+      properties: {
+        region: { type: "string", description: "One of your accessible regions — see get_current_context_scope." },
+        item_id: { type: "string" },
+      },
       required: ["region", "item_id"],
     },
     why: `Read access is live on: ${slugs.join(", ")}.`,
@@ -122,7 +125,10 @@ export function compile(input: CapabilityInput): ToolSpec[] {
     description: "Traverse the context graph around an item, within accessible regions only.",
     inputSchema: {
       type: "object",
-      properties: { region: { type: "string", enum: slugs }, item_id: { type: "string" } },
+      properties: {
+        region: { type: "string", description: "One of your accessible regions — see get_current_context_scope." },
+        item_id: { type: "string" },
+      },
       required: ["region", "item_id"],
     },
     why: `Read access is live on: ${slugs.join(", ")}.`,
@@ -165,7 +171,7 @@ export function compile(input: CapabilityInput): ToolSpec[] {
     inputSchema: {
       type: "object",
       properties: {
-        region: { type: "string", enum: slugs },
+        region: { type: "string", description: "One of your accessible regions — see get_current_context_scope." },
         from_item_id: { type: "string" },
         to_item_id: { type: "string" },
         relationship: { type: "string", enum: RELATIONSHIPS },
@@ -182,7 +188,7 @@ export function compile(input: CapabilityInput): ToolSpec[] {
     inputSchema: {
       type: "object",
       properties: {
-        region: { type: "string", enum: slugs },
+        region: { type: "string", description: "One of your accessible regions — see get_current_context_scope." },
         version_id: { type: "string" },
         sentiment: { type: "string", enum: ["positive", "negative", "neutral"] },
         dimensions: { type: "array", items: { type: "string", enum: TASTE_DIMENSIONS } },
@@ -201,16 +207,16 @@ export function compile(input: CapabilityInput): ToolSpec[] {
     name: "record_artifact",
     title: "Record artifact",
     description:
-      "Submit a new artifact version for human review in an accessible region. It does not become canonical until a person approves it. List the items that shaped the work in used_item_ids so the person reviewing can see what informed it.",
+      "Submit a new artifact version for human review in an accessible region. It does not become canonical until a person approves it. Call get_taste_for_task first and apply any confirmed signals — this is how the work should already look, not an optional check. List the items that shaped the work in used_item_ids so the person reviewing can see what informed it.",
     inputSchema: {
       type: "object",
       properties: {
-        region: { type: "string", enum: slugs },
+        region: { type: "string", description: "One of your accessible regions — see get_current_context_scope." },
         title: { type: "string" },
         content_html: {
           type: "string",
           description:
-            "A complete preview document. For component, include React/ReactDOM UMD scripts from unpkg.com and the Tailwind Play CDN; JSX may use @babel/standalone. The preview has no access to the host app, storage, forms, navigation, or arbitrary network requests.",
+            "A complete preview document. For component, include React/ReactDOM UMD scripts from unpkg.com and the Tailwind Play CDN; JSX may use @babel/standalone. The preview has no access to the host app, storage, forms, navigation, or arbitrary network requests. To use an existing image (a logo, a real photo) rather than a placeholder, drop its embed_url — from get_context_for_task or inspect_context_item — straight into an <img src>.",
         },
         renderer: {
           type: "string",
@@ -243,7 +249,7 @@ export function compile(input: CapabilityInput): ToolSpec[] {
     inputSchema: {
       type: "object",
       properties: {
-        region: { type: "string", enum: slugs },
+        region: { type: "string", description: "One of your accessible regions — see get_current_context_scope." },
         type: { type: "string", enum: ["note", "link", "document"] },
         title: { type: "string" },
         body: { type: "string", description: "The note text or document body. Plain text." },
