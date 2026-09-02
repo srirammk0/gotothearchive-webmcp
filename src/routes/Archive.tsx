@@ -1,9 +1,8 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useSearchParams } from "react-router";
 import { AnimatePresence, motion } from "motion/react";
-import { isAgentAuthority, type ContextItem, type ItemType, type Region } from "@shared/contract";
+import type { ContextItem, ItemType, Region } from "@shared/contract";
 import { EmptyState } from "../ui/primitives/EmptyState";
-import { EmptyRow } from "../ui/primitives/EmptyRow";
 import { Spinner } from "../ui/primitives/Spinner";
 import { Button } from "../ui/primitives/Button";
 import { Icon } from "../ui/primitives/Icon";
@@ -15,25 +14,12 @@ import { Capture } from "../ui/archive/Capture";
 import { CapturePreview } from "../ui/archive/CapturePreview";
 import { MemorySync } from "../ui/archive/MemorySync";
 import { ItemLightbox } from "../ui/archive/ItemLightbox";
-import { ItemPreview } from "../ui/archive/ItemPreview";
-import { host, kind } from "../ui/archive/itemKind";
+import { RegionSection, type ArchiveRegionView } from "../ui/archive/RegionSection";
+import { isPinned, useArchive } from "../ui/archive/useArchive";
+import { useArchiveSelection } from "../ui/archive/useArchiveSelection";
 import { useTrail } from "../ui/Breadcrumbs";
 import { useSpace } from "../ui/hooks/useSpace";
-import {
-  createRegion,
-  deleteItems,
-  deleteRegion,
-  listItems,
-  renameRegion,
-  updateItems,
-} from "../api/client";
 import { duration, ease } from "../ui/tokens";
-
-/** Archive: a region rendered as an editorial index of its items. */
-interface ArchiveRegionView {
-  region: Region;
-  items: ContextItem[];
-}
 
 type TypeFilter = ItemType | "all";
 
@@ -46,338 +32,38 @@ const TYPE_FILTERS: { value: TypeFilter; label: string }[] = [
   { value: "document", label: "Docs" },
 ];
 
-function isAgentAdded(item: ContextItem): boolean {
-  return isAgentAuthority(item.authority_class);
-}
-
-function isPinned(item: ContextItem): boolean {
-  return item.metadata?.pinned === true;
-}
-
-function regionSubtreeIds(regions: Region[], rootId: string): Set<string> {
-  const ids = new Set<string>([rootId]);
-  const pending = [rootId];
-  while (pending.length > 0) {
-    const parentId = pending.pop();
-    if (!parentId) continue;
-    for (const region of regions) {
-      if (region.parent_id === parentId && !ids.has(region.id)) {
-        ids.add(region.id);
-        pending.push(region.id);
-      }
-    }
-  }
-  return ids;
-}
-
 function matchesType(item: ContextItem, filter: TypeFilter): boolean {
   if (filter === "all") return true;
   if (filter === "image") return item.type === "image" || item.type === "screenshot";
   return item.type === filter;
 }
 
-function itemDate(item: ContextItem): string {
-  return new Date(item.created_at).toLocaleDateString(undefined, { month: "short", day: "numeric" });
-}
-
-function Tile({
-  item,
-  index,
-  anySelected,
-  selected,
-  onToggle,
-  onOpen,
-  onTogglePin,
-}: {
-  item: ContextItem;
-  index: number;
-  anySelected: boolean;
-  selected: boolean;
-  onToggle: (id: string) => void;
-  onOpen: (id: string) => void;
-  onTogglePin: (item: ContextItem) => void;
-}) {
-  const pinned = isPinned(item);
-  return (
-    <motion.li
-      layout="position"
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      transition={{ duration: duration.base, ease, delay: Math.min(index, 14) * 0.02 }}
-      className={`group relative ${
-        pinned ? "sm:col-span-2 sm:row-span-2" : "aspect-square self-start"
-      }`}
-    >
-      <div
-        role="button"
-        tabIndex={0}
-        onClick={() => (anySelected ? onToggle(item.id) : onOpen(item.id))}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" || e.key === " ") {
-            e.preventDefault();
-            if (anySelected) onToggle(item.id);
-            else onOpen(item.id);
-          }
-        }}
-        className={`relative flex h-full w-full cursor-pointer items-center justify-center overflow-hidden rounded-[var(--radius-md)] border bg-surface p-5 transition-colors duration-[var(--duration-fast)] ${
-          selected ? "border-accent" : "border-line-soft group-hover:border-line"
-        }`}
-      >
-        <ItemPreview item={item} size="tile" />
-
-        {/* Checkbox — always in the DOM, shown on hover or whenever a selection is active. */}
-        <button
-          type="button"
-          onClick={(e) => {
-            e.stopPropagation();
-            onToggle(item.id);
-          }}
-          aria-label={selected ? `Deselect ${item.title}` : `Select ${item.title}`}
-          aria-pressed={selected}
-          className={`absolute left-2 top-2 z-10 flex h-5 w-5 items-center justify-center rounded-[var(--radius-sm)] border transition-opacity duration-[var(--duration-fast)] ${
-            selected ? "border-accent bg-accent text-canvas" : "border-line bg-raised/90 text-transparent"
-          } ${selected || anySelected ? "opacity-100" : "opacity-0 group-hover:opacity-100"}`}
-        >
-          <Icon name="check" size={12} />
-        </button>
-
-        {/* Pin — top-right, mirrors the checkbox. */}
-        <button
-          type="button"
-          onClick={(e) => {
-            e.stopPropagation();
-            onTogglePin(item);
-          }}
-          aria-label={pinned ? "Unpin" : "Pin"}
-          aria-pressed={pinned}
-          className={`absolute right-2 top-2 z-10 rounded-[var(--radius-sm)] bg-raised/90 p-1 backdrop-blur transition-all duration-[var(--duration-fast)] ${
-            pinned ? "text-accent opacity-100" : "text-muted opacity-0 hover:text-text group-hover:opacity-100"
-          }`}
-        >
-          <Icon name="pin" size={14} />
-        </button>
-      </div>
-
-      {/* Caption sits in the row gap below the square, out of the grid-track math
-          so every cell (1× and pinned) stays a clean square. */}
-      <div className="absolute inset-x-0 top-full flex flex-col gap-0.5 pt-2 leading-tight">
-        <div className="flex items-center gap-1.5">
-          <span
-            className={`shrink-0 rounded-[var(--radius-sm)] px-1.5 py-px text-micro ${
-              isAgentAdded(item) ? "bg-accent/15 text-accent" : "bg-hover text-muted"
-            }`}
-          >
-            {isAgentAdded(item) ? "Agent" : "Human"}
-          </span>
-          <p className="truncate text-meta text-text">{item.title}</p>
-        </div>
-        <p className="truncate text-micro text-faint">
-          {kind(item).label} · {itemDate(item)}
-          {host(item) ? ` · ${host(item)}` : ""}
-        </p>
-      </div>
-    </motion.li>
-  );
-}
-
-function RegionSection({
-  view,
-  collapsed,
-  anySelected,
-  selectedIds,
-  onCollapse,
-  onToggle,
-  onOpenItem,
-  onTogglePin,
-  onRename,
-  onDelete,
-  onOpenFolder,
-  onAdd,
-  childFolders,
-  showOpen,
-}: {
-  view: ArchiveRegionView;
-  collapsed: boolean;
-  anySelected: boolean;
-  selectedIds: Set<string>;
-  onCollapse: (id: string) => void;
-  onToggle: (id: string) => void;
-  onOpenItem: (id: string) => void;
-  onTogglePin: (item: ContextItem) => void;
-  onRename: (region: Region, name: string) => void;
-  onDelete: (region: Region) => void;
-  onOpenFolder: (region: Region) => void;
-  onAdd: (region: Region) => void;
-  childFolders: Region[];
-  showOpen: boolean;
-}) {
-  const [renaming, setRenaming] = useState(false);
-  const [draft, setDraft] = useState(view.region.name);
-
-  return (
-    <section className="flex flex-col">
-      <div className="flex items-center justify-between gap-4 border-b border-line-soft pb-2.5">
-        {renaming ? (
-          <form
-            className="flex items-center gap-2"
-            onSubmit={(e) => {
-              e.preventDefault();
-              if (draft.trim() && draft.trim() !== view.region.name) onRename(view.region, draft.trim());
-              setRenaming(false);
-            }}
-          >
-            <input
-              autoFocus
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              onBlur={() => setRenaming(false)}
-              className={`${controlClass} h-8 w-48 py-1`}
-            />
-          </form>
-        ) : (
-          <div className="group/head flex min-w-0 items-center gap-2">
-            <button
-              type="button"
-              onClick={() => onCollapse(view.region.id)}
-              className="flex min-w-0 items-center gap-1.5 text-left"
-              aria-expanded={!collapsed}
-            >
-              <Icon
-                name="chevronDown"
-                size={13}
-                className={`shrink-0 text-faint transition-transform duration-[var(--duration-base)] ${
-                  collapsed ? "rotate-0" : "rotate-180"
-                }`}
-              />
-              <h2 className="truncate text-headline text-text">{view.region.name}</h2>
-            </button>
-            <button
-              type="button"
-              aria-label={`Rename ${view.region.name}`}
-              onClick={() => {
-                setDraft(view.region.name);
-                setRenaming(true);
-              }}
-              className="shrink-0 text-faint opacity-0 transition-opacity duration-[var(--duration-fast)] hover:text-text group-hover/head:opacity-100"
-            >
-              <Icon name="pencil" size={13} />
-            </button>
-            {showOpen && view.region.parent_id !== null ? (
-              <button
-                type="button"
-                aria-label={`Delete ${view.region.name}`}
-                onClick={() => onDelete(view.region)}
-                className="shrink-0 text-faint opacity-0 transition-opacity duration-[var(--duration-fast)] hover:text-bad group-hover/head:opacity-100"
-              >
-                <Icon name="trash" size={13} />
-              </button>
-            ) : null}
-          </div>
-        )}
-
-        <div className="flex shrink-0 items-center gap-2">
-          {view.items.length > 0 ? (
-            <span className="text-micro text-faint">
-              {view.items.length} {view.items.length === 1 ? "item" : "items"}
-            </span>
-          ) : null}
-          <button
-            type="button"
-            aria-label={`Add to ${view.region.name}`}
-            onClick={() => onAdd(view.region)}
-            className="rounded-[var(--radius-sm)] p-1 text-muted transition-colors duration-[var(--duration-fast)] hover:bg-hover hover:text-text"
-          >
-            <Icon name="plus" size={14} />
-          </button>
-          {showOpen ? (
-            <button
-              type="button"
-              aria-label={`Open ${view.region.name}`}
-              onClick={() => onOpenFolder(view.region)}
-              className="rounded-[var(--radius-sm)] p-1 text-muted transition-colors duration-[var(--duration-fast)] hover:bg-hover hover:text-text"
-            >
-              <Icon name="arrowUpRight" size={14} />
-            </button>
-          ) : null}
-        </div>
-      </div>
-
-      <AnimatePresence initial={false}>
-        {collapsed ? null : (
-          <motion.div
-            key="body"
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: "auto", opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: duration.base, ease }}
-            className="overflow-hidden"
-          >
-          <div className="pt-4">
-            {childFolders.length > 0 ? (
-              <ul className="mb-6 flex flex-wrap gap-2">
-                {childFolders.map((f) => (
-                  <li key={f.id}>
-                    <button
-                      type="button"
-                      onClick={() => onOpenFolder(f)}
-                      className="inline-flex items-center gap-2 rounded-[var(--radius-md)] border border-line-soft bg-surface px-3 py-2 text-meta text-text transition-colors duration-[var(--duration-fast)] hover:border-line hover:bg-hover"
-                    >
-                      <Icon name="folder" size={14} className="text-faint" />
-                      {f.name}
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            ) : null}
-            {view.items.length === 0 ? (
-              childFolders.length > 0 ? null : <EmptyRow />
-            ) : (
-              <ul className="grid grid-flow-dense grid-cols-2 gap-x-4 gap-y-14 pb-10 [grid-auto-rows:minmax(8rem,auto)] sm:grid-cols-4 lg:grid-cols-4 xl:grid-cols-6">
-                {view.items.map((item, i) => (
-                  <Tile
-                    key={item.id}
-                    item={item}
-                    index={i}
-                    anySelected={anySelected}
-                    selected={selectedIds.has(item.id)}
-                    onToggle={onToggle}
-                    onOpen={onOpenItem}
-                    onTogglePin={onTogglePin}
-                  />
-                ))}
-              </ul>
-            )}
-          </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </section>
-  );
-}
+/**
+ * The one thing shown "on top" of the Archive at a time — a modal, the capture
+ * flow, or an open item — as a single value instead of seven independent
+ * booleans/ids, so two of them can never be open together by accident.
+ */
+type Overlay =
+  | { kind: "none" }
+  | { kind: "newFolder"; parent: Region | null; draft: string }
+  | { kind: "capture"; region: Region }
+  | { kind: "deleteFolder"; region: Region }
+  | { kind: "preview"; itemId: string }
+  | { kind: "lightbox"; itemId: string };
 
 export function Archive() {
   const { space, regions: spaceRegions, task, loading: spaceLoading, error: spaceError } = useSpace();
+  const archive = useArchive(spaceRegions, spaceLoading, spaceError);
+  const selection = useArchiveSelection();
   const [params, setParams] = useSearchParams();
   const folderSlug = params.get("folder");
 
-  const [items, setItems] = useState<ContextItem[] | null>(null);
-  const [itemsError, setItemsError] = useState<string | null>(null);
-  const [regionList, setRegionList] = useState<Region[] | null>(null);
   const [query, setQuery] = useState("");
   const [typeFilter, setTypeFilter] = useState<TypeFilter>("all");
   const [collapsedIds, setCollapsedIds] = useState<Set<string>>(new Set());
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [folderModal, setFolderModal] = useState(false);
-  const [folderParent, setFolderParent] = useState<Region | null>(null);
-  const [folderDraft, setFolderDraft] = useState("");
-  const [captureFor, setCaptureFor] = useState<Region | null>(null);
-  const [folderToDelete, setFolderToDelete] = useState<Region | null>(null);
-  const [previewId, setPreviewId] = useState<string | null>(null);
-  const [lightboxId, setLightboxId] = useState<string | null>(null);
-  const [banner, setBanner] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
+  const [overlay, setOverlay] = useState<Overlay>({ kind: "none" });
 
-  const regions = regionList ?? spaceRegions;
+  const regions = archive.regions;
   const activeFolder = folderSlug ? regions.find((r) => r.slug === folderSlug) ?? null : null;
 
   // Full parent chain, root → current, so nested folders read as a real path.
@@ -398,107 +84,28 @@ export function Archive() {
       : [{ label: "Archive" }],
   );
 
-  useEffect(() => {
-    if (spaceRegions.length && !regionList) setRegionList(spaceRegions);
-  }, [spaceRegions, regionList]);
-
-  useEffect(() => {
-    if (spaceLoading || spaceError) return;
-    let cancelled = false;
-    listItems()
-      .then(({ items: fetched }) => !cancelled && setItems(fetched))
-      .catch((err) => !cancelled && setItemsError(err instanceof Error ? err.message : "Could not load the archive."));
-    return () => {
-      cancelled = true;
-    };
-  }, [spaceLoading, spaceError]);
-
-  const toggleSelect = (id: string) =>
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-
-  const clearSelection = () => setSelectedIds(new Set());
-
-  const guard = async (fn: () => Promise<void>) => {
-    setBusy(true);
-    setBanner(null);
-    try {
-      await fn();
-    } catch (err) {
-      setBanner(err instanceof Error ? err.message : "That didn't work.");
-    } finally {
-      setBusy(false);
-    }
+  const handleAddFolder = async () => {
+    if (overlay.kind !== "newFolder" || !overlay.draft.trim()) return;
+    const ok = await archive.addFolder(overlay.draft, overlay.parent?.id ?? null);
+    if (ok) setOverlay({ kind: "none" });
   };
 
-  const addFolder = () =>
-    guard(async () => {
-      const name = folderDraft.trim();
-      if (!name) return;
-      const { region } = await createRegion(name, folderParent?.id ?? null);
-      setRegionList((prev) => [...(prev ?? spaceRegions), region]);
-      setFolderModal(false);
-      setFolderDraft("");
-      setFolderParent(null);
-    });
-
-  const renameFolder = (region: Region, name: string) =>
-    guard(async () => {
-      const { region: updated } = await renameRegion(region.id, name);
-      setRegionList((prev) => (prev ?? spaceRegions).map((r) => (r.id === updated.id ? updated : r)));
-    });
-
-  const removeFolder = (region: Region) =>
-    guard(async () => {
-      const deletedRegionIds = regionSubtreeIds(regions, region.id);
-      const parent = region.parent_id ? regions.find((r) => r.id === region.parent_id) ?? null : null;
-      await deleteRegion(region.id);
-      setRegionList((prev) => (prev ?? spaceRegions).filter((r) => !deletedRegionIds.has(r.id)));
-      setItems((prev) => (prev ?? []).filter((i) => !deletedRegionIds.has(i.region_id)));
-      clearSelection();
-      setLightboxId(null);
-      setFolderToDelete(null);
-      if (folderSlug === region.slug) setParams(parent ? { folder: parent.slug } : {}, { replace: true });
-    });
-
-  const editItem = (id: string, changes: { title?: string; semantic_text?: string }) =>
-    void guard(async () => {
-      await updateItems([id], changes);
-      setItems((prev) => (prev ?? []).map((i) => (i.id === id ? { ...i, ...changes } : i)));
-    });
-
-  const togglePin = (item: ContextItem) => {
-    const next = !isPinned(item);
-    void guard(async () => {
-      await updateItems([item.id], { pinned: next });
-      setItems((prev) =>
-        (prev ?? []).map((i) => (i.id === item.id ? { ...i, metadata: { ...i.metadata, pinned: next } } : i)),
-      );
-    });
+  const handleRemoveFolder = async (region: Region) => {
+    const { ok, parent } = await archive.removeFolder(region);
+    if (!ok) return;
+    selection.clear();
+    setOverlay({ kind: "none" });
+    if (folderSlug === region.slug) setParams(parent ? { folder: parent.slug } : {}, { replace: true });
   };
 
-  const moveSelected = (slug: string) => {
+  const handleMoveSelected = (slug: string) => {
     const dest = regions.find((r) => r.slug === slug);
     if (!dest) return;
-    const ids = [...selectedIds];
-    void guard(async () => {
-      await updateItems(ids, { region_slug: slug });
-      setItems((prev) => (prev ?? []).map((i) => (selectedIds.has(i.id) ? { ...i, region_id: dest.id } : i)));
-      clearSelection();
-    });
+    void archive.moveItems([...selection.selectedIds], dest).then((ok) => ok && selection.clear());
   };
 
-  const deleteSelected = () => {
-    const ids = [...selectedIds];
-    void guard(async () => {
-      await deleteItems(ids);
-      setItems((prev) => (prev ?? []).filter((i) => !selectedIds.has(i.id)));
-      clearSelection();
-    });
+  const handleDeleteSelected = () => {
+    void archive.deleteItemsById([...selection.selectedIds]).then((ok) => ok && selection.clear());
   };
 
   const visibleRegions = useMemo(
@@ -532,7 +139,7 @@ export function Archive() {
   const regionViews: ArchiveRegionView[] = useMemo(() => {
     const q = query.trim().toLowerCase();
     return visibleRegions.map((region) => {
-      const matched = (items ?? []).filter(
+      const matched = (archive.items ?? []).filter(
         (i) =>
           i.region_id === region.id &&
           matchesType(i, typeFilter) &&
@@ -541,14 +148,16 @@ export function Archive() {
       matched.sort((a, b) => Number(isPinned(b)) - Number(isPinned(a)) || b.created_at - a.created_at);
       return { region, items: matched };
     });
-  }, [visibleRegions, items, typeFilter, query]);
+  }, [visibleRegions, archive.items, typeFilter, query]);
 
   const flatItems = useMemo(() => regionViews.flatMap((r) => r.items), [regionViews]);
+  const lightboxId = overlay.kind === "lightbox" ? overlay.itemId : null;
   const lightboxIndex = lightboxId ? flatItems.findIndex((i) => i.id === lightboxId) : -1;
   const lightboxItem = lightboxIndex >= 0 ? flatItems[lightboxIndex] : null;
-  const previewItem = previewId ? (items ?? []).find((i) => i.id === previewId) ?? null : null;
+  const previewId = overlay.kind === "preview" ? overlay.itemId : null;
+  const previewItem = previewId ? (archive.items ?? []).find((i) => i.id === previewId) ?? null : null;
 
-  if (!spaceError && (spaceLoading || (items === null && !itemsError))) {
+  if (!spaceError && (spaceLoading || (archive.items === null && !archive.itemsError))) {
     return (
       <div className="flex min-h-[40vh] items-center justify-center">
         <Spinner label="Opening the archive…" />
@@ -556,11 +165,11 @@ export function Archive() {
     );
   }
 
-  if (spaceError || itemsError) {
+  if (spaceError || archive.itemsError) {
     return (
       <EmptyState
         title="Couldn't load the archive"
-        body={spaceError ?? itemsError ?? "Something went wrong."}
+        body={spaceError ?? archive.itemsError ?? "Something went wrong."}
         action={
           <Button variant="secondary" onClick={() => window.location.reload()}>
             Try again
@@ -570,7 +179,7 @@ export function Archive() {
     );
   }
 
-  const total = (items ?? []).filter((i) => !activeFolder || i.region_id === activeFolder.id).length;
+  const total = (archive.items ?? []).filter((i) => !activeFolder || i.region_id === activeFolder.id).length;
   const visible = flatItems.length;
   const filtered = query.trim() !== "" || typeFilter !== "all";
 
@@ -589,7 +198,7 @@ export function Archive() {
                     type="button"
                     aria-label={`Delete ${activeFolder.name}`}
                     title={`Delete ${activeFolder.name}`}
-                    onClick={() => setFolderToDelete(activeFolder)}
+                    onClick={() => setOverlay({ kind: "deleteFolder", region: activeFolder })}
                     className="shrink-0 rounded-[var(--radius-sm)] p-1.5 text-faint transition-colors duration-[var(--duration-fast)] hover:bg-hover hover:text-bad"
                   >
                     <Icon name="trash" size={15} />
@@ -617,7 +226,7 @@ export function Archive() {
               </label>
               <button
                 type="button"
-                onClick={() => { setFolderParent(activeFolder); setFolderModal(true); }}
+                onClick={() => setOverlay({ kind: "newFolder", parent: activeFolder, draft: "" })}
                 className="box-border inline-flex h-9 items-center gap-1.5 rounded-[var(--radius-md)] border border-line bg-raised px-3 text-meta text-text transition-colors duration-[var(--duration-fast)] hover:bg-hover focus:outline-none focus:ring-0"
               >
                 <Icon name="plus" size={13} />
@@ -651,9 +260,9 @@ export function Archive() {
             </div>
           </div>
 
-          {banner ? (
+          {archive.banner ? (
             <p role="alert" className="text-meta text-bad">
-              {banner}
+              {archive.banner}
             </p>
           ) : null}
         </header>
@@ -665,7 +274,10 @@ export function Archive() {
             action={
               <Button
                 variant="primary"
-                onClick={() => setCaptureFor(activeFolder ?? regions[0] ?? null)}
+                onClick={() => {
+                  const region = activeFolder ?? regions[0];
+                  if (region) setOverlay({ kind: "capture", region });
+                }}
                 disabled={regions.length === 0}
               >
                 <Icon name="plus" size={13} />
@@ -695,8 +307,8 @@ export function Archive() {
               key={view.region.id}
               view={view}
               collapsed={collapsedIds.has(view.region.id)}
-              anySelected={selectedIds.size > 0}
-              selectedIds={selectedIds}
+              anySelected={selection.selectedIds.size > 0}
+              selectedIds={selection.selectedIds}
               onCollapse={(id) =>
                 setCollapsedIds((prev) => {
                   const next = new Set(prev);
@@ -705,13 +317,13 @@ export function Archive() {
                   return next;
                 })
               }
-              onToggle={(id) => toggleSelect(id)}
-              onOpenItem={setLightboxId}
-              onTogglePin={togglePin}
-              onRename={renameFolder}
-              onDelete={setFolderToDelete}
+              onToggle={selection.toggle}
+              onOpenItem={(id) => setOverlay({ kind: "lightbox", itemId: id })}
+              onTogglePin={archive.togglePin}
+              onRename={archive.renameFolder}
+              onDelete={(region) => setOverlay({ kind: "deleteFolder", region })}
               onOpenFolder={(r) => setParams({ folder: r.slug })}
-              onAdd={setCaptureFor}
+              onAdd={(region) => setOverlay({ kind: "capture", region })}
               childFolders={childFoldersOf(view.region.id)}
               showOpen={!activeFolder}
             />
@@ -723,7 +335,7 @@ export function Archive() {
 
       {/* Bulk action bar */}
       <AnimatePresence>
-        {selectedIds.size > 0 ? (
+        {selection.selectedIds.size > 0 ? (
           <motion.div
             initial={{ opacity: 0, y: 16 }}
             animate={{ opacity: 1, y: 0 }}
@@ -731,11 +343,11 @@ export function Archive() {
             transition={{ duration: duration.fast, ease }}
             className="fixed inset-x-0 bottom-6 z-40 mx-auto flex w-fit items-center gap-3 rounded-[var(--radius-lg)] border border-line bg-raised px-4 py-2.5 shadow-lg shadow-black/40"
           >
-            <span className="text-meta text-text">{selectedIds.size} selected</span>
+            <span className="text-meta text-text">{selection.selectedIds.size} selected</span>
             <span aria-hidden="true" className="h-4 w-px bg-line" />
             <Menu
               side="top"
-              items={moveTargets.map((r) => ({ label: r.label, onSelect: () => moveSelected(r.slug), disabled: busy }))}
+              items={moveTargets.map((r) => ({ label: r.label, onSelect: () => handleMoveSelected(r.slug), disabled: archive.busy }))}
               trigger={({ open, toggle }) => (
                 <Button variant="secondary" onClick={toggle} aria-expanded={open}>
                   Move to
@@ -747,12 +359,12 @@ export function Archive() {
                 </Button>
               )}
             />
-            <Button variant="danger" disabled={busy} onClick={deleteSelected}>
+            <Button variant="danger" disabled={archive.busy} onClick={handleDeleteSelected}>
               Delete
             </Button>
             <button
               type="button"
-              onClick={clearSelection}
+              onClick={selection.clear}
               aria-label="Clear selection"
               className="rounded-[var(--radius-sm)] p-1 text-faint transition-colors duration-[var(--duration-fast)] hover:text-text"
             >
@@ -763,26 +375,36 @@ export function Archive() {
       </AnimatePresence>
 
       {/* New folder modal */}
-      <Modal open={folderModal} onClose={() => setFolderModal(false)} title={folderParent ? `New folder in ${folderParent.name}` : "New folder"}>
+      <Modal
+        open={overlay.kind === "newFolder"}
+        onClose={() => setOverlay({ kind: "none" })}
+        title={overlay.kind === "newFolder" && overlay.parent ? `New folder in ${overlay.parent.name}` : "New folder"}
+      >
         <form
           className="flex flex-col gap-4"
           onSubmit={(e) => {
             e.preventDefault();
-            void addFolder();
+            void handleAddFolder();
           }}
         >
           <input
             autoFocus
             placeholder="Folder name"
-            value={folderDraft}
-            onChange={(e) => setFolderDraft(e.target.value)}
+            value={overlay.kind === "newFolder" ? overlay.draft : ""}
+            onChange={(e) =>
+              setOverlay((o) => (o.kind === "newFolder" ? { ...o, draft: e.target.value } : o))
+            }
             className={controlClass}
           />
           <div className="flex justify-end gap-2">
-            <Button type="button" variant="ghost" onClick={() => setFolderModal(false)}>
+            <Button type="button" variant="ghost" onClick={() => setOverlay({ kind: "none" })}>
               Cancel
             </Button>
-            <Button type="submit" variant="primary" disabled={busy || !folderDraft.trim()}>
+            <Button
+              type="submit"
+              variant="primary"
+              disabled={archive.busy || !(overlay.kind === "newFolder" && overlay.draft.trim())}
+            >
               Create folder
             </Button>
           </div>
@@ -790,13 +412,13 @@ export function Archive() {
       </Modal>
 
       <AnimatePresence>
-        {captureFor ? (
+        {overlay.kind === "capture" ? (
           <motion.div
             className="fixed inset-0 z-50 flex items-center justify-center bg-canvas/55 p-5 backdrop-blur-sm"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            onMouseDown={(event) => event.currentTarget === event.target && setCaptureFor(null)}
+            onMouseDown={(event) => event.currentTarget === event.target && setOverlay({ kind: "none" })}
           >
             <motion.div
               initial={{ opacity: 0, y: 10 }}
@@ -806,11 +428,10 @@ export function Archive() {
               className="w-full max-w-xl"
             >
               <Capture
-                region={captureFor}
+                region={overlay.region}
                 onCaptured={(item) => {
-                  setItems((prev) => [item, ...(prev ?? [])]);
-                  setCaptureFor(null);
-                  setPreviewId(item.id);
+                  archive.addItem(item);
+                  setOverlay({ kind: "preview", itemId: item.id });
                 }}
               />
             </motion.div>
@@ -820,23 +441,23 @@ export function Archive() {
 
       {/* Delete-folder confirm */}
       <Modal
-        open={folderToDelete !== null}
-        onClose={() => setFolderToDelete(null)}
-        title={`Delete ${folderToDelete?.name ?? "folder"}?`}
+        open={overlay.kind === "deleteFolder"}
+        onClose={() => setOverlay({ kind: "none" })}
+        title={`Delete ${overlay.kind === "deleteFolder" ? overlay.region.name : "folder"}?`}
       >
         <div className="flex flex-col gap-4">
           <p className="text-meta leading-relaxed text-muted">
             This removes the folder and everything in it. This can't be undone.
           </p>
           <div className="flex justify-end gap-2">
-            <Button type="button" variant="ghost" onClick={() => setFolderToDelete(null)}>
+            <Button type="button" variant="ghost" onClick={() => setOverlay({ kind: "none" })}>
               Cancel
             </Button>
             <Button
               type="button"
               variant="danger"
-              disabled={busy}
-              onClick={() => folderToDelete && removeFolder(folderToDelete)}
+              disabled={archive.busy}
+              onClick={() => overlay.kind === "deleteFolder" && void handleRemoveFolder(overlay.region)}
             >
               Delete folder
             </Button>
@@ -846,22 +467,25 @@ export function Archive() {
 
       {lightboxItem ? (
         <ItemLightbox
-          allItems={items ?? []}
-          onEdit={editItem}
+          allItems={archive.items ?? []}
+          onEdit={archive.editItem}
           item={lightboxItem}
           region={regions.find((r) => r.id === lightboxItem.region_id) ?? null}
           hasPrev={lightboxIndex > 0}
           hasNext={lightboxIndex < flatItems.length - 1}
-          onPrev={() => setLightboxId(flatItems[lightboxIndex - 1]?.id ?? null)}
-          onNext={() => setLightboxId(flatItems[lightboxIndex + 1]?.id ?? null)}
-          onClose={() => setLightboxId(null)}
-          onTogglePin={togglePin}
+          onPrev={() => {
+            const id = flatItems[lightboxIndex - 1]?.id;
+            if (id) setOverlay({ kind: "lightbox", itemId: id });
+          }}
+          onNext={() => {
+            const id = flatItems[lightboxIndex + 1]?.id;
+            if (id) setOverlay({ kind: "lightbox", itemId: id });
+          }}
+          onClose={() => setOverlay({ kind: "none" })}
+          onTogglePin={archive.togglePin}
           onDelete={(it) => {
-            setLightboxId(null);
-            void guard(async () => {
-              await deleteItems([it.id]);
-              setItems((prev) => (prev ?? []).filter((i) => i.id !== it.id));
-            });
+            setOverlay({ kind: "none" });
+            void archive.deleteItemsById([it.id]);
           }}
         />
       ) : null}
@@ -870,9 +494,9 @@ export function Archive() {
         <CapturePreview
           item={previewItem}
           region={regions.find((r) => r.id === previewItem.region_id) ?? null}
-          allItems={items ?? []}
-          onEdit={editItem}
-          onClose={() => setPreviewId(null)}
+          allItems={archive.items ?? []}
+          onEdit={archive.editItem}
+          onClose={() => setOverlay({ kind: "none" })}
         />
       ) : null}
     </div>
