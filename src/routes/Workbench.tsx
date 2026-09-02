@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { motion } from "motion/react";
-import { REVIEW_DECISIONS, type ArtifactState, type Region, type ReviewDecision } from "@shared/contract";
+import { REVIEW_DECISIONS, type ArtifactState, type ArtifactVersion, type Region, type ReviewDecision } from "@shared/contract";
 import { ApiError, deleteArtifact, listArtifacts, type WorkbenchArtifact } from "../api/client";
 import { Button } from "../ui/primitives/Button";
 import { Modal } from "../ui/primitives/Modal";
@@ -9,6 +9,7 @@ import { EmptyState } from "../ui/primitives/EmptyState";
 import { EmptyRow } from "../ui/primitives/EmptyRow";
 import { Spinner } from "../ui/primitives/Spinner";
 import { Icon } from "../ui/primitives/Icon";
+import { Menu } from "../ui/primitives/Menu";
 import { useTrail } from "../ui/Breadcrumbs";
 import { useAsync } from "../ui/hooks/useAsync";
 import { useSpace } from "../ui/hooks/useSpace";
@@ -71,6 +72,45 @@ function StateBadge({ state }: { state: string }) {
     >
       {stateLabel(state)}
     </span>
+  );
+}
+
+/** Inline version chips beyond this count collapse into a dropdown. */
+const VERSION_CHIPS_VISIBLE = 5;
+
+/**
+ * `versions` is sorted oldest → newest. `visible` keeps the most recent
+ * VERSION_CHIPS_VISIBLE; everything older goes in `hidden`. `hiddenActive`
+ * tells the caller whether the currently-selected version got collapsed, so
+ * the dropdown trigger can still show which version is actually active
+ * instead of just an opaque count.
+ */
+export function splitVersionChips<T extends { id: string }>(
+  versions: T[],
+  activeId: string,
+): { visible: T[]; hidden: T[]; hiddenActive: boolean } {
+  if (versions.length <= VERSION_CHIPS_VISIBLE) {
+    return { visible: versions, hidden: [], hiddenActive: false };
+  }
+  const hidden = versions.slice(0, versions.length - VERSION_CHIPS_VISIBLE);
+  const visible = versions.slice(-VERSION_CHIPS_VISIBLE);
+  return { visible, hidden, hiddenActive: hidden.some((v) => v.id === activeId) };
+}
+
+function VersionChip({ v, active, onSelect }: { v: ArtifactVersion; active: boolean; onSelect: (id: string) => void }) {
+  return (
+    <button
+      type="button"
+      onClick={() => onSelect(v.id)}
+      aria-pressed={active}
+      className={`flex items-center gap-2 rounded-[var(--radius-md)] border px-2.5 py-1.5 text-micro transition-colors duration-[var(--duration-fast)] ${
+        active ? "border-line bg-surface text-text" : "border-line-soft text-muted hover:border-line hover:text-text"
+      }`}
+    >
+      <span>v{v.version_no}</span>
+      <StateBadge state={v.state} />
+      <span className="text-faint">{formatTime(v.created_at)}</span>
+    </button>
   );
 }
 
@@ -216,6 +256,7 @@ export function Workbench() {
   }
 
   const { artifact, version, versions, provenance, annotations } = data;
+  const { visible: visibleVersions, hidden: hiddenVersions, hiddenActive } = splitVersionChips(versions, version.id);
 
   const handleDecide = async (decision: ReviewDecision) => {
     setDecisionPending(true);
@@ -263,27 +304,48 @@ export function Workbench() {
             </button>
           </div>
 
-          {/* Every version is a reviewable variant — pick one, then decide on it. */}
+          {/* Every version is a reviewable variant — pick one, then decide on it.
+              Past VERSION_CHIPS_VISIBLE this row would just grow forever, so
+              only the most recent stay inline; the rest collapse into one
+              dropdown trigger, which shows the active version number itself
+              when the selected one is among those collapsed. */}
           {versions.length > 1 ? (
-            <div className="flex flex-wrap gap-2">
-              {versions.map((v) => {
-                const active = v.id === version.id;
-                return (
-                  <button
-                    key={v.id}
-                    type="button"
-                    onClick={() => selectVersion(v.id)}
-                    aria-pressed={active}
-                    className={`flex items-center gap-2 rounded-[var(--radius-md)] border px-2.5 py-1.5 text-micro transition-colors duration-[var(--duration-fast)] ${
-                      active ? "border-line bg-surface text-text" : "border-line-soft text-muted hover:border-line hover:text-text"
-                    }`}
-                  >
-                    <span>v{v.version_no}</span>
-                    <StateBadge state={v.state} />
-                    <span className="text-faint">{formatTime(v.created_at)}</span>
-                  </button>
-                );
-              })}
+            <div className="flex flex-wrap items-center gap-2">
+              {visibleVersions.map((v) => (
+                <VersionChip key={v.id} v={v} active={v.id === version.id} onSelect={selectVersion} />
+              ))}
+              {hiddenVersions.length > 0 ? (
+                <Menu
+                  items={hiddenVersions.map((v) => ({
+                    label: (
+                      <span className="flex items-center gap-2">
+                        <span>v{v.version_no}</span>
+                        <StateBadge state={v.state} />
+                        <span className="text-faint">{formatTime(v.created_at)}</span>
+                      </span>
+                    ),
+                    onSelect: () => selectVersion(v.id),
+                  }))}
+                  trigger={({ open, toggle }) => (
+                    <button
+                      type="button"
+                      onClick={toggle}
+                      aria-expanded={open}
+                      aria-pressed={hiddenActive}
+                      className={`flex items-center gap-1.5 rounded-[var(--radius-md)] border px-2.5 py-1.5 text-micro transition-colors duration-[var(--duration-fast)] ${
+                        hiddenActive ? "border-line bg-surface text-text" : "border-line-soft text-muted hover:border-line hover:text-text"
+                      }`}
+                    >
+                      {hiddenActive ? `v${version.version_no}` : `${hiddenVersions.length} earlier`}
+                      <Icon
+                        name="chevronDown"
+                        size={12}
+                        className={`transition-transform duration-[var(--duration-base)] ${open ? "rotate-180" : ""}`}
+                      />
+                    </button>
+                  )}
+                />
+              ) : null}
             </div>
           ) : null}
         </header>
