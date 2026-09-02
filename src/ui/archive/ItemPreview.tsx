@@ -158,10 +158,13 @@ const ZOOM_STEP = 0.25;
 /**
  * The artifact branch of detailPreview(), split out because it needs its own
  * zoom state (a hook) — unlike ArtifactThumb (a fixed-scale, pointer-events-
- * none *thumbnail*, correctly used at tile size), this is the full-size,
- * genuinely interactive artifact: the same sandboxed srcDoc as
- * ArtifactViewer, at natural size, with a scroll/pinch (ctrl+wheel) +
- * click zoom the way an image viewer would.
+ * none *thumbnail*, correctly used at tile size), this is the full-size
+ * artifact: the same sandboxed srcDoc as ArtifactViewer, at natural size,
+ * with scroll/pinch (ctrl+wheel) zoom the way an image viewer would. Same
+ * review-surface trade-off as ArtifactViewer: a wheel-capture layer sits on
+ * top of the iframe so scrolling actually works, which means the live
+ * artifact's own buttons aren't directly clickable here either — this is
+ * for inspecting a captured item, not operating it.
  */
 function ArtifactDetailPreview({ item }: { item: ContextItem }) {
   const html = String(item.metadata?.preview_html ?? "");
@@ -177,16 +180,7 @@ function ArtifactDetailPreview({ item }: { item: ContextItem }) {
   const zoomBy = (delta: number) => setZoom((z) => Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, z + delta)));
 
   return (
-    <div
-      className="relative h-full w-full overflow-auto rounded-[var(--radius-sm)] border border-line-soft bg-white"
-      onWheel={(e) => {
-        // Trackpad pinch and ctrl+scroll both fire as a wheel event with ctrlKey —
-        // a plain scroll should still pan the zoomed content, not zoom it.
-        if (!e.ctrlKey) return;
-        e.preventDefault();
-        zoomBy(e.deltaY * -0.01);
-      }}
-    >
+    <div className="relative h-full w-full overflow-auto rounded-[var(--radius-sm)] border border-line-soft bg-white">
       <iframe
         title="Artifact preview"
         srcDoc={previewSrcDoc(html)}
@@ -194,6 +188,24 @@ function ArtifactDetailPreview({ item }: { item: ContextItem }) {
         referrerPolicy="no-referrer"
         className="h-full w-full origin-top-left"
         style={{ transform: `scale(${zoom})` }}
+      />
+      {/* Wheel capture layer, same fix as ArtifactViewer: a wheel event that
+          reaches the iframe never bubbles back out to this document — nested
+          browsing contexts don't chain scroll to their parent — so this
+          same-document layer has to be the actual event target instead. A
+          plain scroll is left alone (not preventDefault'd) so the browser's
+          native chaining still pans this overflow-auto container or the
+          page beyond it; only ctrl+wheel (trackpad pinch included) is
+          intercepted, for zoom. Always on top, same trade-off as
+          ArtifactViewer: the live artifact's own controls aren't directly
+          clickable here, only via the zoom buttons below. */}
+      <div
+        className="absolute inset-0"
+        onWheel={(e) => {
+          if (!e.ctrlKey) return;
+          e.preventDefault();
+          zoomBy(e.deltaY * -0.01);
+        }}
       />
       <div className="absolute bottom-2 right-2 flex items-center gap-0.5 rounded-[var(--radius-sm)] bg-raised/90 p-0.5 text-meta text-muted backdrop-blur">
         <button
