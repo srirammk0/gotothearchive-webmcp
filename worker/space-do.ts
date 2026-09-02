@@ -36,6 +36,17 @@ export class SpaceDO extends DurableObject<Env> {
         console.error("space-do: fts rebuild failed", e);
       }
 
+      // Older captures spun extracted media / referenced links off as their own
+      // items. They're now folded into the parent's metadata instead, so drop
+      // the leftover cards. Self-clearing — the next boot finds none.
+      try {
+        for (const space of this.queries.listSpaces()) {
+          this.queries.deleteExtractionChildren(space.id);
+        }
+      } catch (e) {
+        console.error("space-do: extraction-child cleanup failed", e);
+      }
+
       // Derived graph rules are versioned. A marker avoids repeated O(n²)
       // rescans while a version bump deliberately reruns derivation. The
       // backfill only inserts missing system edges; human-created edges remain.

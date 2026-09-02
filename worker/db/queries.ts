@@ -754,6 +754,26 @@ export class Queries {
     if (doomed) this.mirrorItem("delete", doomed, Date.now());
   }
 
+  /**
+   * One-time cleanup: remove items that older captures spun off from an
+   * extracted link (media / referenced URLs). Those are now folded into the
+   * parent item's metadata. Fingerprint: the source-linked authority class plus
+   * a `derived_from_item_id` in metadata — only the removed child() path ever
+   * produced both. Full cascade per row; idempotent.
+   */
+  deleteExtractionChildren(spaceId: string): number {
+    const rows = this.sql
+      .exec<{ id: string }>(
+        `SELECT id FROM items
+         WHERE space_id = ? AND authority_class = 'imported_source_linked'
+           AND metadata LIKE '%derived_from_item_id%'`,
+        spaceId,
+      )
+      .toArray();
+    for (const row of rows) this.deleteItem(row.id);
+    return rows.length;
+  }
+
   getItem(id: string): ContextItem | null {
     const row = this.sql
       .exec<ItemRow>(`SELECT * FROM items WHERE id = ?`, id)

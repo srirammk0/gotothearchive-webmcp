@@ -94,3 +94,23 @@ test("a captured tweet becomes one item; media + links go to metadata, text to s
   const last = JSON.parse(jobs[jobs.length - 1].payload) as { title: string; semantic_text: string };
   expect(last.semantic_text).toBe("The design vs The image");
 });
+
+test("deleteExtractionChildren removes leftover child cards, keeps everything else", () => {
+  const { q } = makeQueries();
+  q.insertSpace({ id: "s", name: "A", owner_id: "u", kind: "personal", created_at: 1 });
+  q.insertRegion({ id: "r", space_id: "s", parent_id: null, name: "W", slug: "w", created_at: 1 });
+
+  const base = {
+    space_id: "s", region_id: "r", owner_id: "u", source_url: null, content_ref: null,
+    semantic_text: null, created_by: "u", created_at: 1, updated_at: 1,
+  } as const;
+  q.insertItem({ ...base, id: "parent", type: "link", title: "A post", metadata: { extracted: { images: ["x"] } }, authority_class: "human_authored" });
+  q.insertItem({ ...base, id: "child_img", type: "image", title: "img", metadata: { derived_from_item_id: "parent" }, authority_class: "imported_source_linked" });
+  q.insertItem({ ...base, id: "child_link", type: "link", title: "ref", metadata: { derived_from_item_id: "parent" }, authority_class: "imported_source_linked" });
+  q.insertItem({ ...base, id: "normal_img", type: "image", title: "a real upload", metadata: {}, authority_class: "human_authored" });
+
+  const removed = q.deleteExtractionChildren("s");
+  expect(removed).toBe(2);
+  expect(q.listItemsBySpace("s").map((i) => i.id).toSorted()).toEqual(["normal_img", "parent"]);
+  expect(q.deleteExtractionChildren("s")).toBe(0); // idempotent
+});
