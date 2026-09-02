@@ -1,8 +1,7 @@
 import { createPortal } from "react-dom";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { isAgentAuthority, type ContextItem, type Region } from "@shared/contract";
-import { MetaList } from "../primitives/MetaList";
 import { Menu } from "../primitives/Menu";
 import { Icon } from "../primitives/Icon";
 import { Tweet } from "./Tweet";
@@ -14,6 +13,25 @@ import { duration, ease } from "../tokens";
 
 function fullDate(ms: number): string {
   return new Date(ms).toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" });
+}
+
+/** Are.na-style key/value strip. Definition list, tight rows, quiet keys. */
+function MetaList({ rows }: { rows: { label: string; value: ReactNode }[] }) {
+  return (
+    <dl className="flex flex-col">
+      {rows
+        .filter((r) => r.value !== null && r.value !== undefined && r.value !== "")
+        .map((r) => (
+          <div
+            key={r.label}
+            className="flex items-baseline justify-between gap-6 border-b border-line-soft py-1.5 last:border-0"
+          >
+            <dt className="shrink-0 text-micro text-faint">{r.label}</dt>
+            <dd className="min-w-0 truncate text-right text-micro text-muted">{r.value}</dd>
+          </div>
+        ))}
+    </dl>
+  );
 }
 
 function agentLabel(item: ContextItem): string {

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { confidenceLabel, dimensionLabel, type ContextItem, type TasteSignal } from "@shared/contract";
 import {
   getTasteEvidence,
@@ -20,8 +20,20 @@ import { useAction } from "../ui/hooks/useAction";
 import { duration, ease } from "../ui/tokens";
 import { EmptyState } from "../ui/primitives/EmptyState";
 import { EmptyRow } from "../ui/primitives/EmptyRow";
-import { SidePanel } from "../ui/primitives/SidePanel";
 import { Spinner } from "../ui/primitives/Spinner";
+
+/** The right-rail panel shape: a hairline top border, a quiet section title, sticky on wide screens. */
+function SidePanel({ title, label, children }: { title: string; label?: ReactNode; children: ReactNode }) {
+  return (
+    <aside aria-label={title} className="flex h-fit flex-col gap-4 border-t border-line pt-4 lg:sticky lg:top-20">
+      <div className="flex items-baseline justify-between gap-3">
+        <p className="text-section text-text">{title}</p>
+        {label ? <span className="text-micro text-faint">{label}</span> : null}
+      </div>
+      {children}
+    </aside>
+  );
+}
 
 /** One piece of evidence — an archived item or a recorded annotation. */
 function EvidenceCard({ record }: { record: EvidenceRecord }) {
