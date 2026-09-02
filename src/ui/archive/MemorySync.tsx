@@ -42,7 +42,7 @@ export function MemorySync() {
         <span>{status.synced} indexed for retrieval</span>
       ) : (
         <>
-          <span>
+          <span title={status.recent_errors[0] ?? undefined}>
             {status.synced}/{status.items} indexed
             {status.pending > 0 ? ` · ${status.pending} syncing` : ""}
             {status.failed > 0 ? ` · ${status.failed} failed` : ""}
