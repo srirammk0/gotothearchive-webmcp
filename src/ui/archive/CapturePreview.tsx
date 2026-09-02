@@ -6,10 +6,8 @@ import { Button } from "../primitives/Button";
 import { Icon } from "../primitives/Icon";
 import { controlClass } from "../primitives/Field";
 import { ConnectionsPanel } from "./ConnectionsPanel";
-import { extractedImage, FileCard, kind, tweetId } from "./itemKind";
-import { Tweet } from "./Tweet";
-import { ArtifactThumb } from "../workbench/ArtifactThumb";
-import { blobUrl } from "../../api/client";
+import { detailPreview } from "./ItemPreview";
+import { extractedImage } from "./itemKind";
 import { duration, ease } from "../tokens";
 
 function host(url: string | null): string | null {
@@ -21,38 +19,14 @@ function host(url: string | null): string | null {
   }
 }
 
+/** Falls through to detailPreview()'s shared six kinds; otherwise any extracted image, then a host + excerpt. */
 function PreviewPane({ item }: { item: ContextItem }) {
   const [imgFailed, setImgFailed] = useState(false);
-  const { render } = kind(item);
-  const tw = tweetId(item.source_url);
   const img = extractedImage(item);
 
-  if (render === "image" && item.content_ref) {
-    return <img src={blobUrl(item.content_ref)} alt="" className="max-h-full max-w-full object-contain" />;
-  }
-  if (render === "pdf" && item.content_ref) {
-    return (
-      <iframe
-        title={item.title}
-        src={`${blobUrl(item.content_ref)}#view=FitH`}
-        className="h-full w-full rounded-[var(--radius-sm)] bg-white"
-      />
-    );
-  }
-  if (render === "text" && item.content_ref) {
-    return <iframe title={item.title} src={blobUrl(item.content_ref)} className="h-full w-full rounded-[var(--radius-sm)] bg-white" />;
-  }
-  if (render === "artifact") {
-    return <ArtifactThumb html={String(item.metadata?.preview_html ?? "")} className="h-full w-full" />;
-  }
-  if (render === "office") return <FileCard item={item} big />;
-  if (render === "tweet" && tw) {
-    return (
-      <div className="no-scrollbar h-full w-full max-w-[520px] overflow-y-auto">
-        <Tweet id={tw} />
-      </div>
-    );
-  }
+  const shared = detailPreview(item);
+  if (shared) return shared;
+
   if (img && !imgFailed) {
     return (
       <img

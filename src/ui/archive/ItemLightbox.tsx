@@ -4,11 +4,9 @@ import { AnimatePresence, motion } from "motion/react";
 import { isAgentAuthority, type ContextItem, type Region } from "@shared/contract";
 import { Menu } from "../primitives/Menu";
 import { Icon } from "../primitives/Icon";
-import { Tweet } from "./Tweet";
 import { ConnectionsPanel } from "./ConnectionsPanel";
-import { extractedImage, FileCard, kind, tweetId } from "./itemKind";
-import { ArtifactThumb } from "../workbench/ArtifactThumb";
-import { blobUrl } from "../../api/client";
+import { detailPreview } from "./ItemPreview";
+import { extractedImage, kind } from "./itemKind";
 import { duration, ease } from "../tokens";
 
 function fullDate(ms: number): string {
@@ -90,7 +88,6 @@ export function ItemLightbox({
   }, [hasPrev, hasNext, onPrev, onNext, onClose, editing]);
 
   const { render } = kind(item);
-  const tw = tweetId(item.source_url);
   const pinned = item.metadata?.pinned === true;
 
   const [note, setNote] = useState(item.semantic_text ?? "");
@@ -161,29 +158,7 @@ export function ItemLightbox({
         >
           {/* Material */}
           <div className="flex min-h-0 flex-1 items-center justify-center overflow-hidden p-6 pt-16 md:p-12">
-            {render === "image" && item.content_ref ? (
-              <img src={blobUrl(item.content_ref)} alt="" className="max-h-full max-w-full object-contain" />
-            ) : render === "pdf" && item.content_ref ? (
-              <iframe
-                title={item.title}
-                src={`${blobUrl(item.content_ref)}#view=FitH`}
-                className="h-full w-full rounded-[var(--radius-sm)] bg-white"
-              />
-            ) : render === "text" && item.content_ref ? (
-              <iframe
-                title={item.title}
-                src={blobUrl(item.content_ref)}
-                className="h-full w-full rounded-[var(--radius-sm)] bg-white"
-              />
-            ) : render === "artifact" ? (
-              <ArtifactThumb html={String(item.metadata?.preview_html ?? "")} className="h-full w-full" />
-            ) : render === "office" ? (
-              <FileCard item={item} big />
-            ) : render === "tweet" && tw ? (
-              <div className="no-scrollbar h-full w-full max-w-[550px] overflow-y-auto">
-                <Tweet id={tw} />
-              </div>
-            ) : render === "note" ? (
+            {detailPreview(item) ?? (render === "note" ? (
               <textarea
                 value={note}
                 onChange={(e) => setNote(e.target.value)}
@@ -221,7 +196,7 @@ export function ItemLightbox({
                   </a>
                 ) : null}
               </div>
-            )}
+            ))}
           </div>
 
           {/* Right rail */}

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import type { ContextItem } from "@shared/contract";
 import { blobUrl } from "../../api/client";
 import { Icon } from "../primitives/Icon";
@@ -148,4 +148,54 @@ export function ItemPreview({ item, size }: { item: ContextItem; size: PreviewSi
   if (size === "tile") return <TilePreview item={item} />;
   if (size === "thumb") return <ThumbPreview item={item} />;
   return <ChipPreview item={item} />;
+}
+
+/**
+ * The full-detail render shared by CapturePreview and ItemLightbox: the six
+ * kinds whose full-size treatment is identical in both (an embed or the real
+ * bytes, filling the pane). A plain function, not a component — so a caller
+ * can fall through to its own bespoke JSX (an editable note, a clickable
+ * link image, a host-line fallback) with `detailPreview(item) ?? <Own />`,
+ * which a component's always-something JSX return can't express.
+ *
+ * Returns null for every kind these two callers still hand-render
+ * themselves: `note` (only ItemLightbox's is editable), `link` (each wraps
+ * its extracted-image fallback differently), and the terminal fallback
+ * (each caller's differs — a host chip vs a clickable source link).
+ */
+export function detailPreview(item: ContextItem): ReactNode | null {
+  const { render } = kind(item);
+
+  if (render === "image" && item.content_ref) {
+    return <img src={blobUrl(item.content_ref)} alt="" className="max-h-full max-w-full object-contain" />;
+  }
+  if (render === "pdf" && item.content_ref) {
+    return (
+      <iframe
+        title={item.title}
+        src={`${blobUrl(item.content_ref)}#view=FitH`}
+        className="h-full w-full rounded-[var(--radius-sm)] bg-white"
+      />
+    );
+  }
+  if (render === "text" && item.content_ref) {
+    return (
+      <iframe title={item.title} src={blobUrl(item.content_ref)} className="h-full w-full rounded-[var(--radius-sm)] bg-white" />
+    );
+  }
+  if (render === "artifact") {
+    return <ArtifactThumb html={String(item.metadata?.preview_html ?? "")} className="h-full w-full" />;
+  }
+  if (render === "office") return <FileCard item={item} big />;
+  if (render === "tweet") {
+    const tw = tweetId(item.source_url);
+    if (tw) {
+      return (
+        <div className="no-scrollbar h-full w-full max-w-[550px] overflow-y-auto">
+          <Tweet id={tw} />
+        </div>
+      );
+    }
+  }
+  return null;
 }
