@@ -25,10 +25,27 @@ export function humanRegions(
   const space = q.getSpace(spaceId);
   const regions = q.listRegions(spaceId);
   const isOwner = space?.owner_id === humanId;
+
+  // Judge demo access (docs/roadmap/judge-demo-access.md). Every demo visitor
+  // shares ONE kind:'guest' space and needs write on its regions so their agent
+  // can walk the whole flow. This is the ONLY relaxation of "owner writes,
+  // everyone else nothing", and it is hard-gated on BOTH sides of the AND:
+  //
+  //   - the space must be kind:'guest'  → a kind:'personal' space can never
+  //     reach this branch, so a demo identity gains nothing in a real member's
+  //     archive at any level. THE INVARIANT THAT MUST NOT BEND.
+  //   - the caller must be a `demo-*` identity, which is minted only from a
+  //     verified `demo_session` cookie and which spaceIdFor() already confines
+  //     to `space-demo`. A second, independent check on the same fact.
+  //
+  // Isolation between demo and real members stays absolute; only isolation
+  // *among* demo visitors relaxes.
+  const isDemoGuest = space?.kind === "guest" && humanId.startsWith("demo-");
+
   return regions.map((r) => ({
     region_id: r.id,
     slug: r.slug,
-    level: isOwner ? "write" : "none",
+    level: isOwner || isDemoGuest ? "write" : "none",
   }));
 }
 

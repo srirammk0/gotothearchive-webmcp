@@ -59,12 +59,46 @@ export async function signedBlobUrl(
 }
 
 /**
- * A signed `/demo` entry token (docs/roadmap/judge-demo-access.md). Same HMAC
- * as a blob signature, keyed on the fixed string "demo"; verify it with
- * `verifyBlobSignature(secret, "demo", exp, sig)`. Generate a link with
- * `bun run scripts/demo-link.ts <origin>`.
+ * The value for the `demo_session` cookie (docs/roadmap/judge-demo-access.md).
+ * `/api/demo-entry` mints one and sets it HttpOnly; `resolveHuman` verifies it
+ * and maps it to the identity `demo-<nonce>`. Same HMAC as a blob signature —
+ * the random nonce and the expiry are signed together (key `demo:<nonce>`), so
+ * neither can be swapped without invalidating the whole token.
  */
 export async function signDemoToken(
+  secret: string,
+  ttlMs: number,
+): Promise<{ nonce: string; exp: number; value: string }> {
+  const nonce = crypto.randomUUID();
+  const exp = Date.now() + ttlMs;
+  const sig = await sign(secret, `demo:${nonce}`, exp);
+  return { nonce, exp, value: `${nonce}.${exp}.${sig}` };
+}
+
+/**
+ * Verify a `demo_session` cookie value. Returns the nonce on success, null on
+ * anything missing, malformed, expired, or wrongly signed — never throws.
+ * Failing closed here is what keeps a tampered cookie from resolving to an
+ * identity.
+ */
+export async function verifyDemoToken(
+  secret: string | undefined,
+  value: string | null | undefined,
+): Promise<string | null> {
+  if (!secret || !value) return null;
+  const [nonce, exp, sig] = value.split(".");
+  if (!nonce || !exp || !sig) return null;
+  return (await verifyBlobSignature(secret, `demo:${nonce}`, exp, sig)) ? nonce : null;
+}
+
+/**
+ * A signed, time-limited `/api/demo-entry` link (scripts/demo-link.ts). Keyed on
+ * the fixed string "demo"; the entry route verifies it with
+ * `verifyBlobSignature(secret, "demo", exp, sig)` before minting a session
+ * cookie. Distinct from `signDemoToken`: this authorises *getting* a session,
+ * that one *is* the session.
+ */
+export async function signDemoLink(
   secret: string,
   ttlMs: number,
 ): Promise<{ exp: number; sig: string }> {

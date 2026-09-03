@@ -109,6 +109,17 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
     }
     const body = data as { ok?: boolean; error?: string; message?: string };
     if (!res.ok || body.ok === false) {
+      // A 401 in demo mode means the `demo_session` cookie expired. Drop the
+      // readable hint and reload so the shell falls back to the sign-in screen
+      // instead of looping on failed requests.
+      if (
+        res.status === 401 &&
+        typeof document !== "undefined" &&
+        document.cookie.split("; ").some((c) => c === "demo_hint=1")
+      ) {
+        document.cookie = "demo_hint=; Path=/; Max-Age=0";
+        location.reload();
+      }
       throw new ApiError(body.message ?? body.error ?? `Request to ${path} failed`, res.status);
     }
     if (isGet) {
@@ -140,24 +151,10 @@ const qs = (params: Record<string, string | null | undefined>): string => {
 
 /* ---------------- space ---------------- */
 
-/**
- * Replays the signed `/demo` token (captured in main.tsx) onto the bootstrap
- * POST so the worker can provision a guest space. A no-op for everyone else.
- */
-function demoBootstrapQuery(): string {
-  try {
-    const raw = sessionStorage.getItem("demo-token");
-    if (!raw) return "";
-    const t = JSON.parse(raw) as { exp?: string; sig?: string; reset?: boolean };
-    if (!t.exp || !t.sig) return "";
-    return qs({ demo_exp: t.exp, demo_sig: t.sig, demo_reset: t.reset ? "1" : null });
-  } catch {
-    return "";
-  }
-}
-
+// Demo identity rides on the `demo_session` cookie (set by /api/demo-entry),
+// sent automatically with `credentials: "same-origin"` — nothing to replay here.
 export const bootstrap = () =>
-  req<{ space: Space; regions: Region[] }>(`${API.bootstrap}${demoBootstrapQuery()}`, { method: "POST" });
+  req<{ space: Space; regions: Region[] }>(API.bootstrap, { method: "POST" });
 
 export const listRegions = () => req<{ regions: Region[] }>(API.regions);
 

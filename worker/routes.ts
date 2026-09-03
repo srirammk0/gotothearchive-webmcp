@@ -46,18 +46,27 @@ import { extractUrl, isPublicHttpUrl } from "./extract";
 import { extractDesignProfile, designSummary } from "./design";
 import { signDemoToken, verifyBlobSignature } from "./blob-sign";
 import { deriveEdgesForItem, rebuildSpaceEdges } from "./graph-build";
-import { applyDemoSeed, provisionGuestSpace } from "./db/demo-seed";
+import { applyDemoSeed, provisionGuestSpace, DEMO_SPACE_ID } from "./db/demo-seed";
 
 /**
- * Each signed-in human gets their own Space, keyed to their Clerk id.
+ * The Space a request operates on.
  *
- * A single shared space would be owned by whoever opened the app first; every
- * later visitor would have no human access to any region, and since agent
- * authority can never exceed the invoking human's, their agent could do nothing
- * at all.
+ * A real member gets their own Space, keyed to their Clerk id — a shared one
+ * would be owned by whoever opened the app first, leaving every later visitor
+ * with no access to anything.
+ *
+ * A demo visitor (human id `demo-<nonce>`, minted only from a verified
+ * `demo_session` cookie) is pinned to the single shared `space-demo`, whatever
+ * the nonce — that is how multiple judges land in the same archive.
+ *
+ * THE INVARIANT (docs/roadmap/judge-demo-access.md): a `demo-*` identity can
+ * name NOTHING but `space-demo` here. It cannot construct `space-<clerkId>`, so
+ * it can never address a member's kind:'personal' space at any level. Clerk
+ * subject ids are `user_…`, never `demo-…`, so the prefixes cannot collide.
+ * This is one of the two enforcement points; humanRegions() is the other.
  */
-function spaceIdFor(humanId: string): string {
-  return `space-${humanId}`;
+export function spaceIdFor(humanId: string): string {
+  return humanId.startsWith("demo-") ? DEMO_SPACE_ID : `space-${humanId}`;
 }
 
 function json(data: unknown, init?: ResponseInit): Response {
@@ -100,8 +109,8 @@ export async function handleRoute(
     return handleSignedBlob(request, env);
   }
 
-  // Judge demo access (docs/roadmap/judge-demo-access.md). A judge with no
-  // signed link mints one here and is dropped into the normal /demo flow.
+  // Judge demo access (docs/roadmap/judge-demo-access.md). The one entry point:
+  // it sets the `demo_session` cookie that IS the demo identity and 302s to `/`.
   // The visitor is signed out by definition, so this sits with the signed-blob
   // branch above, before the session gate. Path is a literal — shared/contract.ts's
   // API const is frozen, so it is deliberately not added there.
@@ -110,26 +119,40 @@ export async function handleRoute(
     if (!env.BLOB_SIGNING_SECRET) {
       return json({ ok: false, error: "demo_unavailable" }, { status: 503 });
     }
-    // Short TTL: it is verified and exchanged for a guest space on the very
-    // next request.
-    const { exp, sig } = await signDemoToken(env.BLOB_SIGNING_SECRET, 30 * 60 * 1000);
-    const target = new URL("/demo", url.origin);
-    target.searchParams.set("demo_exp", String(exp));
-    target.searchParams.set("demo_sig", sig);
-    return Response.redirect(target.toString(), 302);
+    // A pre-minted link (scripts/demo-link.ts) carries ?token=<exp>.<sig>, keyed
+    // on the fixed string "demo" and time-limited. No token = the open door
+    // linked under the sign-in form. Either way a fresh, independent session is
+    // issued below.
+    const linkToken = url.searchParams.get("token");
+    if (linkToken !== null) {
+      const [exp, sig] = linkToken.split(".");
+      if (!(await verifyBlobSignature(env.BLOB_SIGNING_SECRET, "demo", exp ?? null, sig ?? null))) {
+        return json({ ok: false, error: "demo_link_expired" }, { status: 403 });
+      }
+    }
+    // 24h: the cookie is now the session, not a one-shot handoff.
+    const ttlMs = 24 * 60 * 60 * 1000;
+    const maxAge = Math.floor(ttlMs / 1000);
+    const { value } = await signDemoToken(env.BLOB_SIGNING_SECRET, ttlMs);
+    const headers = new Headers({ Location: new URL("/", url.origin).toString() });
+    headers.append(
+      "Set-Cookie",
+      `demo_session=${value}; Path=/; Max-Age=${maxAge}; HttpOnly; Secure; SameSite=Lax`,
+    );
+    // A readable companion so the signed-out React shell knows to render the app
+    // rather than the sign-in form. Carries no authority — the worker only ever
+    // trusts `demo_session`.
+    headers.append("Set-Cookie", `demo_hint=1; Path=/; Max-Age=${maxAge}; Secure; SameSite=Lax`);
+    return new Response(null, { status: 302, headers });
   }
 
   const human = await resolveHuman(request, env);
   if (!human) return json({ ok: false, error: "Sign in required" }, { status: 401 });
 
-  // Judge demo access (docs/roadmap/judge-demo-access.md). A guest space is
-  // exempt from the closed-beta cap and counted separately; the signed `/demo`
-  // token is what lets bootstrap create one.
-  const existingKind = q.getSpace(spaceIdFor(human.human_id))?.kind;
-  const demo = url.searchParams.has("demo_sig")
-    ? await readDemoRequest(url, env)
-    : { valid: false, reset: false };
-  const isGuest = existingKind === "guest" || (existingKind === undefined && demo.valid);
+  // Judge demo access (docs/roadmap/judge-demo-access.md). A demo identity is
+  // always a guest: exempt from the closed-beta cap, metered separately, and —
+  // via spaceIdFor — confined to the one shared `space-demo`.
+  const isGuest = human.human_id.startsWith("demo-");
 
   // Closed-beta gate. Bootstrap claims a slot (or 403s when full); every other
   // route requires an already-claimed slot. Guests skip both.
@@ -149,7 +172,7 @@ export async function handleRoute(
 
   switch (url.pathname) {
     case API.bootstrap:
-      return await handleBootstrap(request, q, human.human_id, demo);
+      return await handleBootstrap(request, q, human.human_id, isGuest);
     case API.quota:
       return handleQuota(q, human.human_id);
     case API.regions:
@@ -203,51 +226,41 @@ export async function handleRoute(
 
 /* ---------------- bootstrap ---------------- */
 
-interface DemoRequest {
-  valid: boolean;
-  reset: boolean;
-}
-
-/**
- * The signed `/demo` entry token, carried on the bootstrap POST as
- * `demo_exp` / `demo_sig` (and `demo_reset=1` to re-seed). Verified with the
- * existing HMAC helper, keyed on the fixed string "demo". Fails closed when
- * BLOB_SIGNING_SECRET is unset — the same shape as every other signed path here.
- */
-async function readDemoRequest(url: URL, env: Env): Promise<DemoRequest> {
-  const valid = await verifyBlobSignature(
-    env.BLOB_SIGNING_SECRET,
-    "demo",
-    url.searchParams.get("demo_exp"),
-    url.searchParams.get("demo_sig"),
-  );
-  return { valid, reset: valid && url.searchParams.get("demo_reset") === "1" };
-}
-
 async function handleBootstrap(
   request: Request,
   q: Queries,
   humanId: string,
-  demo: DemoRequest,
+  isDemo: boolean,
 ): Promise<Response> {
   if (request.method !== "POST") return badRequest("POST required");
   const spaceId = spaceIdFor(humanId);
-  const existing = q.getSpace(spaceId);
 
-  // A guest re-visiting the signed link with ?demo_reset=1 gets a clean re-seed.
-  if (existing?.kind === "guest" && demo.reset) {
-    const at = Date.now();
-    q.purgeSpace(spaceId);
-    applyDemoSeed(q, spaceId, humanId, at);
-    rebuildSpaceEdges(q, spaceId, at);
+  if (isDemo) {
+    // One shared demo archive (docs/roadmap/judge-demo-access.md). Seed it on
+    // the first visitor; recover it if a later visitor finds it wiped (every
+    // judge can delete everything — docs/judges.md). No per-judge space is ever
+    // created, and — critically — a demo id never falls through to the
+    // kind:'personal' branch below.
+    //
+    // Seeded exactly once: this whole block is synchronous, and a Durable
+    // Object runs one request's JS to completion before the next. With no await
+    // between the getSpace check and the write, two judges arriving together
+    // cannot both pass `!existing`.
+    const existing = q.getSpace(spaceId);
+    if (!existing) {
+      provisionGuestSpace(q, humanId, spaceId, Date.now());
+    } else if (q.listItemsBySpace(spaceId).length === 0) {
+      const at = Date.now();
+      q.purgeSpace(spaceId); // keeps the space row; clears stale regions/edges
+      applyDemoSeed(q, spaceId, humanId, at);
+      rebuildSpaceEdges(q, spaceId, at);
+    }
     return json({ ok: true, space: q.getSpace(spaceId), regions: q.listRegions(spaceId) });
   }
+
+  const existing = q.getSpace(spaceId);
   if (existing) {
     return json({ ok: true, space: existing, regions: q.listRegions(existing.id) });
-  }
-  if (demo.valid) {
-    provisionGuestSpace(q, humanId, spaceId, Date.now());
-    return json({ ok: true, space: q.getSpace(spaceId), regions: q.listRegions(spaceId) });
   }
 
   const now = Date.now();

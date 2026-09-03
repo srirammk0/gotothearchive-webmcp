@@ -1,9 +1,10 @@
 /**
  * Demo seed — the material a judge's guest space boots with.
  *
- * See docs/roadmap/judge-demo-access.md. A judge signs in, lands in their own
- * `kind: 'guest'` space, and gets a copy of everything below. Nothing here
- * touches the owner's space.
+ * See docs/roadmap/judge-demo-access.md. A judge opens /api/demo-entry, gets a
+ * signed `demo_session` cookie, and lands in the ONE shared `kind: 'guest'`
+ * space (`DEMO_SPACE_ID`) that this module seeds on first touch. Every judge
+ * shares that archive; nothing here touches a real member's space.
  *
  * ## Why the design profiles are baked
  *
@@ -42,6 +43,14 @@
 import type { AuthorityClass, DesignProfile, ItemType } from "@shared/contract";
 import type { Queries } from "./queries";
 import { GRAPH_DERIVATION_VERSION, rebuildSpaceEdges } from "../graph-build";
+
+/**
+ * The single shared demo Space. Every judge's `demo-<nonce>` identity is pinned
+ * to this id by `spaceIdFor()`, so they all land in the same archive and can
+ * point their own WebMCP agents at it at once. It is `kind: 'guest'`, which is
+ * the only kind `humanRegions()` will grant a non-owner write on.
+ */
+export const DEMO_SPACE_ID = "space-demo";
 
 export interface DemoRegion {
   slug: string;
@@ -844,10 +853,12 @@ export function applyDemoSeed(q: Queries, spaceId: string, humanId: string, now:
 }
 
 /**
- * Create a judge's disposable `kind: 'guest'` space and seed it. Everything
- * downstream — regions, grants, tasks, retrieval, graph, taste — is keyed off
- * `space_id` and works unmodified. Recording the graph-derivation version keeps
- * SpaceDO from rescanning the seeded space on every boot.
+ * Create the shared `kind: 'guest'` demo space and seed it, on the first judge
+ * to arrive (`humanId` is just whoever that was — every later judge shares the
+ * space, none owns it in a meaningful sense). Everything downstream — regions,
+ * grants, tasks, retrieval, graph, taste — is keyed off `space_id` and works
+ * unmodified. Recording the graph-derivation version keeps SpaceDO from
+ * rescanning the seeded space on every boot.
  */
 export function provisionGuestSpace(q: Queries, humanId: string, spaceId: string, now: number): void {
   q.insertSpace({ id: spaceId, name: "Demo Archive", owner_id: humanId, kind: "guest", created_at: now });
