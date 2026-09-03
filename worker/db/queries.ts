@@ -195,6 +195,16 @@ interface AnnotationRow {
   status: string;
   created_at: number;
 }
+interface DecisionRow {
+  [key: string]: SqlStorageValue;
+  id: string;
+  version_id: string;
+  actor_id: string;
+  decision: string;
+  note: string | null;
+  prev_state: string;
+  at: number;
+}
 interface TasteSignalRow {
   [key: string]: SqlStorageValue;
   id: string;
@@ -1453,6 +1463,18 @@ export class Queries {
       d.prev_state,
       d.at,
     );
+  }
+
+  /** The review decisions on one version, oldest first. */
+  listDecisions(versionId: string): DecisionRecord[] {
+    return this.sql
+      .exec<DecisionRow>(`SELECT * FROM decisions WHERE version_id = ? ORDER BY at`, versionId)
+      .toArray()
+      .map((r) => ({
+        ...r,
+        decision: r.decision as DecisionRecord["decision"],
+        prev_state: r.prev_state as DecisionRecord["prev_state"],
+      }));
   }
 
   /* ---------------- taste ---------------- */

@@ -24,10 +24,11 @@ import {
 } from "./db/demo-seed";
 import { authorize, authorizedItemIds, authorizedRegionIds, humanRegions } from "./permissions";
 import { consumeQuota, quotaLimits, GUEST_QUOTA, QUOTA, quotaPeriod } from "./quota";
-import { handleRoute, spaceIdFor } from "./routes";
+import { handleRoute, spaceIdFor, visibleTasteSignals } from "./routes";
 import { resolveHuman } from "./auth";
 import { signDemoLink, signDemoToken, verifyDemoToken } from "./blob-sign";
-import type { ContextItem } from "@shared/contract";
+import { isComponentPreview } from "../src/ui/workbench/componentPreview";
+import { confidenceFrom, type ContextItem } from "@shared/contract";
 
 function makeQueries(): Queries {
   const db = new Database(":memory:");
@@ -486,4 +487,140 @@ test("purgeSpace wipes the demo space and applyDemoSeed restores it", () => {
   applyDemoSeed(q, DEMO_SPACE_ID, A, NOW + 1);
   expect(q.listItemsBySpace(DEMO_SPACE_ID)).toHaveLength(DEMO_ITEMS.length);
   expect(q.listRegions(DEMO_SPACE_ID)).toHaveLength(DEMO_REGIONS.length);
+});
+
+/* ---------------- the seeded showcase (artifacts + taste) ---------------- */
+
+test("the shared demo space boots with a populated showcase", () => {
+  const q = makeQueries();
+  provisionGuestSpace(q, A, DEMO_SPACE_ID, NOW);
+
+  // ≥3 artifacts, each with ≥1 version.
+  const artifacts = q.listArtifacts(DEMO_SPACE_ID);
+  expect(artifacts.length).toBeGreaterThanOrEqual(3);
+  for (const a of artifacts) {
+    expect(a.kind).toBe("visual_brief");
+    expect(q.listArtifactVersions(a.id).length).toBeGreaterThanOrEqual(1);
+  }
+
+  // Landing page: two versions, v2 built on v1, states as a real review arc.
+  const landing = artifacts.find((a) => a.title === "Alvio — launch landing page")!;
+  const [v1, v2] = q.listArtifactVersions(landing.id);
+  expect(q.listArtifactVersions(landing.id)).toHaveLength(2);
+  expect(v2.parent_version_id).toBe(v1.id);
+  expect(v1.state).toBe("changes_requested");
+  expect(v2.state).toBe("approved_with_notes");
+
+  // Component seed: the marker is present so the Workbench renders it live.
+  const pricing = artifacts.find((a) => a.title === "Pricing — plan toggle")!;
+  const pricingHtml = q.listArtifactVersions(pricing.id)[0].content_html;
+  expect(isComponentPreview(pricingHtml)).toBe(true);
+
+  // Every artifact version starts a real HTML document.
+  for (const a of artifacts) {
+    for (const v of q.listArtifactVersions(a.id)) {
+      expect(v.content_html.toLowerCase().startsWith("<!doctype html>") ||
+        v.content_html.includes("<!doctype html>")).toBe(true);
+    }
+  }
+
+  // Review trail on artifact 1: one whole-artifact annotation + two decisions.
+  const notes = q.listAnnotations(v1.id);
+  expect(notes).toHaveLength(1);
+  expect(notes[0].target).toBeNull();
+  expect(notes[0].sentiment).toBe("negative");
+  expect(q.listDecisions(v1.id).map((d) => d.decision)).toEqual(["request_changes"]);
+  expect(q.listDecisions(v2.id).map((d) => d.decision)).toEqual(["approve_with_notes"]);
+
+  // Provenance: influences and accesses both exist, and at least one accessed
+  // item was never an influence (the "accessed vs used" distinction).
+  const showcaseTask = q.listTasks(DEMO_SPACE_ID).find((t) => t.title.startsWith("Alvio spring launch"))!;
+  const accesses = q.recentAccesses(showcaseTask.id, 100);
+  expect(accesses.length).toBeGreaterThanOrEqual(4);
+  const influenceItemIds = new Set(
+    q.listArtifacts(DEMO_SPACE_ID)
+      .flatMap((a) => q.listArtifactVersions(a.id))
+      .flatMap((v) => q.listInfluences(v.id).map((i) => i.item_id)),
+  );
+  expect(influenceItemIds.size).toBeGreaterThan(0);
+  expect(accesses.some((a) => !influenceItemIds.has(a.item_id))).toBe(true);
+  for (const acc of accesses) expect(q.getItem(acc.item_id)).not.toBeNull();
+});
+
+test("the seeded taste signals are grounded and derive their confidence", () => {
+  const q = makeQueries();
+  provisionGuestSpace(q, A, DEMO_SPACE_ID, NOW);
+
+  const signals = q.listTasteSignals(DEMO_SPACE_ID);
+  expect(signals.filter((s) => s.status === "confirmed")).toHaveLength(3);
+  expect(signals.filter((s) => s.status === "proposed")).toHaveLength(1);
+  expect(signals.length).toBeGreaterThanOrEqual(4);
+
+  for (const s of signals) {
+    expect(s.created_by).toBe("human");
+    expect(s.scope).toBe("personal");
+    expect(s.dimensions.length).toBeGreaterThanOrEqual(1);
+
+    const evidence = q.listTasteEvidence(s.id);
+    expect(evidence.length).toBeGreaterThanOrEqual(1);
+    // Confidence is derived from evidence counts, never a literal.
+    expect(s.confidence).toBe(confidenceFrom(evidence.length, 0));
+    for (const e of evidence) {
+      expect(e.kind).toBe("supports");
+      if (e.item_id) expect(q.getItem(e.item_id)).not.toBeNull();
+      if (e.annotation_id) expect(q.getAnnotation(e.annotation_id)).not.toBeNull();
+      if (e.version_id) expect(q.getArtifactVersion(e.version_id)).not.toBeNull();
+    }
+
+    const events = q.listTasteEvents(s.id);
+    expect(events.some((ev) => ev.kind === "proposed")).toBe(true);
+    if (s.status === "confirmed") expect(events.some((ev) => ev.kind === "accepted")).toBe(true);
+  }
+
+  // One signal cites an annotation, one cites an artifact version, one cites a
+  // single item (tentative confidence).
+  const allEvidence = signals.flatMap((s) => q.listTasteEvidence(s.id));
+  expect(allEvidence.some((e) => e.annotation_id)).toBe(true);
+  expect(allEvidence.some((e) => e.version_id)).toBe(true);
+  const proposed = signals.find((s) => s.status === "proposed")!;
+  expect(q.listTasteEvidence(proposed.id)).toHaveLength(1);
+});
+
+/* ---------------- guest-space taste is shared, personal is owner-scoped ---------------- */
+
+test("guest space taste is shared across judges; personal space stays owner-scoped", () => {
+  const q = makeQueries();
+  provisionGuestSpace(q, A, DEMO_SPACE_ID, NOW); // seeds signals owned by A
+
+  // B is a second judge in the same shared space — sees A's seeded signals.
+  const seenByB = visibleTasteSignals(q, DEMO_SPACE_ID, B);
+  expect(seenByB.length).toBe(q.listTasteSignals(DEMO_SPACE_ID).length);
+  expect(seenByB.length).toBeGreaterThanOrEqual(4);
+  expect(seenByB.every((s) => s.owner_id === A)).toBe(true); // not B's, but B sees them
+
+  // A personal space with two owners' signals: each owner sees only their own.
+  q.insertSpace({ id: "space-user_p", name: "Archive", owner_id: "user_p", kind: "personal", created_at: 1 });
+  const mkSignal = (owner: string) =>
+    q.insertTasteSignal({
+      id: `sig-${owner}`, space_id: "space-user_p", owner_id: owner,
+      statement: `${owner} likes tight tracking`, dimensions: ["typography"],
+      scope: "personal", project_id: null, status: "confirmed", confidence: 0.5,
+      created_by: "human", approved_by: owner, supersedes: null, created_at: 1,
+    });
+  mkSignal("user_p");
+  mkSignal("user_q");
+  expect(visibleTasteSignals(q, "space-user_p", "user_p").map((s) => s.id)).toEqual(["sig-user_p"]);
+  expect(visibleTasteSignals(q, "space-user_p", "user_q").map((s) => s.id)).toEqual(["sig-user_q"]);
+});
+
+test("purgeSpace clears the showcase and provisionGuestSpace restores it", () => {
+  const q = makeQueries();
+  provisionGuestSpace(q, A, DEMO_SPACE_ID, NOW);
+  q.purgeSpace(DEMO_SPACE_ID);
+  expect(q.listArtifacts(DEMO_SPACE_ID)).toHaveLength(0);
+  expect(q.listTasteSignals(DEMO_SPACE_ID)).toHaveLength(0);
+
+  applyDemoSeed(q, DEMO_SPACE_ID, A, NOW + 1);
+  expect(q.listArtifacts(DEMO_SPACE_ID).length).toBeGreaterThanOrEqual(3);
+  expect(q.listTasteSignals(DEMO_SPACE_ID).length).toBeGreaterThanOrEqual(4);
 });

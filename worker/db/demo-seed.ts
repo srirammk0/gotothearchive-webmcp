@@ -40,7 +40,8 @@
  *   done
  */
 
-import type { AuthorityClass, DesignProfile, ItemType } from "@shared/contract";
+import type { AuthorityClass, DesignProfile, ItemType, TasteDimension } from "@shared/contract";
+import { confidenceFrom } from "@shared/contract";
 import type { Queries } from "./queries";
 import { GRAPH_DERIVATION_VERSION, rebuildSpaceEdges } from "../graph-build";
 
@@ -830,11 +831,14 @@ export function applyDemoSeed(q: Queries, spaceId: string, humanId: string, now:
     regionIdBySlug.set(r.slug, id);
     q.insertRegion({ id, space_id: spaceId, parent_id: null, name: r.name, slug: r.slug, created_at: now });
   }
+  const itemIdByTitle = new Map<string, string>();
   for (const it of DEMO_ITEMS) {
     const regionId = regionIdBySlug.get(it.region_slug);
     if (!regionId) continue;
+    const itemId = crypto.randomUUID();
+    itemIdByTitle.set(it.title, itemId);
     q.insertItem({
-      id: crypto.randomUUID(),
+      id: itemId,
       space_id: spaceId,
       region_id: regionId,
       owner_id: humanId,
@@ -850,6 +854,456 @@ export function applyDemoSeed(q: Queries, spaceId: string, humanId: string, now:
       updated_at: now,
     });
   }
+  seedShowcase(q, spaceId, humanId, now, regionIdBySlug, itemIdByTitle);
+}
+
+const DAY = 86_400_000;
+const HOUR = 3_600_000;
+
+/**
+ * A finished slice of real work on top of the seeded references: one task, one
+ * agent session, three well-designed artifacts with version history, the
+ * provenance behind them (references used vs items merely accessed), one review
+ * trail, and four taste signals grounded in all of it. This is what a judge sees
+ * when they open the Workbench and the Taste page — a populated product, not an
+ * empty shell. `purgeSpace` clears every table touched here, so a `?reset=1`
+ * re-seed just runs this again from clean.
+ */
+function seedShowcase(
+  q: Queries,
+  spaceId: string,
+  humanId: string,
+  now: number,
+  regionIdBySlug: Map<string, string>,
+  itemIdByTitle: Map<string, string>,
+): void {
+  const inspirationId = regionIdBySlug.get("inspiration") ?? null;
+  const item = (title: string): string => {
+    const id = itemIdByTitle.get(title);
+    if (!id) throw new Error(`demo showcase cites unknown item: ${title}`);
+    return id;
+  };
+
+  /* ---- 2a. task + agent session ---- */
+  const taskId = crypto.randomUUID();
+  q.insertTask({
+    id: taskId,
+    space_id: spaceId,
+    project_id: null,
+    human_id: humanId,
+    title: "Alvio spring launch — landing page, poster, pricing",
+    instruction: "Draft the launch set from the Inspiration references.",
+    status: "open",
+    created_at: now - 6 * DAY,
+    expires_at: null,
+  });
+  const sessionId = crypto.randomUUID();
+  q.insertAgentSession({
+    id: sessionId,
+    human_id: humanId,
+    task_id: taskId,
+    declared: { client: "Claude", provider: "anthropic", model: "claude-sonnet-4" },
+    created_at: now - 6 * DAY + HOUR,
+  });
+
+  /* ---- 2b. three artifacts ---- */
+  const a1v1 = crypto.randomUUID();
+  const a1v2 = crypto.randomUUID();
+  const a1 = crypto.randomUUID();
+  q.insertArtifact({
+    id: a1,
+    space_id: spaceId,
+    task_id: taskId,
+    kind: "visual_brief",
+    title: "Alvio — launch landing page",
+    region_id: inspirationId,
+    created_at: now - 5 * DAY - 2 * HOUR,
+  });
+  q.insertArtifactVersion({
+    id: a1v1,
+    artifact_id: a1,
+    version_no: 1,
+    parent_version_id: null,
+    content_html: alvioLandingHtml({
+      heroSize: "clamp(40px, 7vw, 72px)",
+      heroLeading: "1.05",
+      heroTracking: "-0.01em",
+    }),
+    agent_session_id: sessionId,
+    state: "changes_requested",
+    created_at: now - 5 * DAY,
+  });
+  q.insertArtifactVersion({
+    id: a1v2,
+    artifact_id: a1,
+    version_no: 2,
+    parent_version_id: a1v1,
+    content_html: alvioLandingHtml({
+      heroSize: "clamp(56px, 10vw, 112px)",
+      heroLeading: "0.95",
+      heroTracking: "-0.035em",
+    }),
+    agent_session_id: sessionId,
+    state: "approved_with_notes",
+    created_at: now - 3 * DAY,
+  });
+
+  const a2 = crypto.randomUUID();
+  const a2v1 = crypto.randomUUID();
+  q.insertArtifact({
+    id: a2,
+    space_id: spaceId,
+    task_id: taskId,
+    kind: "visual_brief",
+    title: "Bright Pulp — launch poster",
+    region_id: inspirationId,
+    created_at: now - 4 * DAY - HOUR,
+  });
+  q.insertArtifactVersion({
+    id: a2v1,
+    artifact_id: a2,
+    version_no: 1,
+    parent_version_id: null,
+    content_html: brightPulpPosterHtml(),
+    agent_session_id: sessionId,
+    state: "ready_for_review",
+    created_at: now - 4 * DAY,
+  });
+
+  const a3 = crypto.randomUUID();
+  const a3v1 = crypto.randomUUID();
+  q.insertArtifact({
+    id: a3,
+    space_id: spaceId,
+    task_id: taskId,
+    kind: "visual_brief",
+    title: "Pricing — plan toggle",
+    region_id: inspirationId,
+    created_at: now - 2 * DAY - HOUR,
+  });
+  q.insertArtifactVersion({
+    id: a3v1,
+    artifact_id: a3,
+    version_no: 1,
+    parent_version_id: null,
+    content_html: pricingComponentHtml(),
+    agent_session_id: sessionId,
+    state: "approved",
+    created_at: now - 2 * DAY,
+  });
+
+  /* ---- 2c. provenance: influences (used) + accesses (retrieved) ---- */
+  const influence = (versionId: string, title: string, strength: number, note: string): void => {
+    q.insertInfluence({
+      id: crypto.randomUUID(),
+      version_id: versionId,
+      item_id: item(title),
+      role: "reference",
+      strength,
+      note,
+    });
+  };
+  influence(a1v1, "minimal features section", 0.8, "Feature row as hairline-split columns, not boxed cards.");
+  influence(a1v1, "enterprise agentic saas landing", 0.7, "Warm off-white ground and editorial restraint.");
+  influence(a1v1, "ascii hero design", 0.55, "Grotesque hero type carrying the whole frame.");
+  influence(a1v2, "minimal features section", 0.9, "Kept the hairline column rules through the revision.");
+  influence(a1v2, "ascii hero design", 0.85, "Pushed the headline bigger and tighter, per review.");
+  influence(a2v1, "my favorite poster concept", 0.9, "Small-press object: limited ink, display type does the work.");
+  influence(a2v1, "posters!", 0.6, "Geometric registration mark behind the wordmark.");
+  influence(a3v1, "login flow minimal", 0.7, "Hairline strokes, restrained accent on one control.");
+  influence(a3v1, "simple hero section", 0.55, "Single accent hue against a near-white ground.");
+
+  q.insertAccesses([
+    // A1 — two of these are also influences, two are look-only.
+    { id: crypto.randomUUID(), task_id: taskId, item_id: item("minimal features section"), tool_name: "get_context_for_task", at: now - 5 * DAY - 5 * HOUR, why: "Closest reference for a hairline-split feature row.", applied_signal_ids: [] },
+    { id: crypto.randomUUID(), task_id: taskId, item_id: item("enterprise agentic saas landing"), tool_name: "get_context_for_task", at: now - 5 * DAY - 5 * HOUR, why: "Editorial landing page on a warm ground.", applied_signal_ids: [] },
+    { id: crypto.randomUUID(), task_id: taskId, item_id: item("minimal hero section"), tool_name: "get_context_for_task", at: now - 5 * DAY - 5 * HOUR, why: "Checked its hero spacing, did not use the layout.", applied_signal_ids: [] },
+    { id: crypto.randomUUID(), task_id: taskId, item_id: item("simple hero section"), tool_name: "get_context_for_task", at: now - 5 * DAY - 4 * HOUR, why: "Scanned for hero treatments, went another way.", applied_signal_ids: [] },
+    // A2
+    { id: crypto.randomUUID(), task_id: taskId, item_id: item("my favorite poster concept"), tool_name: "get_context_for_task", at: now - 4 * DAY - 3 * HOUR, why: "The poster direction the brief points at.", applied_signal_ids: [] },
+    { id: crypto.randomUUID(), task_id: taskId, item_id: item("posters!"), tool_name: "get_context_for_task", at: now - 4 * DAY - 3 * HOUR, why: "Geometric poster set for the registration mark.", applied_signal_ids: [] },
+    { id: crypto.randomUUID(), task_id: taskId, item_id: item("dithered gothic concept"), tool_name: "get_context_for_task", at: now - 4 * DAY - 2 * HOUR, why: "Considered a dithered ground, dropped it as too heavy.", applied_signal_ids: [] },
+    // A3
+    { id: crypto.randomUUID(), task_id: taskId, item_id: item("login flow minimal"), tool_name: "get_context_for_task", at: now - 2 * DAY - 3 * HOUR, why: "Reference for restrained product UI chrome.", applied_signal_ids: [] },
+    { id: crypto.randomUUID(), task_id: taskId, item_id: item("onboarding flow minimal agentic startup"), tool_name: "get_context_for_task", at: now - 2 * DAY - 2 * HOUR, why: "Looked at its step layout, not used in the pricing table.", applied_signal_ids: [] },
+  ]);
+
+  /* ---- 2d. review trail on Artifact 1 ---- */
+  const annotationId = crypto.randomUUID();
+  q.insertAnnotation({
+    id: annotationId,
+    version_id: a1v1,
+    author_id: humanId,
+    target: null,
+    sentiment: "negative",
+    dimensions: ["typography", "visual_hierarchy"],
+    comment:
+      "The hero type is too polite. Push it bigger and tighten the tracking — it should dominate the frame.",
+    status: "resolved",
+    created_at: now - 4 * DAY,
+  });
+  q.insertDecision({
+    id: crypto.randomUUID(),
+    version_id: a1v1,
+    actor_id: humanId,
+    decision: "request_changes",
+    note: "Bigger headline, then it's there.",
+    prev_state: "ready_for_review",
+    at: now - 4 * DAY + HOUR,
+  });
+  q.insertDecision({
+    id: crypto.randomUUID(),
+    version_id: a1v2,
+    actor_id: humanId,
+    decision: "approve_with_notes",
+    note: "Good. Ship this.",
+    prev_state: "in_review",
+    at: now - 3 * DAY + HOUR,
+  });
+
+  /* ---- 2e. four taste signals ---- */
+  const signal = (opts: {
+    statement: string;
+    dimensions: TasteDimension[];
+    status: "confirmed" | "proposed";
+    createdAt: number;
+    evidence: { item_id?: string; annotation_id?: string; version_id?: string }[];
+    proposedAt: number;
+    acceptedAt?: number;
+  }): void => {
+    const id = crypto.randomUUID();
+    q.insertTasteSignal({
+      id,
+      space_id: spaceId,
+      owner_id: humanId,
+      statement: opts.statement,
+      dimensions: opts.dimensions,
+      scope: "personal",
+      project_id: null,
+      status: opts.status,
+      confidence: confidenceFrom(opts.evidence.length, 0),
+      created_by: "human",
+      approved_by: opts.status === "confirmed" ? humanId : null,
+      supersedes: null,
+      created_at: opts.createdAt,
+    });
+    for (const e of opts.evidence) {
+      q.insertTasteEvidence({
+        id: crypto.randomUUID(),
+        signal_id: id,
+        kind: "supports",
+        annotation_id: e.annotation_id ?? null,
+        version_id: e.version_id ?? null,
+        item_id: e.item_id ?? null,
+      });
+    }
+    q.insertTasteEvent({
+      id: crypto.randomUUID(),
+      signal_id: id,
+      kind: "proposed",
+      actor_type: "agent",
+      actor_label: "Agent",
+      agent_session_id: sessionId,
+      detail: "Named from the Inspiration references",
+      version_id: null,
+      at: opts.proposedAt,
+    });
+    if (opts.acceptedAt !== undefined) {
+      q.insertTasteEvent({
+        id: crypto.randomUUID(),
+        signal_id: id,
+        kind: "accepted",
+        actor_type: "human",
+        actor_label: "You",
+        agent_session_id: null,
+        detail: "",
+        version_id: null,
+        at: opts.acceptedAt,
+      });
+    }
+  };
+
+  signal({
+    statement:
+      "Landing pages breathe: one clear headline, a single accent, hairline rules between sections instead of boxed feature cards.",
+    dimensions: ["layout_density", "composition"],
+    status: "confirmed",
+    createdAt: now - 5 * DAY,
+    proposedAt: now - 5 * DAY,
+    acceptedAt: now - 3 * DAY + 2 * HOUR,
+    evidence: [
+      { item_id: item("minimal features section") },
+      { item_id: item("minimal hero section") },
+      { version_id: a1v2 },
+    ],
+  });
+  signal({
+    statement:
+      "Display type is grotesque, set large with tight tracking. No serif or decorative headline faces on product pages.",
+    dimensions: ["typography", "visual_hierarchy"],
+    status: "confirmed",
+    createdAt: now - 4 * DAY + 2 * HOUR,
+    proposedAt: now - 4 * DAY + 2 * HOUR,
+    acceptedAt: now - 3 * DAY + 3 * HOUR,
+    evidence: [
+      { item_id: item("ascii hero design") },
+      { item_id: item("enterprise agentic saas landing") },
+      { annotation_id: annotationId },
+    ],
+  });
+  signal({
+    statement:
+      "Product screenshots run full-bleed, framed by the layout — never shrunk into a bordered card.",
+    dimensions: ["imagery", "composition"],
+    status: "confirmed",
+    createdAt: now - 3 * DAY,
+    proposedAt: now - 3 * DAY,
+    acceptedAt: now - 2 * DAY + HOUR,
+    evidence: [
+      { item_id: item("login flow minimal") },
+      { item_id: item("onboarding flow minimal agentic startup") },
+    ],
+  });
+  signal({
+    statement:
+      "May prefer a warm off-white ground (around #F8F7ED) over pure white for long-form pages.",
+    dimensions: ["color"],
+    status: "proposed",
+    createdAt: now - 1 * DAY,
+    proposedAt: now - 1 * DAY,
+    evidence: [{ item_id: item("enterprise agentic saas landing") }],
+  });
+}
+
+/* ------------------------------------------------------------------ *
+ * Artifact content — every string below is a complete, self-contained
+ * document: web fonts from Google Fonts, all other CSS inline, palettes
+ * lifted from the measured profiles of the demo items above.
+ * ------------------------------------------------------------------ */
+
+function alvioLandingHtml(v: { heroSize: string; heroLeading: string; heroTracking: string }): string {
+  return `<!doctype html><html><head>
+<meta charset="utf-8">
+<meta name="gotothearchive-aspect" content="page">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;700&family=Inter:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root { --ground:#F8F7ED; --ink:#1C1C16; --muted:#8C8C82; --line:#C4BEAD; --accent:#556253; }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html, body { background:var(--ground); color:var(--ink); font-family:"Inter", system-ui, sans-serif; -webkit-font-smoothing:antialiased; }
+  body { padding:64px clamp(24px, 6vw, 96px); }
+  .wrap { max-width:1080px; margin:0 auto; }
+  header { display:flex; justify-content:space-between; align-items:baseline; padding-bottom:48px; border-bottom:1px solid var(--line); }
+  .mark { font-family:"Archivo", sans-serif; font-weight:700; letter-spacing:-0.02em; font-size:20px; }
+  nav a { color:var(--ink); text-decoration:none; margin-left:28px; font-size:14px; opacity:0.75; }
+  h1 { font-family:"Archivo", sans-serif; font-weight:700; font-size:${v.heroSize}; line-height:${v.heroLeading}; letter-spacing:${v.heroTracking}; margin:80px 0 20px; max-width:15ch; }
+  .stat { font-size:15px; color:var(--muted); letter-spacing:0.01em; }
+  .features { display:grid; grid-template-columns:repeat(3, 1fr); margin:104px 0; }
+  .features > div { padding:0 36px; }
+  .features > div:first-child { padding-left:0; }
+  .features > div + div { border-left:1px solid var(--line); }
+  .features h3 { font-family:"Archivo", sans-serif; font-weight:500; font-size:17px; margin-bottom:10px; }
+  .features p { font-size:14px; color:var(--muted); line-height:1.65; }
+  .cta { border-top:1px solid var(--line); padding-top:48px; display:flex; justify-content:space-between; align-items:center; gap:24px; }
+  .cta p { font-family:"Archivo", sans-serif; font-weight:500; font-size:24px; letter-spacing:-0.01em; }
+  .cta a { background:var(--accent); color:var(--ground); text-decoration:none; padding:14px 28px; font-size:14px; white-space:nowrap; }
+</style></head><body><div class="wrap">
+  <header><span class="mark">Alvio</span><nav><a>How it works</a><a>Integrations</a><a>Pricing</a></nav></header>
+  <h1>Open new frontiers of intelligence</h1>
+  <p class="stat">10M+ research signals analysed</p>
+  <section class="features">
+    <div><h3>Signal capture</h3><p>Every source your team touches, folded into one searchable archive that keeps its own provenance.</p></div>
+    <div><h3>Grounded agents</h3><p>Agents draft against your references and cite the ones they used. Nothing arrives unattributed.</p></div>
+    <div><h3>Taste that holds</h3><p>Confirmed preferences steer retrieval, so the second draft already knows what the first got wrong.</p></div>
+  </section>
+  <section class="cta"><p>Draft the launch set from your own references.</p><a>Start free</a></section>
+</div></body></html>`;
+}
+
+function brightPulpPosterHtml(): string {
+  return `<!doctype html><html><head>
+<meta charset="utf-8">
+<meta name="gotothearchive-aspect" content="poster">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,700;0,900;1,600&family=Inter:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root { --cream:#F6ECDE; --cobalt:#2349AA; --orange:#E0723D; }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html, body { height:100%; }
+  body { background:var(--cream); font-family:"Inter", sans-serif; overflow:hidden; }
+  .poster { position:relative; width:100%; height:100%; padding:56px; overflow:hidden; }
+  .ring { position:absolute; top:32px; left:28px; width:300px; height:300px; border:2px solid var(--cobalt); border-radius:50%; opacity:0.4; }
+  h1 { position:relative; font-family:"Playfair Display", Georgia, serif; font-weight:900; color:var(--cobalt); font-size:clamp(64px, 17vw, 148px); line-height:0.84; letter-spacing:-0.02em; text-transform:uppercase; }
+  .glass { position:absolute; right:-90px; top:24%; width:340px; height:520px; background:var(--orange); border-radius:130px 130px 24px 24px; }
+  .glass::after { content:""; position:absolute; left:0; right:0; top:36%; height:70px; background:rgba(246,236,222,0.32); }
+  .tag { position:absolute; left:56px; bottom:104px; font-family:"Playfair Display", Georgia, serif; font-style:italic; font-weight:600; font-size:22px; color:var(--orange); }
+  .meta { position:absolute; left:56px; bottom:60px; font-size:13px; letter-spacing:0.2em; text-transform:uppercase; color:var(--cobalt); }
+  .grain { position:absolute; inset:0; opacity:0.13; pointer-events:none; mix-blend-mode:multiply;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E"); }
+</style></head><body>
+  <div class="poster">
+    <div class="ring"></div>
+    <div class="glass"></div>
+    <h1>Bright<br>Pulp</h1>
+    <div class="tag">Cold-pressed, nothing added</div>
+    <div class="meta">Spring range &middot; 2026</div>
+    <div class="grain"></div>
+  </div>
+</body></html>`;
+}
+
+function pricingComponentHtml(): string {
+  return `<meta name="gotothearchive-renderer" content="component"><!doctype html><html><head>
+<meta charset="utf-8">
+<meta name="gotothearchive-aspect" content="wide">
+<script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600&family=Inter:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  body { font-family:"Inter", system-ui, sans-serif; background:#F8F7ED; color:#1C1C16; margin:0; }
+  .tight { font-family:"Inter Tight", "Inter", sans-serif; }
+</style></head><body>
+<div id="root"></div>
+<script>
+  var h = React.createElement;
+  var useState = React.useState;
+  var PLANS = [
+    { name:"Starter", monthly:0, blurb:"For one archive and one person.", feats:["1 workspace","200 saved items","Community support"] },
+    { name:"Team", monthly:24, blurb:"For a working design team.", feats:["Unlimited items","Shared taste signals","Full agent provenance","Priority support"], rec:true },
+    { name:"Scale", monthly:60, blurb:"For several brands at once.", feats:["Everything in Team","SSO and audit log","Custom retention","Dedicated review lane"] }
+  ];
+  function App() {
+    var s = useState(false); var annual = s[0]; var setAnnual = s[1];
+    function price(p) { return annual ? Math.round(p.monthly * 10) : p.monthly; }
+    function seg(on, label) {
+      var active = annual === (on === "a");
+      return h("button", { onClick:function(){ setAnnual(on === "a"); },
+        className:"px-4 py-1.5 text-sm rounded-full transition " + (active ? "bg-[#1C1C16] text-[#F8F7ED]" : "text-[#8C8C82]") }, label);
+    }
+    return h("div", { className:"max-w-5xl mx-auto px-8 py-14" },
+      h("div", { className:"flex items-center justify-center gap-3 mb-12" },
+        h("div", { className:"inline-flex items-center gap-1 border border-[#C4BEAD] rounded-full p-1" }, seg("m","Monthly"), seg("a","Annual")),
+        h("span", { className:"text-xs text-[#556253]" }, "2 months free")),
+      h("div", { className:"grid grid-cols-3 gap-px bg-[#C4BEAD] border border-[#C4BEAD]" },
+        PLANS.map(function(p) {
+          return h("div", { key:p.name, className:"bg-[#F8F7ED] p-7 " + (p.rec ? "ring-1 ring-inset ring-[#556253]" : "") },
+            h("div", { className:"tight text-lg font-semibold" }, p.name),
+            h("div", { className:"text-sm text-[#8C8C82] mt-1 mb-5" }, p.blurb),
+            h("div", { className:"tight text-4xl font-semibold" }, "$" + price(p)),
+            h("div", { className:"text-xs text-[#8C8C82] mt-1 mb-5" }, annual ? "per year" : "per month"),
+            p.rec ? h("div", { className:"text-[10px] uppercase tracking-widest text-[#556253] mb-4" }, "Recommended") : null,
+            h("ul", { className:"space-y-2 text-sm" }, p.feats.map(function(f) {
+              return h("li", { key:f, className:"flex gap-2" }, h("span", { className:"text-[#556253]" }, "—"), f);
+            })));
+        })));
+  }
+  ReactDOM.createRoot(document.getElementById("root")).render(h(App));
+</script>
+</body></html>`;
 }
 
 /**

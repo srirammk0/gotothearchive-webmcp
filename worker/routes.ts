@@ -24,6 +24,7 @@ import {
   type Task,
   type TasteDimension,
   type TasteEvent,
+  type TasteSignal,
   type ToolCallRequest,
 } from "@shared/contract";
 import { Queries } from "./db/queries";
@@ -1532,10 +1533,21 @@ function logTasteEvent(
   });
 }
 
+/**
+ * The taste signals a caller sees on the Taste page. A `kind: 'guest'` space is
+ * the ONE shared demo archive — judges already share every item and see each
+ * other's artifacts, so they see each other's taste too. A `kind: 'personal'`
+ * space stays owner-scoped.
+ */
+export function visibleTasteSignals(q: Queries, spaceId: string, humanId: string): TasteSignal[] {
+  const shared = q.getSpace(spaceId)?.kind === "guest";
+  return q.listTasteSignals(spaceId).filter((signal) => shared || signal.owner_id === humanId);
+}
+
 async function handleTaste(request: Request, q: Queries, humanId: string): Promise<Response> {
   if (request.method === "GET") {
     const spaceId = spaceIdFor(humanId);
-    const signals = q.listTasteSignals(spaceId).filter((signal) => signal.owner_id === humanId);
+    const signals = visibleTasteSignals(q, spaceId, humanId);
     const signalIds = new Set(signals.map((signal) => signal.id));
     // Hydrate each activity event with a thumbnail: the artifact it shaped
     // (preview HTML) or the first source item its signal cites (image / host).
@@ -1669,7 +1681,7 @@ async function handleTaste(request: Request, q: Queries, humanId: string): Promi
     // Clear this person's accumulated taste — signals, evidence, events. The
     // archive is untouched. The caller can only ever reach their own space.
     const spaceId = spaceIdFor(humanId);
-    const cleared = q.listTasteSignals(spaceId).filter((signal) => signal.owner_id === humanId).length;
+    const cleared = visibleTasteSignals(q, spaceId, humanId).length;
     q.purgeTasteForOwner(spaceId, humanId);
     return json({ ok: true, cleared });
   }
