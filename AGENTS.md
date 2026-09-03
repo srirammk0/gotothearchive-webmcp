@@ -44,7 +44,6 @@ Start at [`docs/README.md`](docs/README.md).
 
 ### Design
 
-- [`docs/design/visual-system.md`](docs/design/visual-system.md) — warm editorial visual and interaction system.
 - [`docs/design/core-experiences.md`](docs/design/core-experiences.md) — page-level behavior and state expectations.
 - [`docs/design/references/README.md`](docs/design/references/README.md) — saved original-resolution visual references.
 
@@ -102,11 +101,7 @@ Personal, cultivated, calm, expressive, trustworthy, and quietly alive. The prod
 
 ### Aesthetic Direction
 
-Warm editorial light mode. Use an ivory paper-like foundation, ink typography, warm neutrals, one precise accent, editorial serif/sans contrast, large negative space, asymmetric composition, hairline rules, and media-led color.
-
-The light archive references are the primary visual direction. The Are.na references contribute spatial confidence, restrained chrome, and gallery scale without being copied. Use interior.dev as an interaction-quality and motion reference, not as the visual identity.
-
-Dark mode is deferred.
+A calm dark editorial workspace. Warm near-black grounds, ink-on-dark typography, one precise accent (a warm red), small even type, large negative space, asymmetric composition, hairline rules, and media-led colour. The archived material is the loud thing; the interface stays quiet. Not a security console, enterprise dashboard, generic AI product, or database admin tool.
 
 ### Design Principles
 
@@ -167,7 +162,7 @@ When changing:
 - Artifact review → update `docs/product/workbench.md`.
 - Human or agent access → update `docs/product/sharing-and-permissions.md` and, when relevant, the WebMCP document.
 - Taste behavior → update `docs/product/taste-learning.md`.
-- Visual direction → update `docs/design/visual-system.md` and Design Context here.
+- Visual direction → update the Design Context here and the relevant focused experience document.
 - WebMCP behavior → update `docs/technical/webmcp-capability-layer.md`.
 - Storage or services → update `docs/technical/architecture.md`.
 - Delivery framing → update `docs/hackathon/strategy.md`.

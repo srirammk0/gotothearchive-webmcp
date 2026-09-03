@@ -12,7 +12,7 @@ export interface DisclosureProps {
   onOpen?: () => void;
 }
 
-/** Inline expansion, preferred over modals per the visual system. */
+/** Inline expansion keeps secondary detail available without interrupting the current task. */
 export function Disclosure({ summary, children, defaultOpen = false, className = "", onOpen }: DisclosureProps) {
   const [open, setOpen] = useState(defaultOpen);
   const panelId = useId();

@@ -17,7 +17,7 @@ function nextLevel(level: GrantLevel): GrantLevel {
 /**
  * Line-weight glyphs for the four grant states — never emoji, never a filled
  * chip. State must read from the icon shape AND the accompanying word, so it
- * never depends on colour alone (visual-system.md, WCAG AA).
+ * never depends on colour alone (WCAG AA).
  */
 function GrantGlyph({ level }: { level: GrantLevel }) {
   const common = {

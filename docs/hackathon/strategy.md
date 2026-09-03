@@ -76,7 +76,7 @@ Briefly explain dynamic WebMCP registration and schemas, runtime enforcement, co
 - Real artifacts and viewers.
 - Reliable permission transitions.
 - Clear status and error states.
-- Warm editorial visual system.
+- Calm dark editorial visual system.
 - Purposeful interaction motion.
 - No fake provenance or decorative capability indicators.
 

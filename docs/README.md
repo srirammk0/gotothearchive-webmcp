@@ -19,7 +19,6 @@ single unmaintainable PRD.
 
 ## Design
 
-- [Visual system](design/visual-system.md) — the editorial direction, type, color, motion.
 - [Core experiences](design/core-experiences.md) — page-level behavior and state.
 - [Visual references](design/references/README.md) — saved reference images.
 
