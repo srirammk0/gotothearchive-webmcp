@@ -2,7 +2,7 @@
  * End-to-end: the whole collaboration loop against a real SQLite schema.
  *
  *   archive context → retrieve (scoped) → record artifact → annotate with
- *   sentiment + dimension → request changes → taste proposed from the notes →
+ *   sentiment + dimension → request changes → agent proposes taste via WebMCP →
  *   confirm it → retrieve again (taste now applies) → submit a child revision.
  *
  * No Durable Object — an in-memory `bun:sqlite` DB wrapped in the tiny
@@ -15,7 +15,6 @@ import { Queries } from "./db/queries";
 import { migrate } from "./db/migrate";
 import { handleToolCall } from "./mcp";
 import { retrieve } from "./retrieval";
-import { deriveTasteSignals } from "./taste/derive";
 import type { ToolCallRequest } from "@shared/contract";
 
 function makeQueries(): Queries {
@@ -162,13 +161,21 @@ test("the full collaboration loop runs against a real schema", async () => {
   expect(edited.comment).toBe("flat monochrome palette, no warmth");
   expect(edited.dimensions).toEqual(["color", "imagery"]);
 
-  // 4. taste derivation turns the grouped notes into a proposed signal with cited evidence.
-  await deriveTasteSignals(q, SPACE, now + 3);
+  // 4. the agent, having read the notes back, names the pattern via WebMCP.
+  //    Nothing is derived server-side — a signal is proposed only by the agent
+  //    (propose_taste_signal) or authored by the human on the Taste page.
+  const propose = await call(q, "propose_taste_signal", {
+    region: "work",
+    statement: "Leans away from flat, monochrome colour on campaign heroes.",
+    dimensions: ["color"],
+    annotation_ids: ["a1", "a2"],
+  });
+  expect(propose.ok).toBe(true);
   const proposed = q.listTasteSignals(SPACE).filter((s) => s.status === "proposed");
   expect(proposed.length).toBeGreaterThanOrEqual(1);
   expect(proposed.some((s) => s.dimensions.includes("color"))).toBe(true);
   const colorSignal = proposed.find((s) => s.dimensions.includes("color"))!;
-  expect(colorSignal.created_by).toBe("system");
+  expect(colorSignal.created_by).toBe("agent");
   expect(q.listTasteEvidence(colorSignal.id).length).toBeGreaterThanOrEqual(2);
 
   // 5. the agent can read the feedback back through the tool.

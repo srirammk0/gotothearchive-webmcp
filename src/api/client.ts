@@ -365,6 +365,9 @@ export const updateTasteSignal = (
     body: JSON.stringify({ id, ...changes }),
   });
 
+/** Wipe every taste signal this member owns (plus its evidence and events). The archive is untouched. */
+export const clearTaste = () => req<{ ok: boolean; cleared: number }>(API.taste, { method: "DELETE" });
+
 export interface EvidenceRecord {
   id: string;
   signal_id: string;

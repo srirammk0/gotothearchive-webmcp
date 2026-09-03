@@ -1,18 +1,19 @@
 /**
- * Regression: the manual dimension picker was removed from the UI, which left
- * `handleAnnotations` writing `dimensions: []` and `deriveTasteSignals` — which
- * groups by dimension — deriving nothing from human feedback. `resolveAnnotation
- * Dimensions` now infers them from the note text (keyword classifier). This test
- * walks two plain-text human notes through inference → derivation and asserts a
- * proposal appears, the way TESTING.md run 001 expected and did not get.
+ * The taste loop stores and classifies human annotations for dimension hints,
+ * but never derives a signal from them: a signal is proposed only by the agent
+ * (via `propose_taste_signal`) or authored by the human. This test walks two
+ * plain-text human notes through inference and asserts NO signal appears, then
+ * checks that `reconcileTasteEvidence` keeps an existing agent-proposed
+ * signal's cited evidence honest when those notes change.
  */
 import { test, expect } from "bun:test";
 import { readFileSync } from "node:fs";
 import { Database } from "bun:sqlite";
 import { Queries } from "../db/queries";
 import { migrate } from "../db/migrate";
-import { deriveTasteSignals } from "./derive";
+import { reconcileTasteEvidence } from "./derive";
 import { classifyAnnotationDimensions } from "./classifier";
+import { confidenceFrom } from "@shared/contract";
 
 const HUMAN = "user_1";
 const SPACE = "space-user_1";
@@ -33,7 +34,6 @@ function makeQueries(): Queries {
 }
 
 async function humanNote(q: Queries, id: string, versionId: string, comment: string): Promise<void> {
-  // Mirrors handleAnnotations POST: no explicit dimensions → infer from text.
   const dimensions = await classifyAnnotationDimensions(undefined, {
     title: "Spring hero v1",
     comment,
@@ -46,8 +46,7 @@ async function humanNote(q: Queries, id: string, versionId: string, comment: str
   });
 }
 
-test("two plain-text human colour notes produce a proposed taste signal", async () => {
-  const q = makeQueries();
+function seed(q: Queries): void {
   q.insertSpace({ id: SPACE, name: "Archive", owner_id: HUMAN, kind: "personal", created_at: now });
   q.insertRegion({ id: "r_work", space_id: SPACE, parent_id: null, name: "Work", slug: "work", created_at: now });
   q.insertTask({
@@ -65,23 +64,52 @@ test("two plain-text human colour notes produce a proposed taste signal", async 
     id: "v1", artifact_id: "art1", version_no: 1, parent_version_id: null,
     content_html: "<h1>Bloom</h1>", agent_session_id: "sess1", state: "ready_for_review", created_at: now,
   });
-  // Taste only learns from feedback on reviewed, influence-citing agent work.
   q.insertInfluence({ id: "inf1", version_id: "v1", item_id: "i_brief", role: "reference", strength: 1, note: null });
+}
+
+test("two plain-text human colour notes produce NO taste signal", async () => {
+  const q = makeQueries();
+  seed(q);
 
   await humanNote(q, "a1", "v1", "the colour palette feels flat and washed out");
   await humanNote(q, "a2", "v1", "these muted colours read cold, wanted a warmer palette");
-
   q.setArtifactVersionState("v1", "changes_requested");
 
-  // Both notes must have landed on the colour dimension for the group to form.
   expect(q.getAnnotation("a1")?.dimensions).toContain("color");
-  expect(q.getAnnotation("a2")?.dimensions).toContain("color");
 
-  await deriveTasteSignals(q, SPACE, now + 3);
+  reconcileTasteEvidence(q, SPACE);
 
-  const proposed = q.listTasteSignals(SPACE).filter((s) => s.status === "proposed" && s.created_by === "system");
-  expect(proposed.length).toBeGreaterThanOrEqual(1);
-  const colorSignal = proposed.find((s) => s.dimensions.includes("color"));
-  expect(colorSignal).toBeDefined();
-  expect(q.listTasteEvidence(colorSignal!.id).length).toBeGreaterThanOrEqual(2);
+  expect(q.listTasteSignals(SPACE)).toHaveLength(0);
+});
+
+test("reconcile keeps an existing agent-proposed signal's evidence honest as its notes change", async () => {
+  const q = makeQueries();
+  seed(q);
+  await humanNote(q, "a1", "v1", "the colour palette feels flat and washed out");
+  await humanNote(q, "a2", "v1", "these muted colours read cold, wanted a warmer palette");
+
+  // The agent named the pattern and cited both notes.
+  q.insertTasteSignal({
+    id: "sig1", space_id: SPACE, owner_id: HUMAN,
+    statement: "Leans away from flat, washed-out colour on hero sections.",
+    dimensions: ["color"], scope: "personal", project_id: null, status: "proposed",
+    confidence: confidenceFrom(2, 0), created_by: "agent", approved_by: null,
+    created_at: now + 3, supersedes: null,
+  });
+  for (const [id, aid] of [["e1", "a1"], ["e2", "a2"]] as const) {
+    q.insertTasteEvidence({ id, signal_id: "sig1", kind: "supports", annotation_id: aid, version_id: "v1", item_id: null });
+  }
+
+  // a1 flips positive: it now contradicts an "away" signal.
+  q.updateAnnotation("a1", { sentiment: "positive" });
+  // a2 goes neutral: it drops out entirely.
+  q.updateAnnotation("a2", { sentiment: "neutral" });
+
+  reconcileTasteEvidence(q, SPACE);
+
+  const evidence = q.listTasteEvidence("sig1");
+  expect(evidence).toHaveLength(1);
+  expect(evidence[0].annotation_id).toBe("a1");
+  expect(evidence[0].kind).toBe("contradicts");
+  expect(q.getTasteSignal("sig1")?.confidence).toBeCloseTo(confidenceFrom(0, 1), 5);
 });

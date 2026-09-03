@@ -191,24 +191,26 @@ No external calls, so `retrieve()` does not need to become `async`. Its caller
 
 The loop from `taste-learning.md` §"Continual learning loop", wired end to end.
 
-### 3.1 Derivation (the missing step 5)
+### 3.1 Where a proposed signal comes from
 
-New `worker/taste/derive.ts`, `deriveTasteSignals(q, spaceId, now)`, called after
-every annotation write and every artifact decision:
+There is no server-side derivation. A signal is proposed only by:
 
-1. Read `open` annotations across the space's artifact versions.
-2. Group by `(dimension, sentiment)`.
-3. A group is a **candidate** when: ≥ 2 supporting annotations, spanning ≥ 1
-   artifact, and no `confirmed` signal already contradicts it.
-4. Statement text: a template built from the shared dimension, the dominant
-   sentiment, and the most common content words across the grouped comments
-   (`"For {dimension} on {artifact-kind}, leans {toward/away from} {phrase} —
-   from {n} notes on {m} artifacts"`). No model call. Must satisfy the doc's
-   proposal-quality rules: names the context, cites the annotations, no universal
-   claim from one example. A human edits the wording before confirming anyway.
-5. Insert `taste_signals` (`status='proposed'`, `created_by='system'`),
-   `taste_evidence` rows linking each annotation, `taste_events` 'proposed'.
-6. Never auto-confirm. No acceptance inferred from silence.
+- **the agent**, via the `propose_taste_signal` WebMCP tool — a real model
+  writes the statement and cites the `annotation_id`s / `item_id`s that
+  evidence it; the server re-verifies every citation against the task's access
+  before inserting (`status='proposed'`, `created_by='agent'`), or
+- **the human**, authoring one by hand on the Taste page
+  (`created_by='human'`).
+
+`worker/taste/derive.ts` exports `reconcileTasteEvidence(q, spaceId)`, called
+after every annotation write/edit and every artifact decision. It never inserts
+a signal. Its only job: for each evidence row that cites an annotation, drop the
+row if the annotation is gone / now agent-authored / neutral, otherwise flip its
+`kind` to match the annotation's current sentiment against the signal's
+direction, then recompute confidence. The agent or human chose that citation;
+the server keeps it consistent, it does not second-guess it.
+
+Never auto-confirm. No acceptance inferred from silence.
 
 ### 3.2 Confidence, derived
 
@@ -272,7 +274,7 @@ Remaining, on non-overlapping files, for parallel Sonnet subagents:
 | Track | Files (exclusive) | Notes |
 |---|---|---|
 | **A — retrieval** | `worker/retrieval.ts`, `worker/mcp.ts` | RRF over FTS+recency+graph; real `taste_relevance` (§2.1); `applied_signal_ids` + emit `taste_events` 'applied' in mcp.ts `get_context_for_task`; rewrite `why()`. |
-| **B — taste loop** | `worker/taste/derive.ts` (new), `worker/routes.ts` | `deriveTasteSignals()` (§3.1); call it after annotation write and after artifact decision; recompute confidence via `confidenceFrom` whenever evidence changes; `supersedes` on material edit in the PATCH handler. |
+| **B — taste loop** | `worker/taste/derive.ts`, `worker/routes.ts` | `reconcileTasteEvidence()` (§3.1) after annotation write and artifact decision; `supersedes` on material edit in the PATCH handler. Signals are created by the agent (`propose_taste_signal`) or the human, never here. |
 | **C — UI** | `src/ui/workbench/ProvenanceStrip.tsx`, `src/routes/Taste.tsx`, `src/ui/AgentAccess.tsx`, `src/ui/viewmodels.ts` | §5. Confidence in words via `confidenceLabel`. |
 | **Integration** | Claude: review, wire, typecheck, deploy, verify | — |
 

@@ -63,19 +63,26 @@ Contradiction: 1 note preferring more breathing room in long-form documentation
 1. An agent retrieves task-relevant context and confirmed taste within its grant.
 2. The agent creates an artifact and records influencing references.
 3. The human reviews the artifact in the Workbench.
-4. Annotations identify what worked, failed, or needs revision.
-5. The system derives candidate signals with supporting evidence.
+4. Annotations identify what worked, failed, or needs revision. Each note is
+   stored and keyword-classified into taste dimensions — a hint the agent can
+   read back, not a signal.
+5. A candidate signal is proposed only by one of:
+   - the agent, through the `propose_taste_signal` WebMCP tool, when it has read
+     several annotations pointing the same way and can name the pattern in one
+     sentence, citing the annotations and items that support it;
+   - the human, authoring a signal by hand on the Taste page.
 6. The human accepts, edits, rescopes, or rejects each candidate.
 7. Confirmed signals become eligible for later retrieval.
 
-No acceptance is inferred from silence. No profile is silently rewritten.
-New matching reviews extend the evidence on an existing proposal or confirmed
-signal instead of creating duplicates. Opposing reviews are retained as
-contradicting evidence and lower confidence; they may also produce a separate
-proposal for the human to reconcile.
-Editing an annotation reconciles any evidence already derived from it: changing
-sentiment changes support to contradiction (or vice versa), while removing its
-labels or making it neutral removes it from the affected signal.
+No signal is ever derived server-side. No acceptance is inferred from silence.
+No profile is silently rewritten. Nothing auto-confirms.
+
+When the annotations a signal already cites are edited, the server reconciles
+that signal's evidence: flipping a note's sentiment flips its evidence between
+support and contradiction, and deleting a note, making it neutral, or having an
+agent author it drops the evidence row. Confidence is recomputed from the
+remaining evidence. The server never adds or removes a citation the agent or
+human chose deliberately.
 
 ## Proposal quality rules
 

@@ -362,9 +362,6 @@ function toAuditEvent(r: AuditEventRow): AuditEvent {
 }
 
 export class Queries {
-  /** Project scope selected by openAnnotationsForSpace for the current derive run. */
-  private tasteDerivationProjectId: string | null | undefined;
-
   constructor(private sql: SqlStorage) {}
 
   /* ---------------- spaces ---------------- */
@@ -430,6 +427,19 @@ export class Queries {
     this.sql.exec(`DELETE FROM project_members WHERE project_id IN (SELECT id FROM projects WHERE space_id = ?)`, spaceId);
     this.sql.exec(`DELETE FROM projects WHERE space_id = ?`, spaceId);
     this.sql.exec(`DELETE FROM regions WHERE space_id = ?`, spaceId);
+  }
+
+  /**
+   * Delete a person's accumulated taste in one space — every signal they own,
+   * plus its evidence and events. Backs the "Clear all taste" control on the
+   * Taste page. The archive (items, artifacts, annotations) is untouched.
+   * FK-safe order, mirrors purgeSpace's taste block.
+   */
+  purgeTasteForOwner(spaceId: string, ownerId: string): void {
+    const sub = `SELECT id FROM taste_signals WHERE space_id = ? AND owner_id = ?`;
+    this.sql.exec(`DELETE FROM taste_evidence WHERE signal_id IN (${sub})`, spaceId, ownerId);
+    this.sql.exec(`DELETE FROM taste_events WHERE signal_id IN (${sub})`, spaceId, ownerId);
+    this.sql.exec(`DELETE FROM taste_signals WHERE space_id = ? AND owner_id = ?`, spaceId, ownerId);
   }
 
   /* ---------------- projects ---------------- */
@@ -1448,9 +1458,7 @@ export class Queries {
   /* ---------------- taste ---------------- */
 
   insertTasteSignal(t: TasteSignal): void {
-    const inferredProjectId =
-      t.created_by === "system" && t.project_id === undefined ? this.tasteDerivationProjectId ?? null : null;
-    const requestedProjectId = t.scope === "project" ? t.project_id ?? inferredProjectId : null;
+    const requestedProjectId = t.scope === "project" ? t.project_id ?? null : null;
     const project = requestedProjectId ? this.getProject(requestedProjectId) : null;
     const projectIsOwned = Boolean(
       project && project.space_id === t.space_id && project.owner_id === t.owner_id,
@@ -1624,46 +1632,6 @@ export class Queries {
       .map(toTasteSignal);
   }
 
-  /**
-   * Every open annotation in a space that taste derivation may learn from.
-   *
-   * The version must be agent-authored and grounded in real Archive material
-   * (an influence row) — we never learn taste from ungrounded output. It must
-   * also carry a human decision: `changes_requested` is included alongside the
-   * approved states because "annotate → request changes → a taste signal is
-   * proposed → confirm it → the agent revises" is the core learning loop, and
-   * `handleDecisions` derives immediately after setting that state.
-   */
-  openAnnotationsForSpace(spaceId: string): (Annotation & { space_id: string })[] {
-    const rows = this.sql
-      .exec<AnnotationRow & { space_id: string; project_id: string | null }>(
-        `SELECT a.*, ar.space_id AS space_id, t.project_id AS project_id
-         FROM annotations a
-         JOIN artifact_versions av ON av.id = a.version_id
-         JOIN artifacts ar ON ar.id = av.artifact_id
-         JOIN tasks t ON t.id = ar.task_id
-         WHERE ar.space_id = ?
-           AND t.space_id = ar.space_id
-           AND t.human_id = (SELECT owner_id FROM spaces WHERE id = ar.space_id)
-           AND a.status = 'open'
-           AND a.author_id NOT LIKE 'agent:%'
-           AND av.state IN ('approved', 'approved_with_notes', 'changes_requested')
-           AND av.agent_session_id IS NOT NULL
-           AND EXISTS (SELECT 1 FROM influences i WHERE i.version_id = av.id)
-         ORDER BY a.created_at DESC, a.id DESC`,
-        spaceId,
-      )
-      .toArray()
-      .map((r) => ({ ...toAnnotation(r), space_id: r.space_id, project_id: r.project_id ?? null }));
-
-    // deriveTasteSignals groups only by dimension and sentiment and cannot take
-    // a project argument. Feed one task scope per run (the newest human note)
-    // so evidence from two projects can never be merged into one signal. The
-    // insertTasteSignal method consumes this private, synchronous context.
-    const projectId = rows[0]?.project_id ?? null;
-    this.tasteDerivationProjectId = rows.length > 0 ? projectId : undefined;
-    return rows.filter((row) => (row.project_id ?? null) === projectId);
-  }
 
   /**
    * Anything in this space awaiting a human decision: a proposed taste signal,

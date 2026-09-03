@@ -40,7 +40,7 @@ import {
 import { authorizedRegionIds, humanRegions, liveGrants, taskIsLive, taskProject } from "./permissions";
 import { traverse } from "./graph";
 import { handleToolCall } from "./mcp";
-import { deriveTasteSignals, statementOverlap } from "./taste/derive";
+import { reconcileTasteEvidence, statementOverlap } from "./taste/derive";
 import { classifyAnnotationDimensions } from "./taste/classifier";
 import { extractUrl, isPublicHttpUrl } from "./extract";
 import { extractDesignProfile, designSummary } from "./design";
@@ -206,7 +206,7 @@ export async function handleRoute(
     case API.annotations:
       return await handleAnnotations(request, q, human.human_id, env);
     case API.decisions:
-      return await handleDecisions(request, q, human.human_id, env);
+      return await handleDecisions(request, q, human.human_id);
     case API.taste:
       return await handleTaste(request, q, human.human_id);
     case API.tasteEvidence:
@@ -1390,8 +1390,9 @@ async function handleAnnotations(request: Request, q: Queries, humanId: string, 
       status: "open",
       created_at: Date.now(),
     });
-    // Step 5 of the taste loop: this new note may complete a candidate signal.
-    await deriveTasteSignals(q, spaceIdFor(humanId), Date.now(), env);
+    // A new note may be cited by an existing signal already; keep that
+    // signal's evidence and confidence honest. No signal is ever created here.
+    reconcileTasteEvidence(q, spaceIdFor(humanId));
     return json({ ok: true, annotation: { id } });
   }
   if (request.method === "PATCH") {
@@ -1427,7 +1428,7 @@ async function handleAnnotations(request: Request, q: Queries, humanId: string, 
       sentiment: body.sentiment,
       dimensions: nextDimensions,
     });
-    await deriveTasteSignals(q, spaceIdFor(humanId), Date.now(), env);
+    reconcileTasteEvidence(q, spaceIdFor(humanId));
     return json({ ok: true, annotation: q.getAnnotation(body.id) });
   }
   return badRequest("unsupported method");
@@ -1435,7 +1436,7 @@ async function handleAnnotations(request: Request, q: Queries, humanId: string, 
 
 /* ---------------- decisions ---------------- */
 
-async function handleDecisions(request: Request, q: Queries, humanId: string, env: Env): Promise<Response> {
+async function handleDecisions(request: Request, q: Queries, humanId: string): Promise<Response> {
   if (request.method !== "POST") return badRequest("POST required");
   const body = (await request.json()) as { version_id: string; decision: string; note?: string | null };
   if (!(REVIEW_DECISIONS as readonly string[]).includes(body.decision)) {
@@ -1503,7 +1504,7 @@ async function handleDecisions(request: Request, q: Queries, humanId: string, en
       });
     }
   }
-  await deriveTasteSignals(q, spaceIdFor(humanId), now, env);
+  reconcileTasteEvidence(q, spaceIdFor(humanId));
   return json({ ok: true, version: q.getArtifactVersion(body.version_id) });
 }
 
@@ -1663,6 +1664,14 @@ async function handleTaste(request: Request, q: Queries, humanId: string): Promi
       q.setTasteSignalConfidence(body.id, confidenceFrom(counts.supporting, counts.contradicting));
     }
     return json({ ok: true, signal: q.getTasteSignal(body.id) });
+  }
+  if (request.method === "DELETE") {
+    // Clear this person's accumulated taste — signals, evidence, events. The
+    // archive is untouched. The caller can only ever reach their own space.
+    const spaceId = spaceIdFor(humanId);
+    const cleared = q.listTasteSignals(spaceId).filter((signal) => signal.owner_id === humanId).length;
+    q.purgeTasteForOwner(spaceId, humanId);
+    return json({ ok: true, cleared });
   }
   return badRequest("unsupported method");
 }

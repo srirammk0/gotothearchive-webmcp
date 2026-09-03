@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { confidenceLabel, dimensionLabel, type ContextItem, type TasteSignal } from "@shared/contract";
 import {
+  clearTaste,
   getTasteEvidence,
   listTasteSignals,
   updateTasteSignal,
@@ -311,6 +312,53 @@ function SignalCard({
   );
 }
 
+/** Secondary, out-of-the-way control to wipe accumulated taste behind one confirm step. */
+function ClearTaste({ onCleared }: { onCleared: () => void }) {
+  const action = useAction("That didn't go through. Try again.");
+  const [confirming, setConfirming] = useState(false);
+
+  if (!confirming) {
+    return (
+      <button
+        type="button"
+        onClick={() => setConfirming(true)}
+        className="self-start text-micro text-faint underline-offset-2 hover:text-bad hover:underline"
+      >
+        Clear all taste
+      </button>
+    );
+  }
+
+  return (
+    <div className="flex flex-wrap items-center gap-2 text-meta text-muted">
+      <span>This removes every taste signal. Your archive is untouched.</span>
+      <Button
+        variant="danger"
+        disabled={action.busy}
+        onClick={() =>
+          void action.run(async () => void (await clearTaste())).then((ok) => {
+            if (ok) {
+              setConfirming(false);
+              onCleared();
+            }
+          })
+        }
+      >
+        Clear
+      </Button>
+      <Button variant="ghost" disabled={action.busy} onClick={() => setConfirming(false)}>
+        Cancel
+      </Button>
+      {action.busy ? <Spinner label="Clearing…" /> : null}
+      {action.error ? (
+        <span role="alert" className="text-bad">
+          {action.error}
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
 export function Taste() {
   const [status, setStatus] = useState<"loading" | "error" | "ready">("loading");
   const [signals, setSignals] = useState<TasteSignal[]>([]);
@@ -403,6 +451,8 @@ export function Taste() {
                 </div>
               )}
             </section>
+
+            {signals.length > 0 ? <ClearTaste onCleared={() => load()} /> : null}
           </>
         ) : null}
       </div>
