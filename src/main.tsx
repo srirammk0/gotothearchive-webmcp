@@ -37,8 +37,19 @@ createRoot(document.getElementById("root")!).render(
         <App />
       </Show>
       <Show when="signed-out">
-        <div className="flex min-h-full items-center justify-center p-8">
+        <div className="flex min-h-full flex-col items-center justify-center gap-6 p-8">
           <SignIn routing="hash" />
+          <p className="max-w-xs text-center text-meta text-muted">
+            <a
+              href="/api/demo-entry"
+              className="underline decoration-line underline-offset-2 transition-colors duration-[var(--duration-fast)] hover:text-text focus-visible:text-accent"
+            >
+              Open judge demo access
+            </a>
+            <span className="mt-1 block text-micro">
+              A ready-made archive to explore and break — separate from anything of your own, and yours to reset whenever you like.
+            </span>
+          </p>
         </div>
       </Show>
     </ClerkProvider>

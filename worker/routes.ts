@@ -44,7 +44,7 @@ import { deriveTasteSignals, statementOverlap } from "./taste/derive";
 import { classifyAnnotationDimensions } from "./taste/classifier";
 import { extractUrl, isPublicHttpUrl } from "./extract";
 import { extractDesignProfile, designSummary } from "./design";
-import { verifyBlobSignature } from "./blob-sign";
+import { signDemoToken, verifyBlobSignature } from "./blob-sign";
 import { deriveEdgesForItem, rebuildSpaceEdges } from "./graph-build";
 import { applyDemoSeed, provisionGuestSpace } from "./db/demo-seed";
 
@@ -98,6 +98,25 @@ export async function handleRoute(
   // this one path; every other route is unaffected.
   if (url.pathname === API.blob && url.searchParams.has("sig")) {
     return handleSignedBlob(request, env);
+  }
+
+  // Judge demo access (docs/roadmap/judge-demo-access.md). A judge with no
+  // signed link mints one here and is dropped into the normal /demo flow.
+  // The visitor is signed out by definition, so this sits with the signed-blob
+  // branch above, before the session gate. Path is a literal — shared/contract.ts's
+  // API const is frozen, so it is deliberately not added there.
+  if (url.pathname === "/api/demo-entry") {
+    if (request.method !== "GET") return badRequest("GET required");
+    if (!env.BLOB_SIGNING_SECRET) {
+      return json({ ok: false, error: "demo_unavailable" }, { status: 503 });
+    }
+    // Short TTL: it is verified and exchanged for a guest space on the very
+    // next request.
+    const { exp, sig } = await signDemoToken(env.BLOB_SIGNING_SECRET, 30 * 60 * 1000);
+    const target = new URL("/demo", url.origin);
+    target.searchParams.set("demo_exp", String(exp));
+    target.searchParams.set("demo_sig", sig);
+    return Response.redirect(target.toString(), 302);
   }
 
   const human = await resolveHuman(request, env);

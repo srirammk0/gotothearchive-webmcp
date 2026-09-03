@@ -14,6 +14,8 @@ import { migrate } from "./db/migrate";
 import { applyDemoSeed, provisionGuestSpace, DEMO_ITEMS, DEMO_REGIONS } from "./db/demo-seed";
 import { authorize, authorizedItemIds, authorizedRegionIds } from "./permissions";
 import { consumeQuota, quotaLimits, GUEST_QUOTA, quotaPeriod } from "./quota";
+import { handleRoute } from "./routes";
+import { verifyBlobSignature } from "./blob-sign";
 import type { ContextItem } from "@shared/contract";
 
 function makeQueries(): Queries {
@@ -209,4 +211,48 @@ test("purgeSpace wipes a guest space and applyDemoSeed restores it", () => {
   applyDemoSeed(q, GUEST_SPACE, GUEST, NOW + 1);
   expect(q.listItemsBySpace(GUEST_SPACE)).toHaveLength(DEMO_ITEMS.length);
   expect(q.listRegions(GUEST_SPACE)).toHaveLength(DEMO_REGIONS.length);
+});
+
+/* ---------------- /api/demo-entry ---------------- */
+
+const SECRET = "test-signing-secret";
+const demoEntry = (env: Record<string, unknown>) =>
+  handleRoute(
+    new Request("https://archive.example/api/demo-entry"),
+    env as unknown as Parameters<typeof handleRoute>[1],
+    // The route returns before touching the DB — no session, no queries.
+    null as unknown as Queries,
+  );
+
+test("GET /api/demo-entry 302s into /demo with a token that verifies, no session needed", async () => {
+  const res = await demoEntry({ BLOB_SIGNING_SECRET: SECRET });
+
+  // Not the "Sign in required" 401 gate — the whole point is it works signed out.
+  expect(res.status).toBe(302);
+
+  const loc = new URL(res.headers.get("location") ?? "");
+  expect(loc.pathname).toBe("/demo");
+  const exp = loc.searchParams.get("demo_exp");
+  const sig = loc.searchParams.get("demo_sig");
+  expect(await verifyBlobSignature(SECRET, "demo", exp, sig)).toBe(true);
+
+  // Short-lived: consumed on the next request.
+  expect(Number(exp) - Date.now()).toBeLessThanOrEqual(30 * 60 * 1000);
+  expect(Number(exp) - Date.now()).toBeGreaterThan(25 * 60 * 1000);
+});
+
+test("/api/demo-entry fails closed with BLOB_SIGNING_SECRET unset — no redirect", async () => {
+  const res = await demoEntry({});
+  expect(res.status).toBe(503);
+  expect(res.headers.get("location")).toBeNull();
+  expect(await res.json()).toEqual({ ok: false, error: "demo_unavailable" });
+});
+
+test("/api/demo-entry is GET only", async () => {
+  const res = await handleRoute(
+    new Request("https://archive.example/api/demo-entry", { method: "POST" }),
+    { BLOB_SIGNING_SECRET: SECRET } as unknown as Parameters<typeof handleRoute>[1],
+    null as unknown as Queries,
+  );
+  expect(res.status).toBe(400);
 });
