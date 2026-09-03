@@ -30,10 +30,10 @@ import { Queries } from "./db/queries";
 import { resolveHuman } from "./auth";
 import {
   BETA_MAX_USERS,
-  QUOTA,
   QUOTA_METRICS,
   UPLOAD_MAX_BYTES,
   consumeQuota,
+  quotaLimits,
   quotaPeriod,
   type QuotaMetric,
 } from "./quota";
@@ -45,7 +45,8 @@ import { classifyAnnotationDimensions } from "./taste/classifier";
 import { extractUrl, isPublicHttpUrl } from "./extract";
 import { extractDesignProfile, designSummary } from "./design";
 import { verifyBlobSignature } from "./blob-sign";
-import { deriveEdgesForItem } from "./graph-build";
+import { deriveEdgesForItem, rebuildSpaceEdges } from "./graph-build";
+import { applyDemoSeed, provisionGuestSpace } from "./db/demo-seed";
 
 /**
  * Each signed-in human gets their own Space, keyed to their Clerk id.
@@ -67,10 +68,20 @@ function badRequest(message: string): Response {
   return json({ ok: false, error: message }, { status: 400 });
 }
 
-function isOwnedBlobKey(key: string, humanId: string): boolean {
+/**
+ * A blob key this human may touch. `allowDemoRead` additionally permits the
+ * shared, read-only `demo/` prefix (docs/roadmap/judge-demo-access.md) — set it
+ * only on the read path (handleBlob). A guest still cannot write there: item
+ * creation calls this without the flag, so a guest can neither upload to `demo/`
+ * nor point a new item at any key outside its own space.
+ */
+const oneBlobSegment = (suffix: string): boolean =>
+  Boolean(suffix) && !suffix.includes("/") && !suffix.includes("\\") && !suffix.includes("..");
+
+function isOwnedBlobKey(key: string, humanId: string, opts?: { allowDemoRead?: boolean }): boolean {
+  if (opts?.allowDemoRead && key.startsWith("demo/")) return oneBlobSegment(key.slice("demo/".length));
   const prefix = `${spaceIdFor(humanId)}/`;
-  const suffix = key.startsWith(prefix) ? key.slice(prefix.length) : "";
-  return Boolean(suffix) && !suffix.includes("/") && !suffix.includes("\\") && !suffix.includes("..");
+  return key.startsWith(prefix) && oneBlobSegment(key.slice(prefix.length));
 }
 
 export async function handleRoute(
@@ -92,23 +103,34 @@ export async function handleRoute(
   const human = await resolveHuman(request, env);
   if (!human) return json({ ok: false, error: "Sign in required" }, { status: 401 });
 
+  // Judge demo access (docs/roadmap/judge-demo-access.md). A guest space is
+  // exempt from the closed-beta cap and counted separately; the signed `/demo`
+  // token is what lets bootstrap create one.
+  const existingKind = q.getSpace(spaceIdFor(human.human_id))?.kind;
+  const demo = url.searchParams.has("demo_sig")
+    ? await readDemoRequest(url, env)
+    : { valid: false, reset: false };
+  const isGuest = existingKind === "guest" || (existingKind === undefined && demo.valid);
+
   // Closed-beta gate. Bootstrap claims a slot (or 403s when full); every other
-  // route requires an already-claimed slot.
-  if (url.pathname === API.bootstrap) {
-    const slot = q.claimBetaSlot(human.human_id, BETA_MAX_USERS, Date.now());
-    if (slot === null) {
-      return json(
-        { ok: false, error: "beta_full", message: `The beta is full (${BETA_MAX_USERS} members). Check back later.` },
-        { status: 403 },
-      );
+  // route requires an already-claimed slot. Guests skip both.
+  if (!isGuest) {
+    if (url.pathname === API.bootstrap) {
+      const slot = q.claimBetaSlot(human.human_id, BETA_MAX_USERS, Date.now());
+      if (slot === null) {
+        return json(
+          { ok: false, error: "beta_full", message: `The beta is full (${BETA_MAX_USERS} members). Check back later.` },
+          { status: 403 },
+        );
+      }
+    } else if (q.betaSlot(human.human_id) === null) {
+      return json({ ok: false, error: "beta_required", message: "Open the app first to join the beta." }, { status: 403 });
     }
-  } else if (q.betaSlot(human.human_id) === null) {
-    return json({ ok: false, error: "beta_required", message: "Open the app first to join the beta." }, { status: 403 });
   }
 
   switch (url.pathname) {
     case API.bootstrap:
-      return await handleBootstrap(request, q, human.human_id);
+      return await handleBootstrap(request, q, human.human_id, demo);
     case API.quota:
       return handleQuota(q, human.human_id);
     case API.regions:
@@ -162,15 +184,54 @@ export async function handleRoute(
 
 /* ---------------- bootstrap ---------------- */
 
-async function handleBootstrap(request: Request, q: Queries, humanId: string): Promise<Response> {
+interface DemoRequest {
+  valid: boolean;
+  reset: boolean;
+}
+
+/**
+ * The signed `/demo` entry token, carried on the bootstrap POST as
+ * `demo_exp` / `demo_sig` (and `demo_reset=1` to re-seed). Verified with the
+ * existing HMAC helper, keyed on the fixed string "demo". Fails closed when
+ * BLOB_SIGNING_SECRET is unset — the same shape as every other signed path here.
+ */
+async function readDemoRequest(url: URL, env: Env): Promise<DemoRequest> {
+  const valid = await verifyBlobSignature(
+    env.BLOB_SIGNING_SECRET,
+    "demo",
+    url.searchParams.get("demo_exp"),
+    url.searchParams.get("demo_sig"),
+  );
+  return { valid, reset: valid && url.searchParams.get("demo_reset") === "1" };
+}
+
+async function handleBootstrap(
+  request: Request,
+  q: Queries,
+  humanId: string,
+  demo: DemoRequest,
+): Promise<Response> {
   if (request.method !== "POST") return badRequest("POST required");
-  const existing = q.getSpace(spaceIdFor(humanId));
+  const spaceId = spaceIdFor(humanId);
+  const existing = q.getSpace(spaceId);
+
+  // A guest re-visiting the signed link with ?demo_reset=1 gets a clean re-seed.
+  if (existing?.kind === "guest" && demo.reset) {
+    const at = Date.now();
+    q.purgeSpace(spaceId);
+    applyDemoSeed(q, spaceId, humanId, at);
+    rebuildSpaceEdges(q, spaceId, at);
+    return json({ ok: true, space: q.getSpace(spaceId), regions: q.listRegions(spaceId) });
+  }
   if (existing) {
     return json({ ok: true, space: existing, regions: q.listRegions(existing.id) });
   }
+  if (demo.valid) {
+    provisionGuestSpace(q, humanId, spaceId, Date.now());
+    return json({ ok: true, space: q.getSpace(spaceId), regions: q.listRegions(spaceId) });
+  }
 
   const now = Date.now();
-  const spaceId = spaceIdFor(humanId);
   q.insertSpace({ id: spaceId, name: "Archive", owner_id: humanId, kind: "personal", created_at: now });
 
   for (const r of [
@@ -503,14 +564,19 @@ async function handleItems(request: Request, env: Env, q: Queries, humanId: stri
     if ((body.type === "image" || body.type === "screenshot") && body.content_ref) {
       const measured = cleanPalette(body.palette);
       const blob = await env.BLOBS.get(body.content_ref).catch(() => null);
-      const design = blob
-        ? await extractDesignProfile(
-            env,
-            new Uint8Array(await blob.arrayBuffer()),
-            measured,
-            now,
-          ).catch(() => null)
-        : null;
+      // The vision call is metered (worker/quota.ts `vision_calls`). Over budget
+      // → skip it; the item is already saved and just carries no design profile
+      // yet, exactly as it would after a failed call. A quota refusal never
+      // fails a capture.
+      const design =
+        blob && consumeQuota(q, humanId, "vision_calls", 1, quotaLimits(q.getSpace(spaceId)?.kind)).ok
+          ? await extractDesignProfile(
+              env,
+              new Uint8Array(await blob.arrayBuffer()),
+              measured,
+              now,
+            ).catch(() => null)
+          : null;
       const parent = q.getItem(id);
       if (design && parent) {
         // A human-written description always wins; the derived summary only
@@ -801,7 +867,7 @@ async function handleBlob(request: Request, env: Env, humanId: string): Promise<
   if (request.method !== "GET") return badRequest("GET required");
   const key = new URL(request.url).searchParams.get("key");
   if (!key) return badRequest("key required");
-  if (!key.startsWith(`${spaceIdFor(humanId)}/`) || key.includes("..")) {
+  if (!isOwnedBlobKey(key, humanId, { allowDemoRead: true })) {
     return new Response("Not found", { status: 404 });
   }
   return streamBlobResponse(env, key, request, false);
@@ -1111,7 +1177,7 @@ function handleCapabilities(request: Request, q: Queries, humanId: string): Resp
       project_name: project?.name ?? null,
     },
     pageState: {
-      hasPendingProposals: false,
+      hasPendingProposals: q.hasPendingProposals(task.space_id, task.id),
       activeArtifactId: taskIsActive && artifactIsInTask ? activeArtifactId : null,
     },
   };
@@ -1827,7 +1893,8 @@ async function handleItemNotes(request: Request, q: Queries, humanId: string): P
  * the call may proceed. Reads still work at the limit — only metered writes stop.
  */
 function meter(q: Queries, humanId: string, metric: QuotaMetric, cost = 1): Response | null {
-  const check = consumeQuota(q, humanId, metric, cost);
+  const limits = quotaLimits(q.getSpace(spaceIdFor(humanId))?.kind);
+  const check = consumeQuota(q, humanId, metric, cost, limits);
   return check.ok ? null : json(check, { status: 429 });
 }
 
@@ -1836,13 +1903,18 @@ function handleQuota(q: Queries, humanId: string): Response {
   const used = q.usageForPeriod(humanId, period);
   const now = new Date();
   const monthEnd = Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1);
+  const space = q.getSpace(spaceIdFor(humanId));
+  const limits = quotaLimits(space?.kind);
   return json({
     ok: true,
     quota: {
       period,
       resets_at: monthEnd,
-      beta: { slot: q.betaSlot(humanId), taken: q.betaMemberCount(), max: BETA_MAX_USERS },
-      metrics: QUOTA_METRICS.map((m) => ({ metric: m, used: used[m] ?? 0, limit: QUOTA[m] })),
+      beta:
+        space?.kind === "guest"
+          ? { slot: null, taken: q.betaMemberCount(), max: BETA_MAX_USERS, guest: true }
+          : { slot: q.betaSlot(humanId), taken: q.betaMemberCount(), max: BETA_MAX_USERS },
+      metrics: QUOTA_METRICS.map((m) => ({ metric: m, used: used[m] ?? 0, limit: limits[m] })),
     },
   });
 }

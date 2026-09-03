@@ -2,16 +2,10 @@ import { DurableObject } from "cloudflare:workers";
 import schema from "./db/schema.sql";
 import { Queries } from "./db/queries";
 import { migrate, rebuildFts } from "./db/migrate";
-import { rebuildSpaceEdges } from "./graph-build";
+import { GRAPH_DERIVATION_VERSION, rebuildSpaceEdges } from "./graph-build";
 import { handleRoute } from "./routes";
 import { backfillSpaceDesign } from "./design";
 
-// 2: design-attribute edge rules (shared palette hue, typography classification,
-// designTokens Jaccard) were added after v1 shipped. Spaces deployed under v1
-// have already recorded graph_backfill_version = 1, so without this bump the
-// new rules would only ever apply to newly captured items and an existing
-// archive would never grow a single design edge.
-const GRAPH_DERIVATION_VERSION = 2;
 /** Bump to force a one-time DROP + reindex of items_fts on the next boot. */
 const FTS_REBUILD_VERSION = 1;
 const DESIGN_DRAIN_DELAY_MS = 5_000;
@@ -98,6 +92,7 @@ export class SpaceDO extends DurableObject<Env> {
       for (const space of this.queries.listSpaces()) {
         const { extracted, morePending: designMore } = await backfillSpaceDesign(
           this.queries,
+          space.owner_id,
           this.env,
           space.id,
           async (key) => {

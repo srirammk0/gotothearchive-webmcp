@@ -21,6 +21,16 @@ import type { Queries } from "./db/queries";
 
 const MAX_PER_CALL = 12;
 
+/**
+ * Version marker for the derived-edge rules below. SpaceDO reruns
+ * `rebuildSpaceEdges` for a space once per bump; guest-space provisioning
+ * records this same version so a seeded space is not rescanned on every boot.
+ *
+ * 2: design-attribute edge rules (shared palette hue, typography classification,
+ * designTokens Jaccard) were added after v1 shipped.
+ */
+export const GRAPH_DERIVATION_VERSION = 2;
+
 const STOPLIST = new Set([
   "this", "that", "with", "from", "have", "will", "your", "about", "into",
   "they", "them", "then", "than", "there", "here", "what", "when", "which",

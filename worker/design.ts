@@ -35,6 +35,7 @@ import {
   TYPE_SCALES,
 } from "@shared/contract";
 import type { DesignProfile, PaletteEntry } from "@shared/contract";
+import { consumeQuota, type QuotaStore } from "./quota";
 
 export type DesignAiLike = {
   AI?: { run: (model: string, opts: unknown) => Promise<unknown> };
@@ -355,18 +356,27 @@ export async function backfillSpaceDesign(
     imagesNeedingDesign: (spaceId: string, limit: number) => import("@shared/contract").ContextItem[];
     getItem: (id: string) => import("@shared/contract").ContextItem | null;
     updateItem: (item: import("@shared/contract").ContextItem) => void;
-  },
+  } & QuotaStore,
+  ownerId: string,
   env: DesignAiLike,
   spaceId: string,
   getBlob: (key: string) => Promise<Uint8Array | null>,
 ): Promise<{ extracted: number; morePending: boolean }> {
   const items = q.imagesNeedingDesign(spaceId, BACKFILL_BATCH);
   let extracted = 0;
+  let quotaBlocked = false;
 
   for (const item of items) {
     if (!item.content_ref) continue;
     const bytes = await getBlob(item.content_ref).catch(() => null);
     if (!bytes) continue;
+    // Same meter as the capture path (worker/quota.ts `vision_calls`). Over
+    // budget → stop the batch; the rest of this space's backlog waits for the
+    // next month. Don't re-arm the alarm for it (morePending below).
+    if (!consumeQuota(q, ownerId, "vision_calls").ok) {
+      quotaBlocked = true;
+      break;
+    }
     const now = Date.now();
     // Use the browser-measured palette if one has been backfilled onto this
     // item (see the PATCH path in routes.ts). Colour is never estimated, so
@@ -388,5 +398,8 @@ export async function backfillSpaceDesign(
     extracted++;
   }
 
-  return { extracted, morePending: q.imagesNeedingDesign(spaceId, 1).length > 0 };
+  return {
+    extracted,
+    morePending: !quotaBlocked && q.imagesNeedingDesign(spaceId, 1).length > 0,
+  };
 }

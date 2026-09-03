@@ -58,6 +58,20 @@ export async function signedBlobUrl(
   return url.toString();
 }
 
+/**
+ * A signed `/demo` entry token (docs/roadmap/judge-demo-access.md). Same HMAC
+ * as a blob signature, keyed on the fixed string "demo"; verify it with
+ * `verifyBlobSignature(secret, "demo", exp, sig)`. Generate a link with
+ * `bun run scripts/demo-link.ts <origin>`.
+ */
+export async function signDemoToken(
+  secret: string,
+  ttlMs: number,
+): Promise<{ exp: number; sig: string }> {
+  const exp = Date.now() + ttlMs;
+  return { exp, sig: await sign(secret, "demo", exp) };
+}
+
 /** Verifies a request's `exp`/`sig` for `key`. false on any missing/expired/wrong signature — never throws. */
 export async function verifyBlobSignature(
   secret: string | undefined,

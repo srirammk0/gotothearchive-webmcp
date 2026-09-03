@@ -19,7 +19,7 @@ import {
   type ToolCallResponse,
 } from "@shared/contract";
 import type { Queries } from "./db/queries";
-import { consumeQuota, quotaPeriod } from "./quota";
+import { consumeQuota, quotaLimits, quotaPeriod } from "./quota";
 import {
   authorize,
   authorizedRegionIds,
@@ -31,6 +31,7 @@ import {
   writeDenial,
 } from "./permissions";
 import { retrieve } from "./retrieval";
+import { signalIsInScope } from "./taste/scope";
 import { signedBlobUrl } from "./blob-sign";
 import { traverse } from "./graph";
 import { deriveEdgesForItem } from "./graph-build";
@@ -490,6 +491,10 @@ export async function handleToolCall(
           return project !== null && s.project_id === project.id;
         })
         .filter((s) => s.status === "confirmed" || s.status === "proposed")
+        // Region-scoped revocation (F1): a signal reaches the agent only while
+        // every region grounding it is still readable. Same rule for confirmed
+        // and proposed — a proposal is still a compression of the folder's material.
+        .filter((s) => signalIsInScope(q, s.id, allowedIds))
         .slice(0, MAX_ROWS)
         .map((s) => ({
           id: s.id,
@@ -653,7 +658,7 @@ export async function handleToolCall(
       // Versions are cheap (one row); it is the artifact that is the unit.
       let finalArtifactId = existing?.id ?? null;
       if (!finalArtifactId) {
-        const budget = consumeQuota(q, human.human_id, "artifacts");
+        const budget = consumeQuota(q, human.human_id, "artifacts", 1, quotaLimits(q.getSpace(task.space_id)?.kind));
         if (!budget.ok) return denyResult(budget.message);
         finalArtifactId = crypto.randomUUID();
         q.insertArtifact({

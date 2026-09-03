@@ -140,8 +140,24 @@ const qs = (params: Record<string, string | null | undefined>): string => {
 
 /* ---------------- space ---------------- */
 
+/**
+ * Replays the signed `/demo` token (captured in main.tsx) onto the bootstrap
+ * POST so the worker can provision a guest space. A no-op for everyone else.
+ */
+function demoBootstrapQuery(): string {
+  try {
+    const raw = sessionStorage.getItem("demo-token");
+    if (!raw) return "";
+    const t = JSON.parse(raw) as { exp?: string; sig?: string; reset?: boolean };
+    if (!t.exp || !t.sig) return "";
+    return qs({ demo_exp: t.exp, demo_sig: t.sig, demo_reset: t.reset ? "1" : null });
+  } catch {
+    return "";
+  }
+}
+
 export const bootstrap = () =>
-  req<{ space: Space; regions: Region[] }>(API.bootstrap, { method: "POST" });
+  req<{ space: Space; regions: Region[] }>(`${API.bootstrap}${demoBootstrapQuery()}`, { method: "POST" });
 
 export const listRegions = () => req<{ regions: Region[] }>(API.regions);
 
