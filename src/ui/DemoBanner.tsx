@@ -12,10 +12,11 @@ function initiallyDismissed(): boolean {
 
 /**
  * The strip a judge sees on every demo page. The demo is one archive shared by
- * every visitor with no sign-in, so the two things it has to say are "this is
- * not your data" and "everyone here sees what you do". Dismissable, because a
- * judge exploring for twenty minutes does not need it in view the whole time;
- * the dismissal is per-browser and versioned, so a reworded message comes back.
+ * every visitor with no sign-in, so the two things it has to say are "everyone
+ * here sees what you do" and "none of this is real data". One line, in the same
+ * accent the "Agent" label uses. Dismissable: a judge exploring for twenty
+ * minutes does not need it in view the whole time, and the dismissal is
+ * per-browser and versioned so a reworded message comes back.
  */
 export function DemoBanner() {
   const [dismissed, setDismissed] = useState(initiallyDismissed);
@@ -31,18 +32,16 @@ export function DemoBanner() {
   };
 
   return (
-    <div className="border-b border-line bg-surface">
-      <div className="mx-auto flex max-w-[1440px] items-start gap-3 px-5 py-2 sm:px-8">
-        <p className="flex-1 text-micro leading-relaxed text-muted">
-          <span className="text-text">Shared demo archive.</span> No sign-in —
-          every visitor works in this same archive, so anything you change the
-          other judges see, and they can change yours. Nothing here is private and
-          none of it is real personal data. Reopen your link to reset it.{" "}
+    <div className="border-b border-accent/20 bg-accent/15 text-accent">
+      <div className="mx-auto flex h-8 max-w-[1440px] items-center gap-3 px-5 sm:px-8">
+        <p className="flex-1 truncate text-micro">
+          Shared demo archive — everyone here sees your changes, and none of it is
+          real personal data.{" "}
           <a
             href="https://github.com/srirammk0/gotothearchive-webmcp/blob/main/docs/judges.md"
             target="_blank"
             rel="noreferrer"
-            className="underline decoration-line underline-offset-2 transition-colors duration-[var(--duration-fast)] hover:text-text focus-visible:text-accent"
+            className="underline underline-offset-2 transition-opacity duration-[var(--duration-fast)] hover:opacity-70"
           >
             How the demo works
           </a>
@@ -51,7 +50,7 @@ export function DemoBanner() {
           type="button"
           onClick={dismiss}
           aria-label="Dismiss demo notice"
-          className="shrink-0 text-micro text-muted transition-colors duration-[var(--duration-fast)] hover:text-text focus-visible:text-accent"
+          className="shrink-0 text-micro transition-opacity duration-[var(--duration-fast)] hover:opacity-70"
         >
           Dismiss
         </button>
