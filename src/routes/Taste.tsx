@@ -354,7 +354,17 @@ export function Taste() {
           </p>
         </header>
 
-        {status === "loading" ? <Spinner label="Loading signals…" /> : null}
+        {status === "loading" ? (
+          <div role="status" aria-busy="true" className="flex flex-col gap-4">
+            <span className="sr-only">Loading signals</span>
+            {Array.from({ length: 4 }, (_, i) => (
+              <div
+                key={i}
+                className="h-20 rounded-[var(--radius-md)] bg-surface animate-pulse motion-reduce:animate-none"
+              />
+            ))}
+          </div>
+        ) : null}
         {status === "error" ? (
           <EmptyState
             title="Couldn't load taste signals"

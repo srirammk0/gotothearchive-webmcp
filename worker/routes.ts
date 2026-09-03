@@ -1059,11 +1059,15 @@ async function handleTask(request: Request, q: Queries, humanId: string): Promis
       created_at: now,
       expires_at: body.expires_at ?? null,
     });
-    // A demo task opens with Work and Inspiration already readable, so the page
-    // has a real WebMCP surface the moment it loads — an agent (or an auditor)
-    // reading the registry at first paint sees the retrieval tools, not just
-    // identify_agent. Personal stays ungranted, so "revoke Inspiration and watch
-    // the tool disappear" still has somewhere to fall from. Guests only.
+    // A demo task opens with Work and Inspiration granted at "propose", so the
+    // page has the full agent workflow the moment it loads — an agent (or an
+    // auditor) reading the registry at first paint sees the retrieval tools plus
+    // propose_taste_signal, record_artifact and withdraw_artifact, not just
+    // identify_agent. "propose" is deliberate: it does not include write, so
+    // add_context_item / remove_context_item stay off and the shared demo
+    // archive's seeded items cannot be mutated. Personal stays ungranted, so
+    // "revoke Inspiration and watch the tool disappear" still has somewhere to
+    // fall from. Guests only.
     if (q.getSpace(spaceId)?.kind === "guest") {
       const byslug = new Map(q.listRegions(spaceId).map((r) => [r.slug, r.id]));
       for (const slug of ["work", "inspiration"]) {
@@ -1074,7 +1078,7 @@ async function handleTask(request: Request, q: Queries, humanId: string): Promis
           task_id: id,
           space_id: spaceId,
           region_id: regionId,
-          level: "read",
+          level: "propose",
           grantor_id: humanId,
           created_at: now,
           expires_at: null,

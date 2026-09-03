@@ -115,6 +115,7 @@ test("Chrome WebMCP annotations + budgets are set correctly", () => {
     "trace_artifact_influences",
   ]);
   const untrusted = new Set([
+    "get_current_context_scope",
     "get_context_for_task",
     "inspect_context_item",
     "trace_artifact_influences",

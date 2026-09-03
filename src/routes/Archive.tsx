@@ -3,7 +3,6 @@ import { useSearchParams } from "react-router";
 import { AnimatePresence, motion } from "motion/react";
 import type { ContextItem, ItemType, Region } from "@shared/contract";
 import { EmptyState } from "../ui/primitives/EmptyState";
-import { Spinner } from "../ui/primitives/Spinner";
 import { Button } from "../ui/primitives/Button";
 import { Icon } from "../ui/primitives/Icon";
 import { Modal } from "../ui/primitives/Modal";
@@ -163,8 +162,24 @@ export function Archive() {
 
   if (!spaceError && (spaceLoading || (archive.items === null && !archive.itemsError))) {
     return (
-      <div className="flex min-h-[40vh] items-center justify-center">
-        <Spinner label="Opening the archive…" />
+      <div role="status" aria-busy="true" className="flex flex-col gap-12">
+        <span className="sr-only">Opening the archive</span>
+        {[0, 1].map((s) => (
+          <section key={s} className="flex flex-col" aria-hidden="true">
+            <div className="flex items-center gap-2 border-b border-line-soft pb-2.5">
+              <div className="h-4 w-4 rounded-[var(--radius-sm)] bg-surface animate-pulse motion-reduce:animate-none" />
+              <div className="h-4 w-40 rounded-[var(--radius-sm)] bg-surface animate-pulse motion-reduce:animate-none" />
+            </div>
+            <ul className="grid grid-cols-2 gap-x-4 gap-y-14 pt-4 pb-10 sm:grid-cols-4 xl:grid-cols-6">
+              {Array.from({ length: s === 0 ? 6 : 4 }, (_, i) => (
+                <li key={i} className="flex flex-col gap-2">
+                  <div className="h-32 rounded-[var(--radius-md)] bg-raised animate-pulse motion-reduce:animate-none" />
+                  <div className="h-3 w-3/4 rounded-[var(--radius-sm)] bg-surface animate-pulse motion-reduce:animate-none" />
+                </li>
+              ))}
+            </ul>
+          </section>
+        ))}
       </div>
     );
   }

@@ -172,7 +172,19 @@ function ArtifactList({ regions }: { regions: Region[] }) {
     return regionGroups;
   }, [artifacts, regions]);
 
-  if (status === "loading") return <Spinner label="Loading artifacts…" />;
+  if (status === "loading") {
+    return (
+      <div role="status" aria-busy="true" className="flex flex-col gap-6">
+        <span className="sr-only">Loading artifacts</span>
+        <div className="h-7 w-48 rounded-[var(--radius-sm)] bg-surface animate-pulse motion-reduce:animate-none" />
+        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+          {Array.from({ length: 8 }, (_, i) => (
+            <div key={i} className="h-40 rounded-[var(--radius-md)] bg-raised animate-pulse motion-reduce:animate-none" />
+          ))}
+        </div>
+      </div>
+    );
+  }
   if (status === "error") {
     return (
       <EmptyState title="Couldn't load artifacts" body="Something went wrong reaching the server. Try again shortly." />

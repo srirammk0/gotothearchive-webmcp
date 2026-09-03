@@ -2,16 +2,16 @@
 
 @theme {
   /* Soft dark workspace — warm greys, one hot accent. */
-  --color-canvas: #0f0f0e;
-  --color-surface: #1a1a19;
-  --color-raised: #232322;
-  --color-hover: #2b2b29;
-  --color-line: #2e2e2c;
-  --color-line-soft: #242423;
+  --color-canvas: #18181a;
+  --color-surface: #212124;
+  --color-raised: #2a2a2e;
+  --color-hover: #323236;
+  --color-line: #3a3a3f;
+  --color-line-soft: #2c2c30;
 
   --color-text: #f2f0ec;
-  --color-muted: #a39e95;
-  /* Clears WCAG AA against canvas and surface at the small sizes used for metadata. */
+  --color-muted: #b3aea4;
+  /* Clears WCAG AA against canvas (5.11:1) and surface (4.63:1) at the small sizes used for metadata. */
   --color-faint: #8f897f;
 
   --color-accent: #e34927;

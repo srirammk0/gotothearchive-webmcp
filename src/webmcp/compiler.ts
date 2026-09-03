@@ -79,10 +79,10 @@ export function compile(input: CapabilityInput): ToolSpec[] {
   push("read", (slugs) => ({
     name: "get_current_context_scope",
     title: "Context scope",
-    annotations: { readOnlyHint: true },
+    annotations: { readOnlyHint: true, untrustedContentHint: true },
     description: input.pageState.hasPendingProposals
-      ? "List the regions currently accessible for this task, with their access level. Something you submitted is currently awaiting human review; it is not yet canonical, and there is no tool to approve it yourself."
-      : "List the regions currently accessible for this task, with their access level.",
+      ? "The regions readable for this task, each with its access level. A submission from this task is awaiting human review and is not yet canonical context."
+      : "The regions readable for this task, each with its access level.",
     inputSchema: { type: "object", properties: {} },
     why: `You can view ${slugs.join(", ")} for this task.`,
   }));
@@ -92,7 +92,7 @@ export function compile(input: CapabilityInput): ToolSpec[] {
     title: "Get context for task",
     annotations: { readOnlyHint: true, untrustedContentHint: true },
     description:
-      "Retrieve context items relevant to the current task, scoped to accessible regions. Omit region to search every accessible region. Each result carries an excerpt and, for images, the extracted design profile — exact hex palette, typography classification, layout, texture. Use those values literally; do not invent your own.",
+      "Context items relevant to the task, ranked, limited to the accessible regions. Each result has an excerpt; image results include a design profile with the measured hex palette, typography classification, layout and texture. With no region, every accessible region is searched.",
     inputSchema: {
       type: "object",
       properties: {
@@ -100,6 +100,7 @@ export function compile(input: CapabilityInput): ToolSpec[] {
         query: { type: "string", description: "What context is useful for the current task." },
         limit: { type: "number", description: "Maximum items to return, from 1 to 20." },
       },
+      required: ["query"],
     },
     why: `Read access is live on: ${slugs.join(", ")}.`,
   }));
@@ -109,12 +110,12 @@ export function compile(input: CapabilityInput): ToolSpec[] {
     title: "Inspect context item",
     annotations: { readOnlyHint: true, untrustedContentHint: true },
     description:
-      "Look up one context item in full: its text, its extracted design profile (exact colour palette, typography, layout, texture), a viewable image URL when it has one, and the items it is related to in the archive graph. This is the tool for actually LOOKING at something before you use it.",
+      "One context item in full: its text, its design profile (measured hex palette, typography, layout, texture), a viewable image URL when it has one, and its related items in the archive graph.",
     inputSchema: {
       type: "object",
       properties: {
         region: { type: "string", enum: slugs, description: "One of your accessible regions." },
-        item_id: { type: "string" },
+        item_id: { type: "string", description: "The id of the item to open, from a get_context_for_task result." },
       },
       required: ["region", "item_id"],
     },
@@ -126,7 +127,7 @@ export function compile(input: CapabilityInput): ToolSpec[] {
     title: "Get taste for task",
     annotations: { readOnlyHint: true, untrustedContentHint: true },
     description:
-      "Retrieve confirmed and proposed taste signals for this task. Each confirmed signal lists the archive items it is grounded in — inspect those to see concretely what the preference means before applying it.",
+      "Confirmed and proposed taste signals for this task. Each confirmed signal lists the archive items it is grounded in.",
     inputSchema: { type: "object", properties: {} },
     why: `Read access is live on: ${slugs.join(", ")}.`,
   }));

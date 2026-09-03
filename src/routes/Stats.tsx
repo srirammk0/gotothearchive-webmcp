@@ -3,7 +3,6 @@ import { useNavigate } from "react-router";
 import { getStats, getQuota, type QuotaInfo, type SpaceStats } from "../api/client";
 import { EmptyState } from "../ui/primitives/EmptyState";
 import { EmptyRow } from "../ui/primitives/EmptyRow";
-import { Spinner } from "../ui/primitives/Spinner";
 import { Icon, type IconName } from "../ui/primitives/Icon";
 import { ArtifactThumb } from "../ui/workbench/ArtifactThumb";
 import { useTrail } from "../ui/Breadcrumbs";
@@ -254,7 +253,20 @@ export function Stats() {
     };
   }, []);
 
-  if (status === "loading") return <Spinner label="Reading the trail…" />;
+  if (status === "loading") {
+    return (
+      <div role="status" aria-busy="true" className="flex flex-col gap-6">
+        <span className="sr-only">Reading the trail</span>
+        <div className="h-7 w-40 rounded-[var(--radius-sm)] bg-surface animate-pulse motion-reduce:animate-none" />
+        <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+          {Array.from({ length: 4 }, (_, i) => (
+            <div key={i} className="h-24 rounded-[var(--radius-md)] bg-raised animate-pulse motion-reduce:animate-none" />
+          ))}
+        </div>
+        <div className="h-64 rounded-[var(--radius-md)] bg-surface animate-pulse motion-reduce:animate-none" />
+      </div>
+    );
+  }
   if (status === "error" || !stats) {
     return <EmptyState title="Couldn't load stats" body="Something went wrong reaching the server. Try again shortly." />;
   }
