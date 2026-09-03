@@ -159,7 +159,7 @@ export function compile(input: CapabilityInput): ToolSpec[] {
     name: "propose_taste_signal",
     title: "Propose taste signal",
     description:
-      "Name a preference you've noticed from the person's own feedback (via trace_artifact_influences), grounded in the annotations or context items that show it. Stays proposed until a person confirms it — this does not teach get_taste_for_task anything by itself. Cite at least one annotation_id or item_id as evidence.",
+      "Proposes a preference observed in the person's own feedback, with the annotations or context items that evidence it. It stays proposed until a person confirms it; get_taste_for_task is unaffected until then. At least one annotation_id or item_id is required as evidence.",
     inputSchema: {
       type: "object",
       properties: {
@@ -182,7 +182,7 @@ export function compile(input: CapabilityInput): ToolSpec[] {
     name: "record_artifact",
     title: "Record artifact",
     description:
-      "Submit a new artifact version for human review in an accessible region. Not canonical until a person approves it. Before designing: call get_context_for_task and get_taste_for_task, then build from what they return — use the exact hex values and typography classification in each reference's `design` profile rather than colours and fonts of your own choosing. Generic output that ignores them is the single most common failure here. List what shaped the work in used_item_ids.",
+      "Submits a new artifact version for human review in an accessible region. Not canonical until a person approves it. Image references from get_context_for_task carry a `design` profile — measured hex palette, typography classification, layout, texture — describing what each reference looks like. used_item_ids records which context items shaped the work.",
     inputSchema: {
       type: "object",
       properties: {
@@ -191,13 +191,13 @@ export function compile(input: CapabilityInput): ToolSpec[] {
         content_html: {
           type: "string",
           description:
-            "A complete preview document.\n\nBUILD FROM THE ARCHIVE, NOT FROM DEFAULTS. Every image reference you retrieve carries a `design` profile. Spend it literally:\n- `palette` — use these hex values. A `role` of \"ground\" is the background, \"primary\"/\"secondary\" are the inks, \"text\" is the type colour. `palette_source: \"measured\"` means they were read from the real pixels and are exact. Do not substitute your own palette.\n- `typography.classification` — pick a real web font of that class and load it from Google Fonts (didone_serif → Playfair Display or Bodoni Moda; grotesque → Archivo or Inter Tight; geometric_sans → Poppins; monospace → JetBrains Mono). Honour `case` and `scale`: `hero` means the display type dominates the frame, not a polite heading.\n- `layout.composition`, `density`, `alignment` — reproduce that structure.\n- `texture` — halftone / paper_grain / riso_misregistration are achievable in pure CSS+SVG: feTurbulence for grain, a repeating-radial-gradient for halftone, a 1-2px offset duplicate in a second ink for misregistration.\n- `shape.corner_radius` and `stroke` — sharp means 0 radius, hairline means ~1px rules.\n\ncomponent: include React/ReactDOM UMD scripts from unpkg.com and the Tailwind Play CDN; JSX may use @babel/standalone. You cannot import this app's own source files — if reproducing an existing component, write real JSX and Tailwind inline that recreates its actual markup, not a generic stand-in. static_html runs no JavaScript, but nothing else is restricted: real web fonts, full CSS (grid, gradients, custom properties, mix-blend-mode) and inline SVG filters are all available for posters and editorial layouts. Either renderer can use an existing image instead of a placeholder: drop its embed_url — from get_context_for_task or inspect_context_item — straight into an <img src>. The preview has no access to the host app, storage, forms, navigation, or network beyond what is named here.",
+            "The full preview document. A retrieved reference's `design` profile carries its measured palette (each entry has a hex, a coverage percent, and a role: ground / primary / secondary / text), its typography classification, layout and texture. An image's embed_url from get_context_for_task or inspect_context_item can be used directly as an <img src>. component builds load React/ReactDOM (UMD) and the Tailwind Play CDN and may use @babel/standalone JSX; static_html runs no JavaScript but allows web fonts, full CSS and inline SVG filters. The preview has no access to the host app, storage, navigation, forms, or any network beyond those CDNs.",
         },
         renderer: {
           type: "string",
           enum: ["static_html", "component"],
           description:
-            "Pick by what the artifact actually is — neither is 'more fidelity' than the other. component: a self-contained React/Tailwind UI preview. Use this for an actual UI component, an interactive control, or anything reproducing something built with React/Tailwind — including this app's own design system when asked to work from it. static_html: a pure visual document — real fonts, full CSS, SVG filters, no JavaScript. Use this for posters, editorial layouts, and other purely visual work with nothing meant to be an interactive component. Runs only in an isolated iframe with no host, storage, navigation, form, or network access beyond its approved CDNs.",
+            "component: a self-contained React/Tailwind UI preview, for a UI component or interactive control. static_html: a pure visual document with real fonts, full CSS and SVG filters and no JavaScript, for posters and editorial layouts. Both render in an isolated iframe with no host, storage, navigation, form, or network access beyond the approved CDNs.",
         },
         used_item_ids: {
           type: "array",
@@ -209,7 +209,7 @@ export function compile(input: CapabilityInput): ToolSpec[] {
           type: "string",
           enum: ARTIFACT_ASPECTS,
           description:
-            "The shape this artifact is meant to be seen at, so the Workbench gives it the right box instead of clipping it. poster = 3:4, portrait = 2:3, square, wide = 16:9, page = A4. Choose the one that matches what you are actually making.",
+            "The shape the artifact is meant to be seen at, so the Workbench frames it without clipping. poster = 3:4, portrait = 2:3, square, wide = 16:9, page = A4.",
         },
         artifact_id: { type: "string" },
         parent_version_id: { type: "string" },
@@ -228,7 +228,7 @@ export function compile(input: CapabilityInput): ToolSpec[] {
     name: "withdraw_artifact",
     title: "Withdraw artifact",
     description:
-      "Remove an artifact you produced in this task, if no one has annotated or decided on it yet. Use it when you have submitted something wrong or duplicated — not to clear space. Refused once a person has engaged with it. Your artifact quota unit is returned.",
+      "Removes an artifact this task produced, when no person has annotated or decided on it yet. Refused once a person has engaged with it. The artifact's quota unit is returned.",
     inputSchema: {
       type: "object",
       properties: {
