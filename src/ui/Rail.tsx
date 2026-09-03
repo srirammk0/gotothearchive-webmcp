@@ -19,7 +19,7 @@ const destinations = [
 export function Rail() {
   return (
     <header className="sticky top-0 z-30 bg-canvas">
-      <div className="mx-auto flex h-14 max-w-[1440px] items-center gap-6 px-5 sm:px-8">
+      <div className="mx-auto flex h-14 max-w-[1440px] items-center gap-2 px-3 sm:gap-6 sm:px-8">
         <nav aria-label="Primary" className="flex shrink-0 items-center gap-1">
           {destinations.map((d) => (
             <NavLink key={d.to} to={d.to} end={d.end} className="relative px-2 py-3.5">
@@ -80,7 +80,7 @@ function BetaBadge() {
           ? `Beta member ${quota.beta.slot} of ${quota.beta.max} · quota resets monthly`
           : "Closed beta"
       }
-      className="shrink-0 rounded-[var(--radius-sm)] bg-accent/15 px-1.5 py-px text-micro text-accent transition-opacity duration-[var(--duration-fast)] hover:opacity-80"
+      className="hidden shrink-0 rounded-[var(--radius-sm)] bg-accent/15 px-1.5 py-px text-micro text-accent transition-opacity duration-[var(--duration-fast)] hover:opacity-80 sm:block"
     >
       Beta{quota?.beta.slot ? ` ${quota.beta.slot}/${quota.beta.max}` : ""}
     </NavLink>
@@ -93,7 +93,7 @@ function BetaBadge() {
  * nothing when Clerk is not configured.
  */
 function Account() {
-  if (!import.meta.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY) return null;
+  if (!import.meta.env.VITE_CLERK_PUBLISHABLE_KEY) return null;
   return (
     <div className="flex shrink-0 items-center">
       <Show when="signed-out">
