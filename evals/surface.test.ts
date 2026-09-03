@@ -97,6 +97,14 @@ test("approval tools are never compiled, at any level", () => {
   }
 });
 
+test("a pending proposal rewords get_current_context_scope but adds no tool", () => {
+  const clean = input();
+  const pending = input({ pageState: { hasPendingProposals: true, activeArtifactId: null } });
+  expect(tool(clean, "get_current_context_scope")?.description).not.toContain("awaiting human review");
+  expect(tool(pending, "get_current_context_scope")?.description).toContain("awaiting human review");
+  expect(names(pending).toSorted()).toEqual(names(clean).toSorted());
+});
+
 test("Chrome WebMCP annotations + budgets are set correctly", () => {
   const specs = compile(input({ pageState: { hasPendingProposals: false, activeArtifactId: "art_1" } }));
   const readOnly = new Set([

@@ -17,6 +17,7 @@ import type {
 import type { Queries } from "./db/queries";
 import { authorizedItemIds, authorizedRegionIds, taskProject } from "./permissions";
 import { traverse } from "./graph";
+import { signalIsInScope } from "./taste/scope";
 
 export interface RetrieveInput {
   taskId: string;
@@ -103,8 +104,14 @@ export async function retrieve(
   // 3. Fuse with reciprocal rank fusion, then apply priors as multipliers.
   const confirmed = q.confirmedTasteSignals(task.space_id).filter((signal) => {
     if (signal.owner_id !== task.human_id) return false;
-    if (signal.scope === "personal") return (signal.project_id ?? null) === null;
-    return project !== null && signal.project_id === project.id;
+    const scopeOk =
+      signal.scope === "personal"
+        ? (signal.project_id ?? null) === null
+        : project !== null && signal.project_id === project.id;
+    if (!scopeOk) return false;
+    // Region-scoped revocation (F1): drop signals a revoked folder taught, so a
+    // revoked signal stops boosting results and stops emitting 'applied' events.
+    return signalIsInScope(q, signal.id, allowedIds);
   });
   type Row = {
     entry: RetrievedItem;

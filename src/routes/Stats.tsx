@@ -194,6 +194,7 @@ const QUOTA_LABEL: Record<string, string> = {
   agent_calls: "Agent tool calls",
   uploads: "File uploads",
   artifacts: "Artifacts generated",
+  vision_calls: "Design extractions",
 };
 
 const OUTCOME_TONE: Record<string, string> = {

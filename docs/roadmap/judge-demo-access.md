@@ -1,108 +1,123 @@
-# Judge demo access — implementation plan
+# Judge demo access — one shared archive
 
-How a hackathon judge gets into a working Archive without an account, without
-touching the owner's real data, and without weakening the permission model the
-submission is about.
+How a hackathon judge gets into a working Archive without an account, and how
+several judges land in the **same** archive so each can point their own WebMCP
+agent at it at once — without weakening the permission model the submission is
+about.
 
-## Constraints this has to respect
+> **This supersedes the earlier "a seeded guest space per judge" plan.** The repo
+> owner asked for the shared model explicitly: the showcase is *two agents on one
+> archive*, each bounded by its own grant, where judge A revoking a region for
+> A's task does not touch judge B's agent. A per-judge space cannot show that.
+> The cost — judges share one archive and see each other's edits — is accepted
+> and documented (see docs/judges.md).
 
-1. **`humanRegions()` gives the owner `write` and everyone else `none`.** There
-   is no multi-person Archive. A judge cannot be "shared into" the real space —
-   that code path does not exist and must not be faked for the demo.
-2. **`BETA_MAX_USERS = 25`.** Judges must not burn beta slots.
-3. **Quotas are per human.** A judge exhausting `agent_calls` must not take the
-   owner's budget with them.
-4. **The schema already has `spaces.kind = 'personal' | 'guest'`.** The guest
-   case exists in the contract and is the intended hook. Use it.
+## Constraints this still respects
 
-## Recommended shape: a seeded guest space per judge
+1. **`humanRegions()` gives the owner `write` and everyone else `none`.** The one
+   relaxation: a `demo-*` identity gets `write` on the regions of a
+   `kind: 'guest'` space. It is hard-gated on `kind === 'guest'`, so a
+   `kind: 'personal'` space can never grant a non-owner anything.
+2. **`BETA_MAX_USERS = 25`.** Demo identities are exempt and counted separately.
+3. **Quotas are per human.** Each judge's `demo-<nonce>` meters against its own
+   `GUEST_QUOTA` row; one judge exhausting `agent_calls` does not take another's
+   budget, nor the owner's.
+4. **`spaces.kind = 'personal' | 'guest'`.** The guest case is the intended hook.
 
-A judge signs in through the normal Clerk flow and lands in their **own** guest
-space, pre-seeded with a copy of the demo material. Everything they do is real —
-real grants, real retrieval, real revocation, real denials — against data that
-is not the owner's.
+## THE INVARIANT THAT MUST NOT BEND
 
-This is the only option that keeps the demo honest. A read-only screenshot tour
-cannot show runtime denial, which is the whole claim.
+A demo identity must **never** reach a `kind: 'personal'` space at any level.
+Isolation between demo and real members stays absolute; only isolation *among*
+demo visitors relaxes. Two independent enforcement points, either sufficient on
+its own:
 
-### Implementation
+- **`spaceIdFor()`** maps every `demo-<nonce>` to the literal `space-demo` and
+  nothing else. A demo identity cannot construct `space-<clerkId>`, so it has no
+  way to *name* a member's space. (Clerk subject ids are `user_…`, never
+  `demo-…`, so the prefixes cannot collide.)
+- **`humanRegions()`** grants a non-owner `write` only when
+  `space.kind === 'guest'` *and* the caller is a `demo-*` identity. A personal
+  space never takes that branch.
 
-**1. Seed content lives in the repo, not in the owner's space.**
+`worker/demo-seed.test.ts` asserts this directly: a demo task with a hand-inserted
+cross-space grant at `read` / `propose` / `write` still reads nothing from a
+personal space.
 
-`worker/db/demo-seed.ts` (new): a small module exporting the demo regions
-(`work`, `inspiration`, `personal`) and ~8–10 items — titles, `semantic_text`,
-and a **pre-computed `metadata.design`** for each image.
+## The shape that was built
 
-Ship the design profiles as data. Do **not** let a guest space trigger the
-vision model on first boot: it would cost a Workers AI call per image per judge,
-take ~8s each, and produce a *different* profile for each judge, so no two judges
-would see the same demo. Bake the exact profiles that were extracted once.
+### 1. Demo identity is a signed cookie
 
-Blobs: reference a small set of demo images already in R2 under a fixed
-`demo/` key prefix, shared read-only by every guest space. `isOwnedBlobKey()` in
-[worker/routes.ts](../../worker/routes.ts) currently ties a key to a human — it
-needs one extra allowance for the `demo/` prefix, read-only, and nothing else.
+- **`signDemoToken(secret, ttl)`** (`worker/blob-sign.ts`) mints
+  `{ nonce, exp, value }`. `nonce` is `crypto.randomUUID()`; the HMAC covers the
+  nonce and the expiry together (key `demo:<nonce>`, same `sign(secret, key, exp)`
+  helper as a blob signature). `value` is `<nonce>.<exp>.<sig>`.
+- **`GET /api/demo-entry`** mints one and sets it as
+  `demo_session=<value>; Path=/; Max-Age=86400; HttpOnly; Secure; SameSite=Lax`,
+  then `302`s to `/`. TTL 24h — the cookie *is* the session now, not a one-shot
+  handoff. It also sets a readable `demo_hint=1` companion (no authority; only
+  tells the signed-out React shell to render the app instead of the sign-in
+  form).
+- **`resolveHuman()`** (`worker/auth.ts`) falls back to `demo_session` when there
+  is no valid Clerk token, returning `{ human_id: "demo-<nonce>" }`. It verifies
+  the HMAC + expiry with `verifyDemoToken()` and fails closed on anything missing,
+  malformed, expired, or wrongly signed.
+- Pre-minted links: `scripts/demo-link.ts` emits
+  `${origin}/api/demo-entry?token=<exp>.<sig>` (signed with `signDemoLink`, keyed
+  on `"demo"`, default 14-day TTL). `/api/demo-entry` verifies the token before
+  minting a session; an expired token → `403`. The bare `/api/demo-entry` (no
+  token), linked under the sign-in form, also works — it is the open door.
+- **The old client path is gone.** `src/main.tsx` no longer stashes a token in
+  `sessionStorage`; `src/api/client.ts` no longer replays `demoBootstrapQuery`
+  on bootstrap. The cookie (sent automatically with `credentials: same-origin`)
+  supersedes both. The client-side `/demo` route is deleted — with a server-set
+  cookie the entry point has to be a server route, and `/api/demo-entry` is one.
 
-**2. Guest space provisioning.**
+### 2. One shared demo space
 
-On bootstrap, if the human has no space and arrived with the demo flag, create
-`kind: 'guest'` and apply the seed. Everything downstream (regions, grants,
-tasks, retrieval, graph derivation, taste) then works unmodified, because it is
-all keyed off `space_id`.
+Fixed id `space-demo` (`DEMO_SPACE_ID` in `worker/db/demo-seed.ts`),
+`kind: 'guest'`. Every demo visitor lands in it via `spaceIdFor()`.
 
-`rebuildSpaceEdges` runs on boot as normal, so a seeded space grows real design
-edges from the baked profiles with no AI call.
+`handleBootstrap` seeds it idempotently on first touch — `provisionGuestSpace` if
+the space does not exist, or a `purgeSpace` + `applyDemoSeed` recovery if a later
+visitor finds it wiped (every judge can delete everything). **No double-seed:**
+the whole block is synchronous and a Durable Object runs one request's JS to
+completion before the next, so with no `await` between the `getSpace` check and
+the write, two judges arriving together cannot both pass `!existing`.
 
-**3. Entry point.**
+### 3. The permission seam
 
-`/demo` → sets the flag, then the normal sign-in. Simplest thing that works:
-a signed link with an expiry, verified with the existing
-[worker/blob-sign.ts](../../worker/blob-sign.ts) HMAC helper rather than a new
-mechanism.
+`humanRegions()` returns `write` for a `demo-*` identity on a `kind: 'guest'`
+space's regions — see THE INVARIANT above for how it is gated.
 
-**4. Quota and cap.**
+### 4. Everything else is unchanged
 
-- Guest spaces are exempt from `BETA_MAX_USERS`, counted separately.
-- Give guests their own smaller `QUOTA` row — enough for a full demo run
-  (~40 `agent_calls`, ~5 `artifacts`, 0 `uploads`) and no more.
-- `uploads: 0` matters: it removes the R2 write path and the vision-model path
-  from the guest surface entirely.
+Grants stay per-task. Two judges each create their own tasks and grants; the
+authority intersection (human ∩ grant ∩ task ∩ page ∩ policy) is untouched.
+Judge A revoking a region on A's task revokes only grant rows with
+`task_id = A's task` — B's grant on the same region row is a different row and is
+untouched. Invariant #11 (approval is never an agent capability) is untouched.
 
-**5. Reset.**
+### 5. Reset
 
-A guest space is disposable. Either give it a short TTL, or a "reset demo"
-control that drops and re-seeds. A judge who revokes everything and closes the
-task must be able to get back to a working state without asking you.
+No per-judge reset — one judge resetting would wipe every other judge's work.
+Recovery is automatic instead: if the shared space is emptied, the next
+`/api/demo-entry` → bootstrap re-seeds it.
 
-### Guards
+## Known ceilings
 
-- A guest space must never be able to read another space. This is already true
-  via `space_id` scoping — **add a test that asserts it** rather than assuming.
-- `demo/` blobs are read-only to guests. A guest must not be able to write to
-  that prefix or reference a key outside it.
-- Deleting a guest space must not touch `demo/` blobs, which are shared.
-
-### Tests
-
-- a guest space boots with the seeded regions, items and design profiles
-- design profiles arrive pre-baked (assert **no** AI binding call on guest boot)
-- a guest cannot read the owner's items, at any grant level
-- a guest cannot consume the owner's quota
-- guest spaces do not count against `BETA_MAX_USERS`
-
-## Fallback if time runs short
-
-A single shared guest space with a published link, reset between judges. Loses
-isolation — two judges at once will collide on grants — but preserves the live
-revocation demo, which is the part that cannot be faked. Do not fall back further
-than this: a video-only submission cannot demonstrate runtime denial, and runtime
-denial is the claim.
+- `/api/demo-entry` is an open door (it is linked publicly under the sign-in
+  form, by design). Anyone can mint a demo session; the edge rate-limiter
+  (`env.API_RL`, per IP) is the only throttle. Acceptable for a few-day
+  hackathon window; the signed `?token=` links exist for when the open door
+  should be closed.
+- `Secure` cookies need HTTPS. The demo flow therefore only works on the
+  deployed origin, not plain-http localhost (where real members use Clerk
+  sign-in anyway).
+- Taste signals are space-scoped, so a signal one judge confirms is visible to
+  every judge's retrieval. This is the documented consequence of one shared
+  archive, not a hole in the per-task grant model.
 
 ## What to tell judges
 
-One short page, linked from the submission:
-
-- what the space contains and that it is theirs to break
-- the exact flow to walk: grant → retrieve → artifact → annotate → taste →
-  **revoke → watch the tool disappear and a stale call get refused**
-- that the archive is seeded demo material, not a real person's
+`docs/judges.md` — one page, honest about the shared archive, with the flow to
+walk ending on **revoke → watch the tool disappear and a stale call get refused**.

@@ -394,6 +394,44 @@ export class Queries {
       .map(toSpace);
   }
 
+  /**
+   * Delete every row belonging to a space, keeping the `spaces` row itself.
+   * Backs the disposable guest-demo reset (docs/roadmap/judge-demo-access.md) —
+   * a judge who revoked everything and closed the task gets a clean re-seed
+   * without the owner's help. FK-safe order; `demo/` R2 blobs are shared and
+   * never touched here.
+   */
+  purgeSpace(spaceId: string): void {
+    const vsub = `SELECT av.id FROM artifact_versions av JOIN artifacts a ON a.id = av.artifact_id WHERE a.space_id = ?`;
+    this.sql.exec(`DELETE FROM influences WHERE version_id IN (${vsub})`, spaceId);
+    this.sql.exec(`DELETE FROM annotations WHERE version_id IN (${vsub})`, spaceId);
+    this.sql.exec(`DELETE FROM decisions WHERE version_id IN (${vsub})`, spaceId);
+    this.sql.exec(`DELETE FROM taste_events WHERE version_id IN (${vsub})`, spaceId);
+    this.sql.exec(`DELETE FROM taste_evidence WHERE version_id IN (${vsub})`, spaceId);
+    this.sql.exec(`DELETE FROM artifact_versions WHERE artifact_id IN (SELECT id FROM artifacts WHERE space_id = ?)`, spaceId);
+    this.sql.exec(`DELETE FROM artifacts WHERE space_id = ?`, spaceId);
+
+    this.sql.exec(`DELETE FROM taste_events WHERE signal_id IN (SELECT id FROM taste_signals WHERE space_id = ?)`, spaceId);
+    this.sql.exec(`DELETE FROM taste_evidence WHERE signal_id IN (SELECT id FROM taste_signals WHERE space_id = ?)`, spaceId);
+    this.sql.exec(`DELETE FROM taste_signals WHERE space_id = ?`, spaceId);
+
+    const tsub = `SELECT id FROM tasks WHERE space_id = ?`;
+    this.sql.exec(`DELETE FROM accesses WHERE task_id IN (${tsub})`, spaceId);
+    this.sql.exec(`DELETE FROM denials WHERE task_id IN (${tsub})`, spaceId);
+    this.sql.exec(`DELETE FROM agent_sessions WHERE task_id IN (${tsub})`, spaceId);
+    this.sql.exec(`DELETE FROM grants WHERE space_id = ?`, spaceId);
+    this.sql.exec(`DELETE FROM tasks WHERE space_id = ?`, spaceId);
+
+    // deleteItem clears edges, item_notes, project_members and the FTS row.
+    for (const row of this.sql.exec<{ id: string }>(`SELECT id FROM items WHERE space_id = ?`, spaceId).toArray()) {
+      this.deleteItem(row.id);
+    }
+
+    this.sql.exec(`DELETE FROM project_members WHERE project_id IN (SELECT id FROM projects WHERE space_id = ?)`, spaceId);
+    this.sql.exec(`DELETE FROM projects WHERE space_id = ?`, spaceId);
+    this.sql.exec(`DELETE FROM regions WHERE space_id = ?`, spaceId);
+  }
+
   /* ---------------- projects ---------------- */
 
   insertProject(p: Project): void {
@@ -1625,6 +1663,30 @@ export class Queries {
     const projectId = rows[0]?.project_id ?? null;
     this.tasteDerivationProjectId = rows.length > 0 ? projectId : undefined;
     return rows.filter((row) => (row.project_id ?? null) === projectId);
+  }
+
+  /**
+   * Anything in this space awaiting a human decision: a proposed taste signal,
+   * a proposed graph edge, or an artifact version sitting in review for this
+   * task. Edges carry no space_id, so scope them through either endpoint item
+   * (insertEdge pins both endpoints to one space).
+   */
+  hasPendingProposals(spaceId: string, taskId: string): boolean {
+    return (
+      (this.sql
+        .exec<{ n: number }>(
+          `SELECT
+             EXISTS (SELECT 1 FROM taste_signals WHERE space_id = ? AND status = 'proposed')
+             OR EXISTS (SELECT 1 FROM edges e JOIN items i ON i.id = e.from_id
+                        WHERE i.space_id = ? AND e.approval_state = 'proposed')
+             OR EXISTS (SELECT 1 FROM artifact_versions av JOIN artifacts a ON a.id = av.artifact_id
+                        WHERE a.task_id = ? AND av.state = 'ready_for_review') AS n`,
+          spaceId,
+          spaceId,
+          taskId,
+        )
+        .toArray()[0]?.n ?? 0) > 0
+    );
   }
 
   /* ---------------- audit ---------------- */
