@@ -6,25 +6,31 @@ one flow to walk, and the one moment that is the point of the project.
 ## What you're looking at
 
 Your demo link drops you into your **own** Space after a normal sign-in. It is
-a `kind: 'guest'` Space, seeded with a copy of a designer's archive:
+a `kind: 'guest'` Space, seeded with a copy of a real design-reference folder:
 
-- **Inspiration** — seven images. Four riso-style posters that share a
-  signature (warm paper ground, one saturated ink, halftone, hero display
-  caps) and three frames of a monochrome apparel identity. Each carries a real
-  design profile: the palettes are genuinely measured from the pixels; the
-  typography / layout / mood fields were judged once by a model and frozen, so
-  every judge sees the same archive. Nothing is extracted at boot.
+- **Inspiration** — eighteen items lifted from the author's own Design region:
+  eleven captured images (product and landing-page work, hero concepts, a few
+  looser visual references) and seven links to the posts they were collected
+  from. Every image carries a real design profile — the palette measured from
+  its own pixels at capture time, the typography / layout / mood judged by the
+  vision model then and frozen since. Nothing is extracted at boot, so every
+  judge sees the identical archive.
 - **Work** — two short text items: a creative brief and a page of landing-page
   copy.
 - **Personal** — one item, a flat-move checklist. This is the region you never
   grant. It is there so the agent always has something it is genuinely refused.
 
-It is seeded demo material, not a real person's archive. It is yours to break —
-grant, revoke, annotate, delete, whatever you like. If you want a clean slate,
-open your demo link again with `&reset=1` on the end; it re-seeds the Space
-from scratch. (Nothing you do touches anyone else's data — every guest Space is
-separate, and guests are exempt from the beta member cap and metered on a
-smaller, separate quota.)
+To be exact about what this is: the Inspiration items are genuine — real rows
+from the author's archive, with the profiles the product itself produced, which
+is the point (a demo built from hand-written fixtures would prove nothing about
+the extraction path). The Work and Personal items are written for the demo. The
+author's actual Personal region holds personal documents and none of it is here.
+
+It is yours to break — grant, revoke, annotate, delete, whatever you like. If
+you want a clean slate, open your demo link again with `&reset=1` on the end; it
+re-seeds the Space from scratch. (Nothing you do touches anyone else's data —
+every guest Space is separate, and guests are exempt from the beta member cap
+and metered on a smaller, separate quota.)
 
 ## The flow to walk
 
@@ -35,8 +41,8 @@ smaller, separate quota.)
    ranked low. Permission filters; it does not rank.
 3. **Artifact.** Have the agent produce a draft (a landing page / poster
    treatment) grounded in what it retrieved.
-4. **Annotate.** Leave a note or two on the draft — "more like the riso
-   posters", "lose the photo".
+4. **Annotate.** Leave a note or two on the draft — "more like the minimal
+   hero shots", "lose the photo".
 5. **Taste.** A taste signal is derived from your annotations. It is grounded
    only in Inspiration. It stays *proposed* until you act on it — silence is
    never acceptance.

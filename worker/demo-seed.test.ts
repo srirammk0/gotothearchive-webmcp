@@ -69,20 +69,23 @@ test("design profiles arrive pre-baked — no AI binding call on guest boot", ()
   const bySrc = new Map(DEMO_ITEMS.filter((d) => d.design).map((d) => [d.title, d.design]));
   for (const img of seededImages(q)) {
     const design = (img.metadata as { design: Record<string, unknown> }).design;
-    // Stored verbatim from the frozen constant — deep-equal proves nothing was
-    // regenerated (an extraction would rewrite extracted_at / extracted_by).
+    // Stored verbatim — deep-equal proves nothing was regenerated (an extraction
+    // would rewrite extracted_at / extracted_by).
     expect(design).toEqual(bySrc.get(img.title));
     expect(design.palette_source).toBe("measured");
-    expect(design.extracted_by).toBe("claude-opus-5");
+    // The seed is lifted from the owner's real archive, so every profile still
+    // names the vision model that judged it at capture time. A profile judged
+    // here on boot could not carry this value with an extracted_at in the past.
+    expect(design.extracted_by).toBe("@cf/meta/llama-3.2-11b-vision-instruct");
     expect(design.extracted_at).not.toBe(NOW);
   }
 
   // rebuildSpaceEdges still grew real edges off those baked profiles, with no
-  // model in the loop: the two didone posters share typography.classification +
-  // typography.scale (design rule 4a).
+  // model in the loop: the grotesque-set product shots share
+  // typography.classification + typography.scale (design rule 4a).
   const didone = seededImages(q).filter(
     (i) => (i.metadata as { design: { typography: { classification: string } } }).design.typography.classification ===
-      "didone_serif",
+      "grotesque",
   );
   expect(didone.length).toBeGreaterThanOrEqual(2);
   const [a, b] = didone;
@@ -90,9 +93,9 @@ test("design profiles arrive pre-baked — no AI binding call on guest boot", ()
     .allEdgesForItem(a.id)
     .some((e) => e.relationship === "related_to" && (e.from_id === b.id || e.to_id === b.id));
   expect(linked).toBe(true);
-  // And at least one design-only edge exists among the monochrome identity
-  // frames — they share almost no salient words, so an edge between them can
-  // only have come from designTokens similarity (rule 4c).
+  // And at least one design-only edge exists among the items carrying no
+  // display type — they share almost no salient words, so an edge between them
+  // can only have come from designTokens similarity (rule 4c).
   const mono = seededImages(q).filter(
     (i) => (i.metadata as { design: { typography: { classification: string } } }).design.typography.classification ===
       "none",

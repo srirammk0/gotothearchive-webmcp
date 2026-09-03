@@ -10,19 +10,23 @@
  * `metadata.design` is shipped as data, not extracted on first boot. Extracting
  * would cost a Workers AI call per image per judge, take ~8s each, and — because
  * the non-palette fields are a model's judgement — hand every judge a *different*
- * profile, so no two judges would see the same demo. These are extracted once and
- * frozen.
+ * profile, so no two judges would see the same demo.
  *
- * ## Provenance of the values, honestly
+ * ## Provenance of the values
  *
- * - `palette` / `palette_source: "measured"` — genuinely measured. Produced by
- *   running the production quantizer (`src/ui/archive/palette.ts`, the same code
- *   the capture path runs in the browser) over the real pixels of the files in
- *   `demo-assets/`. Exact, not invented.
- * - everything else — judged, and `extracted_by` records who judged it. These
- *   were assigned by a model reading the images directly rather than by the
- *   vision model in `worker/design.ts`, so `extracted_by` names that model. It is
- *   never presented as human-authored.
+ * Nothing here was authored for the demo. Every item below is a real row lifted
+ * out of the owner's own archive (the Design region), so each profile is exactly
+ * what the product's own capture path produced when the image was first saved:
+ *
+ * - `palette` / `palette_source: "measured"` — quantized from the real pixels in
+ *   the browser at capture time by `src/ui/archive/palette.ts`. Exact.
+ * - everything else — judged at capture time by the vision model in
+ *   `worker/design.ts`, and each profile's own `extracted_by` / `extracted_at`
+ *   record which model and when. Carried through verbatim rather than re-judged,
+ *   so the seed cannot drift from what the product actually does, and no Workers
+ *   AI call happens on a guest boot.
+ *
+ * `semantic_text` is likewise the caption the capture path wrote, not demo prose.
  *
  * ## Blobs
  *
@@ -39,12 +43,6 @@ import type { AuthorityClass, DesignProfile, ItemType } from "@shared/contract";
 import type { Queries } from "./queries";
 import { GRAPH_DERIVATION_VERSION, rebuildSpaceEdges } from "../graph-build";
 
-/** Frozen so every judge's copy carries the same timestamps. */
-const EXTRACTED_AT = 1_788_300_000_000;
-
-/** The model that judged the non-palette design fields. Not human-authored. */
-const EXTRACTED_BY = "claude-opus-5";
-
 export interface DemoRegion {
   slug: string;
   name: string;
@@ -56,7 +54,9 @@ export interface DemoItem {
   title: string;
   /** What retrieval matches on. Written as prose, the way a person would say it. */
   semantic_text: string;
-  /** R2 key under the shared read-only `demo/` prefix. Null for text items. */
+  /** Where a link item came from. Null for everything else. */
+  source_url?: string | null;
+  /** R2 key under the shared read-only `demo/` prefix. Null for text and link items. */
   content_ref: string | null;
   design: DesignProfile | null;
 }
@@ -73,211 +73,707 @@ export const DEMO_REGIONS: DemoRegion[] = [
 ];
 
 /**
- * Ten items. Seven images in Inspiration carrying real design profiles — four
- * riso-print posters that share a signature (warm off-white ground, one
- * saturated ink, halftone, hero display caps) and three frames of a monochrome
- * identity system. The posters are what make the taste loop demonstrable: they
- * agree with each other strongly enough for a real signal to be derived, and
- * that signal is grounded only in Inspiration, so revoking Inspiration takes it
- * away (F1). Work and Personal hold text, so the demo needs no upload path.
+ * Twenty-one items. Eighteen sit in Inspiration and come straight from the
+ * owner's Design region: eleven captured images, each carrying a real measured
+ * palette and a real extracted profile, plus seven links to the posts they were
+ * collected from.
+ *
+ * They cluster the way a real reference folder does — a run of minimal,
+ * grotesque-set product and landing-page work alongside looser visual material —
+ * which is what makes the taste loop demonstrable: enough agreement for a signal
+ * to actually derive, grounded only in Inspiration, so revoking Inspiration takes
+ * it away (F1).
+ *
+ * Work and Personal hold short written items instead. They are the one part of
+ * the seed that is written rather than lifted: the owner's real Personal region
+ * holds personal documents, which have no place in a demo a stranger opens. Text
+ * also means the demo needs no upload path, which is why guests get `uploads: 0`.
  */
 export const DEMO_ITEMS: DemoItem[] = [
   {
     region_slug: "inspiration",
     type: "image",
-    title: "Bright Pulp — beverage poster",
-    semantic_text:
-      "Riso-style drink poster. Condensed high-contrast serif caps in cobalt blue stacked in the upper left, over a halftone illustration of a citrus soda glass in burnt orange that bleeds off the right edge. Warm cream paper ground, a thin blue registration circle behind the type, visible print grain.",
-    content_ref: "demo/bright-pulp.png",
+    title: "ascii hero design",
+    semantic_text: "This image depicts the homepage of the Alvio website, featuring a striking central image of a man standing in a room surrounded by a large, illuminated wall of small, square, white lights. He is dressed in a light-colored suit and is holding a tablet, with a blue sky and clouds visible behind him. The image is overlaid with text, including the phrase \"10M+ Research Signals Analyzed\" in the bottom left corner and \"Open New Frontiers of Intelligence\" in the bottom left. The top of the page displays the Alvio logo and a navigation bar with options such as \"How it works\", \"Integrations\", \"Pricing\"…\nlarge grotesque typography — none; centered composition, balanced density; flat clean texture; full color photo imagery; rounded corners; luxury mood; palette #E5EBED #161A13 #343C2F #A8BCB1 #556253",
+    content_ref: "demo/ascii-hero-design.png",
     design: {
       palette: [
-        { hex: "#F6ECDE", pct: 59, role: "ground" },
-        { hex: "#E0723D", pct: 18, role: "primary" },
-        { hex: "#2349AA", pct: 10, role: "secondary" },
-        { hex: "#ECC1A1", pct: 6, role: "accent" },
-        { hex: "#DF9A70", pct: 3, role: "accent" },
-      ],
-      palette_source: "measured",
-      typography: {
-        classification: "didone_serif",
-        case: "uppercase",
-        scale: "hero",
-        note: "high-contrast condensed serif caps, tight leading",
-      },
-      layout: { composition: "asymmetric_stack", density: "sparse", alignment: "left" },
-      texture: ["halftone", "paper_grain"],
-      shape: { corner_radius: "sharp", stroke: "hairline" },
-      imagery: { treatment: "halftone" },
-      mood: ["retro_print", "editorial"],
-      extracted_by: EXTRACTED_BY,
-      extracted_at: EXTRACTED_AT,
-    },
-  },
-  {
-    region_slug: "inspiration",
-    type: "image",
-    title: "After Rain — botanical poster",
-    semantic_text:
-      "Riso-style botanical poster. A halftone fern frond in deep green runs the full height of the right side, water beads picked out in white. Condensed serif caps in the lower left, one thin red circle and rule marking a single leaf. Off-white paper ground, generous empty space.",
-    content_ref: "demo/after-rain.png",
-    design: {
-      palette: [
-        { hex: "#F9F9F5", pct: 67, role: "ground" },
-        { hex: "#4F926B", pct: 11, role: "secondary" },
-        { hex: "#85B898", pct: 11, role: "accent" },
-        { hex: "#197646", pct: 6, role: "primary" },
-        { hex: "#AFD6BD", pct: 4, role: "accent" },
-      ],
-      palette_source: "measured",
-      typography: {
-        classification: "didone_serif",
-        case: "uppercase",
-        scale: "hero",
-        note: "high-contrast serif caps set tight in two lines",
-      },
-      layout: { composition: "asymmetric_stack", density: "sparse", alignment: "left" },
-      texture: ["halftone", "paper_grain"],
-      shape: { corner_radius: "sharp", stroke: "hairline" },
-      imagery: { treatment: "halftone" },
-      mood: ["retro_print", "organic", "editorial"],
-      extracted_by: EXTRACTED_BY,
-      extracted_at: EXTRACTED_AT,
-    },
-  },
-  {
-    region_slug: "inspiration",
-    type: "image",
-    title: "Side by Side — duotone portrait poster",
-    semantic_text:
-      "Poster split between heavy condensed grotesque caps stacked down the left and two halftone portraits in cobalt duotone on the right. A single thin orange line curves between the two figures, ending in small crosses. Cool off-white ground, heavy print grain.",
-    content_ref: "demo/side-by-side.png",
-    design: {
-      palette: [
-        { hex: "#1B4CA3", pct: 48, role: "primary" },
-        { hex: "#F4F4F2", pct: 31, role: "ground" },
-        { hex: "#BFC4D2", pct: 9, role: "accent" },
-        { hex: "#5B77B3", pct: 8, role: "secondary" },
-        { hex: "#909EC2", pct: 4, role: "accent" },
+        {
+          hex: "#E5EBED",
+          pct: 53,
+          role: "ground"
+        },
+        {
+          hex: "#161A13",
+          pct: 16,
+          role: "text"
+        },
+        {
+          hex: "#343C2F",
+          pct: 9,
+          role: "text"
+        },
+        {
+          hex: "#A8BCB1",
+          pct: 8,
+          role: "primary"
+        },
+        {
+          hex: "#556253",
+          pct: 6,
+          role: "secondary"
+        }
       ],
       palette_source: "measured",
       typography: {
         classification: "grotesque",
-        case: "uppercase",
-        scale: "hero",
-        note: "heavy condensed grotesque caps, stacked one word per line",
+        case: "none",
+        scale: "large",
+        note: "none"
       },
-      layout: { composition: "poster_split", density: "balanced", alignment: "left" },
-      texture: ["halftone", "paper_grain"],
-      shape: { corner_radius: "sharp", stroke: "hairline" },
-      imagery: { treatment: "duotone" },
-      mood: ["editorial", "retro_print"],
-      extracted_by: EXTRACTED_BY,
-      extracted_at: EXTRACTED_AT,
-    },
+      layout: {
+        composition: "centered",
+        density: "balanced",
+        alignment: "center"
+      },
+      texture: [
+        "flat_clean"
+      ],
+      shape: {
+        corner_radius: "rounded",
+        stroke: "none"
+      },
+      imagery: {
+        treatment: "full_color_photo"
+      },
+      mood: [
+        "luxury"
+      ],
+      extracted_by: "@cf/meta/llama-3.2-11b-vision-instruct",
+      extracted_at: 1788361903030
+    }
   },
   {
     region_slug: "inspiration",
     type: "image",
-    title: "Concrete Quiet — architecture poster",
-    semantic_text:
-      "Brutalist architecture poster. A halftone black and white photograph of a curved concrete stair and cantilevered ramp fills the frame. Condensed grotesque caps in signal red run edge to edge across the middle, underlined by a hairline rule. Warm grey paper ground, coarse print screen.",
-    content_ref: "demo/concrete-quiet.png",
+    title: "flower w/ motion blur",
+    semantic_text: "The image presents a captivating close-up of a flower, showcasing its intricate details and vibrant colors. The flower's petals are predominantly yellow and pink, with subtle hints of green, and appear to be in motion, as if swaying gently in the breeze. The blurred effect surrounding the flower adds a sense of dynamism and energy to the image.\n\nIn the background, a solid black surface provides a striking contrast to the flower's delicate features, drawing the viewer's attention to the subject. The overall composition is simple yet effective, allowing the viewer to focus on the beauty and eleg…\ntype only composition, sparse density; sharp corners; editorial, organic mood; palette #0F1004 #C77D3F #57401B #F1C4A6 #E2A264",
+    content_ref: "demo/flower-w-motion-blur.png",
     design: {
       palette: [
-        { hex: "#DCD7CF", pct: 51, role: "ground" },
-        { hex: "#2C2E30", pct: 18, role: "text" },
-        { hex: "#505050", pct: 8, role: "accent" },
-        { hex: "#B2ACA6", pct: 6, role: "primary" },
-        { hex: "#75706E", pct: 6, role: "secondary" },
+        {
+          hex: "#0F1004",
+          pct: 71,
+          role: "ground"
+        },
+        {
+          hex: "#C77D3F",
+          pct: 7,
+          role: "secondary"
+        },
+        {
+          hex: "#57401B",
+          pct: 7,
+          role: "accent"
+        },
+        {
+          hex: "#F1C4A6",
+          pct: 6,
+          role: "primary"
+        },
+        {
+          hex: "#E2A264",
+          pct: 5,
+          role: "accent"
+        }
+      ],
+      palette_source: "measured",
+      typography: {
+        classification: "none",
+        case: "none",
+        scale: "none",
+        note: "none"
+      },
+      layout: {
+        composition: "type_only",
+        density: "sparse",
+        alignment: "none"
+      },
+      texture: [],
+      shape: {
+        corner_radius: "sharp",
+        stroke: "none"
+      },
+      imagery: {
+        treatment: "none"
+      },
+      mood: [
+        "editorial",
+        "organic"
+      ],
+      extracted_by: "@cf/meta/llama-3.2-11b-vision-instruct",
+      extracted_at: 1788361736550
+    }
+  },
+  {
+    region_slug: "inspiration",
+    type: "image",
+    title: "creation of adam",
+    semantic_text: "dithering\ntype only composition, balanced density; halftone texture; rounded corners; luxury mood; palette #FFFEFF #9F7AC6 #D2C1E4",
+    content_ref: "demo/creation-of-adam.png",
+    design: {
+      palette: [
+        {
+          hex: "#FFFEFF",
+          pct: 89,
+          role: "ground"
+        },
+        {
+          hex: "#9F7AC6",
+          pct: 5,
+          role: "primary"
+        },
+        {
+          hex: "#D2C1E4",
+          pct: 5,
+          role: "secondary"
+        }
+      ],
+      palette_source: "measured",
+      typography: {
+        classification: "none",
+        case: "none",
+        scale: "none",
+        note: "none"
+      },
+      layout: {
+        composition: "type_only",
+        density: "balanced",
+        alignment: "center"
+      },
+      texture: [
+        "halftone"
+      ],
+      shape: {
+        corner_radius: "rounded",
+        stroke: "none"
+      },
+      imagery: {
+        treatment: "none"
+      },
+      mood: [
+        "luxury"
+      ],
+      extracted_by: "@cf/meta/llama-3.2-11b-vision-instruct",
+      extracted_at: 1788361741677
+    }
+  },
+  {
+    region_slug: "inspiration",
+    type: "image",
+    title: "minimal features section",
+    semantic_text: "features section\nlarge grotesque typography — none; centered composition, balanced density; flat clean texture; rounded corners; minimal mood; palette #FDFEFD #464946 #252113 #797A6E #ACB4B5",
+    content_ref: "demo/minimal-features-section.png",
+    design: {
+      palette: [
+        {
+          hex: "#FDFEFD",
+          pct: 50,
+          role: "primary"
+        },
+        {
+          hex: "#464946",
+          pct: 17,
+          role: "ground"
+        },
+        {
+          hex: "#252113",
+          pct: 11,
+          role: "secondary"
+        },
+        {
+          hex: "#797A6E",
+          pct: 10,
+          role: "accent"
+        },
+        {
+          hex: "#ACB4B5",
+          pct: 3,
+          role: "accent"
+        }
       ],
       palette_source: "measured",
       typography: {
         classification: "grotesque",
-        case: "uppercase",
-        scale: "hero",
-        note: "condensed grotesque caps, tight tracking, set edge to edge",
+        case: "mixed",
+        scale: "large",
+        note: "none"
       },
-      layout: { composition: "asymmetric_stack", density: "balanced", alignment: "left" },
-      texture: ["halftone", "paper_grain"],
-      shape: { corner_radius: "sharp", stroke: "hairline" },
-      imagery: { treatment: "halftone" },
-      mood: ["brutalist", "editorial", "retro_print"],
-      extracted_by: EXTRACTED_BY,
-      extracted_at: EXTRACTED_AT,
-    },
+      layout: {
+        composition: "centered",
+        density: "balanced",
+        alignment: "center"
+      },
+      texture: [
+        "flat_clean"
+      ],
+      shape: {
+        corner_radius: "rounded",
+        stroke: "none"
+      },
+      imagery: {
+        treatment: "none"
+      },
+      mood: [
+        "minimal"
+      ],
+      extracted_by: "@cf/meta/llama-3.2-11b-vision-instruct",
+      extracted_at: 1788361845471
+    }
   },
   {
     region_slug: "inspiration",
     type: "image",
-    title: "Four-point mark — identity sheet",
-    semantic_text:
-      "Contact sheet for a monochrome apparel identity. A four-point star mark shown positive and negative, then applied across washed black garments — tee front and back, hoodie, cap, shorts, track jacket — photographed on grey seamless. No display type anywhere, flat clean surfaces.",
-    content_ref: "demo/nightshade-identity-sheet.png",
+    title: "minimal hero section",
+    semantic_text: "agentic landing page design\ntype only composition, sparse density; sharp corners; palette #FDFDFD #8F826C #3F3124 #1594D4 #CCD3CE",
+    content_ref: "demo/minimal-hero-section.png",
     design: {
       palette: [
-        { hex: "#0D0D0D", pct: 53, role: "ground" },
-        { hex: "#302F2F", pct: 18, role: "text" },
-        { hex: "#727070", pct: 11, role: "primary" },
-        { hex: "#FDFDFD", pct: 9, role: "text" },
-        { hex: "#4E4D4D", pct: 8, role: "secondary" },
+        {
+          hex: "#FDFDFD",
+          pct: 59,
+          role: "text"
+        },
+        {
+          hex: "#8F826C",
+          pct: 17,
+          role: "ground"
+        },
+        {
+          hex: "#3F3124",
+          pct: 15,
+          role: "primary"
+        },
+        {
+          hex: "#1594D4",
+          pct: 2,
+          role: "secondary"
+        },
+        {
+          hex: "#CCD3CE",
+          pct: 2,
+          role: "accent"
+        }
       ],
       palette_source: "measured",
-      typography: { classification: "none", case: "none", scale: "none", note: "no display type" },
-      layout: { composition: "grid_contact_sheet", density: "dense", alignment: "none" },
-      texture: ["flat_clean"],
-      shape: { corner_radius: "sharp", stroke: "none" },
-      imagery: { treatment: "full_color_photo" },
-      mood: ["minimal", "streetwear", "luxury"],
-      extracted_by: EXTRACTED_BY,
-      extracted_at: EXTRACTED_AT,
-    },
+      typography: {
+        classification: "none",
+        case: "none",
+        scale: "none",
+        note: "none"
+      },
+      layout: {
+        composition: "type_only",
+        density: "sparse",
+        alignment: "none"
+      },
+      texture: [],
+      shape: {
+        corner_radius: "sharp",
+        stroke: "none"
+      },
+      imagery: {
+        treatment: "none"
+      },
+      mood: [],
+      extracted_by: "@cf/meta/llama-3.2-11b-vision-instruct",
+      extracted_at: 1788361796502
+    }
   },
   {
     region_slug: "inspiration",
     type: "image",
-    title: "Four-point mark — outerwear application",
-    semantic_text:
-      "Two panels side by side. Left, a black nylon track jacket on grey seamless with the four-point star mark small on the chest. Right, the same mark alone in black on white at large scale. Flat clean product photography, no type.",
-    content_ref: "demo/nightshade-outerwear.png",
+    title: "login flow minimal",
+    semantic_text: "agentic startup onboarding/login flow design\nmoderate grotesque typography — none; centered composition, balanced density; hairline strokes; slight corners; editorial, minimal mood; palette #151615 #333333",
+    content_ref: "demo/login-flow-minimal.png",
     design: {
       palette: [
-        { hex: "#FEFEFE", pct: 60, role: "ground" },
-        { hex: "#181819", pct: 26, role: "text" },
-        { hex: "#6A6A69", pct: 14, role: "primary" },
+        {
+          hex: "#151615",
+          pct: 61,
+          role: "text"
+        },
+        {
+          hex: "#333333",
+          pct: 32,
+          role: "ground"
+        }
       ],
       palette_source: "measured",
-      typography: { classification: "none", case: "none", scale: "none", note: "no display type" },
-      layout: { composition: "poster_split", density: "balanced", alignment: "none" },
-      texture: ["flat_clean"],
-      shape: { corner_radius: "sharp", stroke: "none" },
-      imagery: { treatment: "full_color_photo" },
-      mood: ["minimal", "streetwear"],
-      extracted_by: EXTRACTED_BY,
-      extracted_at: EXTRACTED_AT,
-    },
+      typography: {
+        classification: "grotesque",
+        case: "mixed",
+        scale: "moderate",
+        note: "none"
+      },
+      layout: {
+        composition: "centered",
+        density: "balanced",
+        alignment: "center"
+      },
+      texture: [],
+      shape: {
+        corner_radius: "slight",
+        stroke: "hairline"
+      },
+      imagery: {
+        treatment: "none"
+      },
+      mood: [
+        "editorial",
+        "minimal"
+      ],
+      extracted_by: "@cf/meta/llama-3.2-11b-vision-instruct",
+      extracted_at: 1788361802485
+    }
   },
   {
     region_slug: "inspiration",
     type: "image",
-    title: "Four-point mark — primary lockup",
-    semantic_text:
-      "The bare identity mark: two joined four-point stars with long tapered horizontal points, white on solid black, centred with wide margins. Vector-flat, no texture, no type.",
-    content_ref: "demo/nightshade-mark.jpg",
+    title: "enterprise agentic saas landing",
+    semantic_text: "hero section\nlarge grotesque typography — high-contrast condensed caps; centered composition, balanced density; halftone texture; rounded corners; editorial mood; palette #F8F7ED #C4BEAD #8C8C82 #1C1C16",
+    content_ref: "demo/enterprise-agentic-saas-landing.png",
     design: {
       palette: [
-        { hex: "#000000", pct: 97, role: "ground" },
-        { hex: "#FEFEFE", pct: 3, role: "text" },
+        {
+          hex: "#F8F7ED",
+          pct: 67,
+          role: "primary"
+        },
+        {
+          hex: "#C4BEAD",
+          pct: 22,
+          role: "ground"
+        },
+        {
+          hex: "#8C8C82",
+          pct: 4,
+          role: "secondary"
+        },
+        {
+          hex: "#1C1C16",
+          pct: 2,
+          role: "text"
+        }
       ],
       palette_source: "measured",
-      typography: { classification: "none", case: "none", scale: "none", note: "no display type" },
-      layout: { composition: "centered", density: "sparse", alignment: "center" },
-      texture: ["flat_clean"],
-      shape: { corner_radius: "organic", stroke: "none" },
-      imagery: { treatment: "illustration" },
-      mood: ["minimal", "luxury"],
-      extracted_by: EXTRACTED_BY,
-      extracted_at: EXTRACTED_AT,
-    },
+      typography: {
+        classification: "grotesque",
+        case: "mixed",
+        scale: "large",
+        note: "high-contrast condensed caps"
+      },
+      layout: {
+        composition: "centered",
+        density: "balanced",
+        alignment: "center"
+      },
+      texture: [
+        "halftone"
+      ],
+      shape: {
+        corner_radius: "rounded",
+        stroke: "none"
+      },
+      imagery: {
+        treatment: "none"
+      },
+      mood: [
+        "editorial"
+      ],
+      extracted_by: "@cf/meta/llama-3.2-11b-vision-instruct",
+      extracted_at: 1788362032722
+    }
+  },
+  {
+    region_slug: "inspiration",
+    type: "image",
+    title: "dithered gothic concept",
+    semantic_text: "nice messy dithering concept for a background, gothic style\ntype only composition, sparse density; rounded corners; minimal, experimental mood; palette #0C38B3 #CBB7A2 #536DBF #8295CF #9A8B8A",
+    content_ref: "demo/dithered-gothic-concept.png",
+    design: {
+      palette: [
+        {
+          hex: "#0C38B3",
+          pct: 52,
+          role: "ground"
+        },
+        {
+          hex: "#CBB7A2",
+          pct: 30,
+          role: "primary"
+        },
+        {
+          hex: "#536DBF",
+          pct: 4,
+          role: "secondary"
+        },
+        {
+          hex: "#8295CF",
+          pct: 3,
+          role: "accent"
+        },
+        {
+          hex: "#9A8B8A",
+          pct: 2,
+          role: "accent"
+        }
+      ],
+      palette_source: "measured",
+      typography: {
+        classification: "none",
+        case: "none",
+        scale: "none",
+        note: "none"
+      },
+      layout: {
+        composition: "type_only",
+        density: "sparse",
+        alignment: "center"
+      },
+      texture: [],
+      shape: {
+        corner_radius: "rounded",
+        stroke: "none"
+      },
+      imagery: {
+        treatment: "none"
+      },
+      mood: [
+        "minimal",
+        "experimental"
+      ],
+      extracted_by: "@cf/meta/llama-3.2-11b-vision-instruct",
+      extracted_at: 1788361867978
+    }
+  },
+  {
+    region_slug: "inspiration",
+    type: "image",
+    title: "simple hero section",
+    semantic_text: "landing hero section for startup w/ dithered focused image\ntype only composition, balanced density; sharp corners; palette #FCFCFD #C0C0EC #4040EA #8080EB #1313DC",
+    content_ref: "demo/simple-hero-section.png",
+    design: {
+      palette: [
+        {
+          hex: "#FCFCFD",
+          pct: 65,
+          role: "ground"
+        },
+        {
+          hex: "#C0C0EC",
+          pct: 10,
+          role: "accent"
+        },
+        {
+          hex: "#4040EA",
+          pct: 9,
+          role: "primary"
+        },
+        {
+          hex: "#8080EB",
+          pct: 8,
+          role: "secondary"
+        },
+        {
+          hex: "#1313DC",
+          pct: 3,
+          role: "accent"
+        }
+      ],
+      palette_source: "measured",
+      typography: {
+        classification: "none",
+        case: "none",
+        scale: "none",
+        note: "none"
+      },
+      layout: {
+        composition: "type_only",
+        density: "balanced",
+        alignment: "center"
+      },
+      texture: [],
+      shape: {
+        corner_radius: "sharp",
+        stroke: "none"
+      },
+      imagery: {
+        treatment: "none"
+      },
+      mood: [],
+      extracted_by: "@cf/meta/llama-3.2-11b-vision-instruct",
+      extracted_at: 1788361920850
+    }
+  },
+  {
+    region_slug: "inspiration",
+    type: "image",
+    title: "onboarding flow minimal agentic startup",
+    semantic_text: "onboarding flow for an agentic startup landing\nlarge grotesque typography — none; type only composition, balanced density; hairline strokes; slight corners; editorial, minimal mood; palette #1C1C1C",
+    content_ref: "demo/onboarding-flow-minimal-agentic-startup.png",
+    design: {
+      palette: [
+        {
+          hex: "#1C1C1C",
+          pct: 91,
+          role: "ground"
+        }
+      ],
+      palette_source: "measured",
+      typography: {
+        classification: "grotesque",
+        case: "mixed",
+        scale: "large",
+        note: "none"
+      },
+      layout: {
+        composition: "type_only",
+        density: "balanced",
+        alignment: "center"
+      },
+      texture: [],
+      shape: {
+        corner_radius: "slight",
+        stroke: "hairline"
+      },
+      imagery: {
+        treatment: "none"
+      },
+      mood: [
+        "editorial",
+        "minimal"
+      ],
+      extracted_by: "@cf/meta/llama-3.2-11b-vision-instruct",
+      extracted_at: 1788361931899
+    }
+  },
+  {
+    region_slug: "inspiration",
+    type: "image",
+    title: "ai agent hero background concept",
+    semantic_text: "This image depicts a website landing page, featuring a striking blue and beige color scheme. The top section, in blue, displays a navigation bar with white text, including \"About,\" \"Product,\" \"Contact Us,\" \"Moonlight,\" \"Login,\" and \"Sign Up.\" The central section showcases a large blue spiral pattern on a beige background, accompanied by the phrase \"The AI Agent That Keeps Everything Aligned\" in white text. Below this, a smaller white text reads, \"Keep Check on every activity related to your day to day tasks and with a single agent.\" A blue \"Get Started\" button is prominently displayed below. T…\ntype only composition, balanced density; rounded corners; palette #062BA6 #DDD5C6 #A1ABBE #6582B5",
+    content_ref: "demo/ai-agent-hero-background-concept.png",
+    design: {
+      palette: [
+        {
+          hex: "#062BA6",
+          pct: 44,
+          role: "ground"
+        },
+        {
+          hex: "#DDD5C6",
+          pct: 35,
+          role: "primary"
+        },
+        {
+          hex: "#A1ABBE",
+          pct: 12,
+          role: "secondary"
+        },
+        {
+          hex: "#6582B5",
+          pct: 6,
+          role: "accent"
+        }
+      ],
+      palette_source: "measured",
+      typography: {
+        classification: "none",
+        case: "none",
+        scale: "none",
+        note: "none"
+      },
+      layout: {
+        composition: "type_only",
+        density: "balanced",
+        alignment: "center"
+      },
+      texture: [],
+      shape: {
+        corner_radius: "rounded",
+        stroke: "none"
+      },
+      imagery: {
+        treatment: "none"
+      },
+      mood: [],
+      extracted_by: "@cf/meta/llama-3.2-11b-vision-instruct",
+      extracted_at: 1788362084031
+    }
+  },
+  {
+    region_slug: "inspiration",
+    type: "link",
+    title: "video design",
+    semantic_text: "more language exploration https://t.co/yChH7pIOsp",
+    source_url: "https://x.com/ayushsoni_io/status/2093976615407718587?s=20",
+    content_ref: null,
+    design: null
+  },
+  {
+    region_slug: "inspiration",
+    type: "link",
+    title: "startup post 1",
+    semantic_text: "editorial vibe",
+    source_url: "https://x.com/miralizain/status/2093662498104934885?s=20",
+    content_ref: null,
+    design: null
+  },
+  {
+    region_slug: "inspiration",
+    type: "link",
+    title: "playful post for cardinal",
+    semantic_text: "geometric graphic",
+    source_url: "https://x.com/ayushsoni_io/status/2093991380003815645?s=20",
+    content_ref: null,
+    design: null
+  },
+  {
+    region_slug: "inspiration",
+    type: "link",
+    title: "my favorite poster concept",
+    semantic_text: "very good beautiful poster concept made for founders inc, my favority",
+    source_url: "https://x.com/ayushsoni_io/status/2094767901651669281?s=20",
+    content_ref: null,
+    design: null
+  },
+  {
+    region_slug: "inspiration",
+    type: "link",
+    title: "posters!",
+    semantic_text: "geomtric",
+    source_url: "https://x.com/ayushsoni_io/status/2093993497573707811?s=20",
+    content_ref: null,
+    design: null
+  },
+  {
+    region_slug: "inspiration",
+    type: "link",
+    title: "Latest Visuals from Agent Index brand",
+    semantic_text: "Latest Visuals from Agent Index brand",
+    source_url: "https://x.com/yahyavision/status/2094740298555695176?s=46",
+    content_ref: null,
+    design: null
+  },
+  {
+    region_slug: "inspiration",
+    type: "link",
+    title: "Brand identity direction for Cicely, focusing on making the brand feel youthful,",
+    semantic_text: "Brand identity direction for Cicely, focusing on making the brand feel youthful, accessible, tactile, and vibrant.",
+    source_url: "https://x.com/swarnima_otw/status/2094679145771160055?s=46",
+    content_ref: null,
+    design: null
   },
   {
     region_slug: "work",
@@ -335,7 +831,7 @@ export function applyDemoSeed(q: Queries, spaceId: string, humanId: string, now:
       owner_id: humanId,
       type: it.type,
       title: it.title,
-      source_url: null,
+      source_url: it.source_url ?? null,
       content_ref: it.content_ref,
       semantic_text: it.semantic_text,
       metadata: it.design ? { design: it.design } : {},
