@@ -602,7 +602,7 @@ export interface TasteSignal {
   project_id?: Id | null;
 }
 
-/** Words, not false-precision percentages (taste-learning.md §Taste interface). */
+/** Words, not false-precision percentages. */
 export function confidenceLabel(c: number): "tentative" | "growing" | "well-supported" {
   if (c < 0.4) return "tentative";
   if (c < 0.7) return "growing";

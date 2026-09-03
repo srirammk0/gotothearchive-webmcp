@@ -31,33 +31,17 @@ Standing rules:
 
 ## Documentation map
 
-Start at [`docs/README.md`](docs/README.md).
+Start at [`docs/README.md`](docs/README.md). The set is deliberately small:
 
-### Product
-
-- [`docs/product/vision-and-principles.md`](docs/product/vision-and-principles.md) — thesis, audience, principles, positioning.
-- [`docs/product/platform-scope.md`](docs/product/platform-scope.md) — current-pass inclusions and boundaries.
-- [`docs/product/information-architecture.md`](docs/product/information-architecture.md) — navigation, vocabulary, hierarchy, progressive disclosure.
-- [`docs/product/workbench.md`](docs/product/workbench.md) — artifact viewers, versions, annotations, decisions, rendering safety.
-- [`docs/product/sharing-and-permissions.md`](docs/product/sharing-and-permissions.md) — human roles, agent grants, inheritance, privacy, audit.
-- [`docs/product/taste-learning.md`](docs/product/taste-learning.md) — evidence, proposals, scope, retrieval, privacy.
-
-### Design
-
-- [`docs/design/core-experiences.md`](docs/design/core-experiences.md) — page-level behavior and state expectations.
-- [`docs/design/references/README.md`](docs/design/references/README.md) — saved original-resolution visual references.
-
-### Technical foundation
-
-- [`docs/technical/context-model-and-retrieval.md`](docs/technical/context-model-and-retrieval.md) — entities, edges, authority, processing, retrieval.
+- [`docs/technical/BUILD-CONTRACT.md`](docs/technical/BUILD-CONTRACT.md) — frozen invariants.
 - [`docs/technical/webmcp-capability-layer.md`](docs/technical/webmcp-capability-layer.md) — dynamic tools and schemas, enforcement, Agent Lens.
-- [`docs/technical/architecture.md`](docs/technical/architecture.md) — Cloudflare-native shape, storage, jobs, connectors, safety.
+- [`docs/technical/architecture.md`](docs/technical/architecture.md) — Cloudflare-native shape, storage, jobs, safety.
+- [`docs/roadmap/judge-demo-access.md`](docs/roadmap/judge-demo-access.md) — the shared no-account demo and its isolation invariant.
+- [`docs/judges.md`](docs/judges.md) — judge-facing orientation.
 
-### Delivery
-
-- [`docs/hackathon/strategy.md`](docs/hackathon/strategy.md) — WebMCP demonstration and submission framing.
-- [`docs/roadmap/judge-demo-access.md`](docs/roadmap/judge-demo-access.md) — how the shared no-account demo works.
-- [`docs/submission.md`](docs/submission.md) — external gates before submitting.
+Product and design intent that used to live under `docs/product/` and
+`docs/design/` was removed; the behavior is the code, the invariants are in
+BUILD-CONTRACT.md, and the pitch is the Devpost writeup.
 
 ## Source-of-truth order
 
@@ -155,17 +139,7 @@ Prefer:
 
 ## Documentation maintenance
 
-When changing:
-
-- Product scope → update `docs/product/platform-scope.md`.
-- Navigation or nouns → update `docs/product/information-architecture.md`.
-- Artifact review → update `docs/product/workbench.md`.
-- Human or agent access → update `docs/product/sharing-and-permissions.md` and, when relevant, the WebMCP document.
-- Taste behavior → update `docs/product/taste-learning.md`.
-- Visual direction → update the Design Context here and the relevant focused experience document.
-- WebMCP behavior → update `docs/technical/webmcp-capability-layer.md`.
-- Storage or services → update `docs/technical/architecture.md`.
-- Delivery framing → update `docs/hackathon/strategy.md`.
-- Deferred scope → update `docs/product/platform-scope.md`.
-
-Add new focused documents only when a concern has enough independent behavior to deserve its own source of truth.
+Keep the doc set small. Update BUILD-CONTRACT.md when an invariant changes,
+webmcp-capability-layer.md when the WebMCP behavior changes, architecture.md
+when storage or services change, and judge-demo-access.md when the demo's
+access model changes. Do not add product-spec documents back.

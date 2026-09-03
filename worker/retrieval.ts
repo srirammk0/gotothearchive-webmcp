@@ -256,7 +256,7 @@ function jaccard(a: Set<string>, b: Set<string>): number {
   return shared / (a.size + b.size - shared);
 }
 
-/** taste-learning.md §Authority order: project taste outranks personal. */
+/** Authority order: project taste outranks personal. */
 function authorityOrderWeight(signal: TasteSignal): number {
   return signal.scope === "project" ? 1.0 : 0.7;
 }

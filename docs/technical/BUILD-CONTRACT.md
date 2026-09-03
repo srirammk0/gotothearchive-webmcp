@@ -22,7 +22,7 @@ Both tracks import shared types as `import type { ... } from "@shared/contract"`
 
 ## Invariants that are not negotiable
 
-These come from `docs/product/sharing-and-permissions.md` and `docs/technical/webmcp-capability-layer.md`. Violating one breaks the submission's central claim.
+These come from `docs/technical/webmcp-capability-layer.md` and the frozen contract. Violating one breaks the submission's central claim.
 
 1. **Effective authority is an intersection.**
    `human access ∩ agent grant ∩ task scope ∩ page state ∩ runtime policy`.
