@@ -11,7 +11,8 @@
 
   --color-text: #f2f0ec;
   --color-muted: #a39e95;
-  --color-faint: #6f6a62;
+  /* Clears WCAG AA against canvas and surface at the small sizes used for metadata. */
+  --color-faint: #8f897f;
 
   --color-accent: #e34927;
   --color-good: #7ea87c;
@@ -77,19 +78,12 @@ select option { background: var(--color-raised); color: var(--color-text); }
   }
 }
 
-/* No focus rings or outlines anywhere — hover/active colour shifts carry state instead. */
-*,
-*:focus,
-*:focus-visible,
-*:focus-within {
-  outline: none !important;
-  -webkit-tap-highlight-color: transparent;
-}
+/* Pointer interaction stays quiet; keyboard focus remains unmistakable. */
+* { -webkit-tap-highlight-color: transparent; }
 
-/* Native form controls: kill any focus box-shadow ring the browser adds. */
-input:focus,
-textarea:focus,
-select:focus,
-button:focus {
-  box-shadow: none !important;
+*:focus:not(:focus-visible) { outline: none; }
+
+*:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 3px;
 }
