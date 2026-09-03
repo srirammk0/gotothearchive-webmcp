@@ -1046,17 +1046,44 @@ async function handleTask(request: Request, q: Queries, humanId: string): Promis
     const projectId = body.project_id ?? null;
     if (projectId !== null && !ownedProject(q, humanId, projectId)) return badRequest("unknown project");
     const id = crypto.randomUUID();
+    const spaceId = spaceIdFor(humanId);
+    const now = Date.now();
     q.insertTask({
       id,
-      space_id: spaceIdFor(humanId),
+      space_id: spaceId,
       project_id: projectId,
       human_id: humanId,
       title: body.title,
       instruction: body.instruction ?? "",
       status: "open",
-      created_at: Date.now(),
+      created_at: now,
       expires_at: body.expires_at ?? null,
     });
+    // A demo task opens with Work and Inspiration already readable, so the page
+    // has a real WebMCP surface the moment it loads — an agent (or an auditor)
+    // reading the registry at first paint sees the retrieval tools, not just
+    // identify_agent. Personal stays ungranted, so "revoke Inspiration and watch
+    // the tool disappear" still has somewhere to fall from. Guests only.
+    if (q.getSpace(spaceId)?.kind === "guest") {
+      const byslug = new Map(q.listRegions(spaceId).map((r) => [r.slug, r.id]));
+      for (const slug of ["work", "inspiration"]) {
+        const regionId = byslug.get(slug);
+        if (!regionId) continue;
+        q.insertGrant({
+          id: crypto.randomUUID(),
+          task_id: id,
+          space_id: spaceId,
+          region_id: regionId,
+          level: "read",
+          grantor_id: humanId,
+          created_at: now,
+          expires_at: null,
+          revoked_at: null,
+          revoked_by: null,
+          reason: null,
+        });
+      }
+    }
     return json({ ok: true, task: taskResponse(q, q.getTask(id)) });
   }
   if (request.method === "GET") {

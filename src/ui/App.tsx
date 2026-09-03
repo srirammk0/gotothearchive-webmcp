@@ -4,6 +4,7 @@ import { Rail } from "./Rail";
 import { DemoBanner } from "./DemoBanner";
 import { Breadcrumbs, TrailProvider } from "./Breadcrumbs";
 import { ease, duration } from "./tokens";
+import { WebMcpProvider } from "../webmcp/WebMcpProvider";
 import { Archive } from "../routes/Archive";
 import { Workbench } from "../routes/Workbench";
 import { Taste } from "../routes/Taste";
@@ -38,11 +39,13 @@ export function App({ demo = false }: { demo?: boolean }) {
   return (
     <BrowserRouter>
       <TrailProvider>
-        <div className="flex min-h-full flex-col">
-          {demo ? <DemoBanner /> : null}
-          <Rail />
-          <AnimatedRoutes />
-        </div>
+        <WebMcpProvider>
+          <div className="flex min-h-full flex-col">
+            {demo ? <DemoBanner /> : null}
+            <Rail />
+            <AnimatedRoutes />
+          </div>
+        </WebMcpProvider>
       </TrailProvider>
     </BrowserRouter>
   );

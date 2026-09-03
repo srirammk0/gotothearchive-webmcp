@@ -5,7 +5,7 @@ import { compile } from "./compiler";
 import { registrar } from "./registrar";
 import { callTool } from "./transport";
 
-interface UseCapabilitiesResult {
+export interface UseCapabilitiesResult {
   specs: ToolSpec[];
   registered: ToolSpec[];
   lastChange: number | null;

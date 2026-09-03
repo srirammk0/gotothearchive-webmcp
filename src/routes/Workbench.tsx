@@ -20,7 +20,6 @@ import { AnnotationRail } from "../ui/workbench/AnnotationRail";
 import { ProvenanceStrip } from "../ui/workbench/ProvenanceStrip";
 import { Disclosure } from "../ui/primitives/Disclosure";
 import { useWorkbench } from "../ui/workbench/useWorkbench";
-import { useCapabilities } from "../webmcp/useCapabilities";
 
 const DECISION_LABEL: Record<ReviewDecision, string> = {
   approve: "Approve",
@@ -112,12 +111,6 @@ function VersionChip({ v, active, onSelect }: { v: ArtifactVersion; active: bool
       <span className="text-faint">{formatTime(v.created_at)}</span>
     </button>
   );
-}
-
-/** Invisible: keeps the open artifact's review tools (trace_artifact_influences) in the WebMCP surface. */
-function ArtifactCapabilitySync({ taskId, artifactId }: { taskId: string; artifactId: string }) {
-  useCapabilities(taskId, artifactId);
-  return null;
 }
 
 function ArtifactCard({ artifact, onOpen }: { artifact: WorkbenchArtifact; onOpen: () => void }) {
@@ -283,7 +276,6 @@ export function Workbench() {
 
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-7">
-        <ArtifactCapabilitySync taskId={artifact.task_id} artifactId={artifact.id} />
         <header className="flex flex-col gap-4">
           <Link
             to="/workbench"

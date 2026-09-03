@@ -21,16 +21,22 @@ const hasDemoSession = (() => {
 
 /**
  * Signed out and no demo session yet: call /api/demo-entry once to pick up the
- * cookies (it follows a redirect to the app; we ignore the body), then reload
- * into <App demo />. If that route is unavailable — no signing secret — fall
- * back to a plain sign-in screen instead of looping.
+ * cookies (it follows a redirect to the app; we ignore the body), then render
+ * <App demo /> directly — the `demo_session` cookie is in the jar by the time
+ * the fetch resolves, so the normal bootstrap authenticates with it. No page
+ * reload: a reload mid-load derails a WebMCP capture. If that route is
+ * unavailable — no signing secret — fall back to a plain sign-in screen
+ * instead of looping.
  */
 let demoEntryStarted = false;
 
 function DemoEntry() {
-  const [unavailable, setUnavailable] = useState(false);
+  const [phase, setPhase] = useState<"loading" | "ready" | "unavailable">(
+    hasDemoSession ? "ready" : "loading",
+  );
 
   useEffect(() => {
+    if (phase !== "loading") return;
     if (demoEntryStarted) return; // StrictMode double-invoke, or a re-mount
     demoEntryStarted = true;
 
@@ -42,18 +48,17 @@ function DemoEntry() {
       // no storage — proceed without the cross-reload guard
     }
     if (triedBefore) {
-      setUnavailable(true);
+      setPhase("unavailable");
       return;
     }
     fetch("/api/demo-entry")
-      .then((res) => {
-        if (res.ok) window.location.reload();
-        else setUnavailable(true);
-      })
-      .catch(() => setUnavailable(true));
-  }, []);
+      .then((res) => setPhase(res.ok ? "ready" : "unavailable"))
+      .catch(() => setPhase("unavailable"));
+  }, [phase]);
 
-  return unavailable ? <SignInScreen /> : null;
+  if (phase === "ready") return <App demo />;
+  if (phase === "unavailable") return <SignInScreen />;
+  return null;
 }
 
 function SignInScreen() {
@@ -64,7 +69,7 @@ function SignInScreen() {
   );
 }
 
-const demoView = hasDemoSession ? <App demo /> : <DemoEntry />;
+const demoView = <DemoEntry />;
 
 // Clerk is optional. With no key the deployment is demo-only: skip the provider
 // entirely so nothing on the page waits on a Clerk that will never load (a

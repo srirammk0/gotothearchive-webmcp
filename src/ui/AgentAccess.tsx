@@ -3,7 +3,7 @@ import { AnimatePresence, motion } from "motion/react";
 import { GRANT_LABEL, GRANT_LEVELS, type GrantLevel, type Region } from "@shared/contract";
 import { duration, ease } from "./tokens";
 import { errorMessage, getCapabilities, getLens, setGrant } from "../api/client";
-import { useCapabilities } from "../webmcp/useCapabilities";
+import { useWebMcp } from "../webmcp/WebMcpProvider";
 import { isWebMcpAvailable } from "../webmcp/registrar";
 import { Disclosure } from "./primitives/Disclosure";
 import { Spinner } from "./primitives/Spinner";
@@ -177,7 +177,9 @@ function LiveAgentAccess({ taskId, regions }: { taskId: string; regions: Region[
   const [rowError, setRowError] = useState<{ regionId: string; message: string } | null>(null);
   const [denials, setDenials] = useState<DenialView[]>([]);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
-  const { specs, registered, refresh } = useCapabilities(taskId);
+  // Display + post-grant refresh only. Registration is driven once, app-wide,
+  // by <WebMcpProvider>; this panel consumes that shared state.
+  const { specs, registered, refresh } = useWebMcp();
   const webMcpAvailable = isWebMcpAvailable();
 
   const loadCapabilities = useCallback(async () => {

@@ -52,8 +52,9 @@ export function compile(input: CapabilityInput): ToolSpec[] {
       name: "identify_agent",
       requires: "read",
       title: "Identify agent",
+      annotations: { readOnlyHint: false },
       description:
-        "Identify which agent product you are so your contributions are attributed correctly. Call this once at the start of the session. Example: { client: \"Cursor\", provider: \"anthropic\", model: \"claude-sonnet-4\" }.",
+        "Records which agent product is acting in this session (client, and optionally provider and model) so contributions are attributed correctly. Attribution only; the declared identity never affects access. Example argument: { client: \"Cursor\", provider: \"anthropic\", model: \"claude-sonnet-4\" }.",
       inputSchema: {
         type: "object",
         properties: {
