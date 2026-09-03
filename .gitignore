@@ -40,3 +40,7 @@ dist-ssr
 # graphify knowledge graph (regenerate with `graphify update .`)
 graphify-out/
 .logo-originals/
+
+# Local design references and generated art (not part of the build)
+.poster-typography-reference.png
+assets/generated/
