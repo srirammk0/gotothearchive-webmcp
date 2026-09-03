@@ -1,6 +1,7 @@
 import { AnimatePresence, motion } from "motion/react";
 import { BrowserRouter, Route, Routes, useLocation } from "react-router";
 import { Rail } from "./Rail";
+import { DemoBanner } from "./DemoBanner";
 import { Breadcrumbs, TrailProvider } from "./Breadcrumbs";
 import { ease, duration } from "./tokens";
 import { Archive } from "../routes/Archive";
@@ -33,11 +34,12 @@ function AnimatedRoutes() {
   );
 }
 
-export function App() {
+export function App({ demo = false }: { demo?: boolean }) {
   return (
     <BrowserRouter>
       <TrailProvider>
         <div className="flex min-h-full flex-col">
+          {demo ? <DemoBanner /> : null}
           <Rail />
           <AnimatedRoutes />
         </div>

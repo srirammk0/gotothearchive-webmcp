@@ -31,7 +31,7 @@ createRoot(document.getElementById("root")!).render(
       </Show>
       <Show when="signed-out">
         {demoMode ? (
-          <App />
+          <App demo />
         ) : (
           <div className="flex min-h-full flex-col items-center justify-center gap-6 p-8">
             <SignIn routing="hash" />
