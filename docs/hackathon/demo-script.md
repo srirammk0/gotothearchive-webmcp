@@ -64,11 +64,14 @@ agent-created work is not canonical until a human approves it.]**
 
 ## 1:48–2:15 — Taste, not memory
 
-**[SHOW: Add one strong annotation during the sped-up run. Open Taste and show
-the resulting proposal with its evidence. Confirm or edit it.]**
+**[SHOW: Add one strong annotation. Return to Codex and ask it to inspect the
+feedback and name the preference it notices. Show `trace_artifact_influences`
+and `propose_taste_signal` at roughly 8× speed. Open Taste and show the proposal
+with its evidence. Confirm or edit it.]**
 
-That feedback becomes more useful than another memory note. Archive proposes a
-Taste signal connected to its exact annotation, artifact and references.
+That feedback becomes more useful than another memory note. Codex reads it and
+proposes a Taste signal connected to the exact annotation, artifact and
+references. The server never invents a preference on its own.
 
 It does not silently decide who I am. I can inspect the evidence, edit the
 wording, scope it, reject it or confirm it. Future agents can use confirmed

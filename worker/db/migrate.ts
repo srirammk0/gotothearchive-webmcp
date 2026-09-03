@@ -40,10 +40,9 @@ export function rebuildFts(sql: SqlStorage): void {
 /**
  * Widen `taste_signals.created_by` to accept 'agent'.
  *
- * An agent naming a preference it noticed is a different act from the
- * derivation loop finding one in the person's own annotations, and the Taste UI
- * labels them differently — so it needs its own value rather than being filed
- * as 'system'. SQLite has no ALTER for a CHECK constraint; the only way is to
+ * An agent naming a preference it noticed is different from a human writing
+ * one directly, and the Taste UI labels them differently — so it needs its own
+ * value rather than being filed as 'system'. SQLite has no ALTER for a CHECK constraint; the only way is to
  * rebuild. Idempotent: the probe below short-circuits once the constraint is
  * already wide enough, so this costs nothing on subsequent boots.
  */

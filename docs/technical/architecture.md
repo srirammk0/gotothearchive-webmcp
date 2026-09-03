@@ -93,7 +93,7 @@ Long-running work may include:
 - Image OCR and description.
 - Semantic indexing.
 - Artifact rendering.
-- Taste candidate derivation.
+- Taste-evidence reconciliation after annotations change.
 
 Jobs should be idempotent, cancellable where practical, observable, and safe to retry. Canonical item creation should not depend on every derived process succeeding.
 

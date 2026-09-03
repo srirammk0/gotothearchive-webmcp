@@ -190,6 +190,6 @@ Workbench events create Inbox entries when action is required:
 - Changes requested.
 - New revision submitted.
 - Approval requested.
-- Taste proposal derived from completed review.
+- Agent-proposed Taste signal grounded in completed review.
 
 Activity that needs no decision belongs in history, not the Inbox.

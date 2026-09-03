@@ -56,9 +56,10 @@ separate, exempt from the beta member cap, and metered on its own small quota.
    treatment) grounded in what it retrieved.
 4. **Annotate.** Leave a note or two on the draft — "more like the minimal
    hero shots", "lose the photo".
-5. **Taste.** A taste signal is derived from your annotations. It is grounded
-   only in Inspiration. It stays *proposed* until you act on it — silence is
-   never acceptance.
+5. **Taste.** Ask the agent to inspect your annotations and propose a Taste
+   signal through WebMCP. Its cited evidence is grounded only in Inspiration.
+   It stays *proposed* until you act on it — silence is never acceptance, and
+   the server never invents a preference on its own.
 6. **Revoke — the point of the project.** Revoke **Inspiration** on your task.
    Then:
    - the tool surface changes under the agent: capabilities that depended on

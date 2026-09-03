@@ -78,7 +78,7 @@ destination. See **Deferred** below.
 
 - Human-authored preferences.
 - Evidence-linked confirmed taste signals.
-- Proposed signals derived from explicit artifact feedback.
+- Agent-proposed signals grounded in explicit artifact feedback.
 - Personal, project, or explicitly shared scope.
 - Accept, edit, rescope, reject, and undo.
 

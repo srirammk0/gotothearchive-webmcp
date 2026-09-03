@@ -9,13 +9,13 @@ Companion to [taste-learning.md](./taste-learning.md).
   items. Text hits seed graph expansion; recency ranks that justified candidate
   set. Recent items become the candidate fallback only when FTS returns nothing
   or the query is empty.
-- Personal taste derivation excludes agent-authored annotations at both the SQL
-  query and derivation boundaries.
+- Taste evidence reconciliation excludes agent-authored annotations at both the
+  SQL query and reconciliation boundaries.
 - New matching evidence extends existing proposals or confirmed signals.
   Opposing evidence is recorded as `contradicts`, recomputes confidence, and may
   still form a separate human-reviewable proposal.
-- Annotation edits reconcile previously derived evidence before new candidates
-  are evaluated, preventing stale sentiment or labels from shaping confidence.
+- Annotation edits reconcile previously cited evidence, preventing stale
+  sentiment or labels from shaping confidence.
 
 ## 8. Hardening pass (2026-08-31, round 2)
 
@@ -113,7 +113,7 @@ OOM). Not deployable on Workers. We already have the pattern in `worker/graph.ts
 - **Confidence is derived from evidence**, never a literal.
 - **Ontology grows from usage**: unknown types are recorded and counted; frequent
   ones are proposed to a human and merged on confirmation.
-- **Review queue**: low-confidence derivations are proposed, never applied.
+- **Review queue**: low-confidence proposals are reviewed, never silently applied.
 - Tokenise the query with the *same* analyzer used to build the index.
 
 ## 1. Current state (what's broken)
@@ -255,7 +255,7 @@ No new grant levels. No change to `authorize()` / `permissions.ts`.
 - **Workbench provenance strip**: show the `why()` line per retrieved reference and
   a "taste applied" chip when `applied_signal_ids` is non-empty.
 - **Taste destination**: confidence in words; the supersedes timeline; a "proposed
-  from your notes" badge on system-derived signals with a link to the annotations.
+  from your notes" badge on agent-proposed signals with a link to the annotations.
 - **Agent Lens**: 'applied' taste events in the per-agent activity stream (the
   table already exists).
 
@@ -288,8 +288,9 @@ Verification against the deployed Worker, guest demo space:
    returns the matching item ⇒ FTS join fixed (was always empty before).
 2. A query that only matches via a graph neighbour of a text hit → that neighbour
    comes back too ⇒ fusion working.
-3. Annotate an artifact twice on one dimension → `GET /api/taste` shows a
-   new `proposed` signal citing both annotations ⇒ derivation live.
+3. Annotate an artifact twice on one dimension, then have the agent read those
+   annotations and call `propose_taste_signal` → `GET /api/taste` shows a new
+   `proposed` signal citing both annotations ⇒ agent proposal loop live.
 4. Confirm it. Re-run retrieval → the matching item's rank rises,
    `applied_signal_ids` non-empty, a `taste_events` 'applied' row exists ⇒ loop
    closed.

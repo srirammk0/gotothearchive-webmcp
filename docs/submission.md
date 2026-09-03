@@ -1,12 +1,15 @@
 # Submission checklist
 
 The product build passes `bun run build`, `bun run lint`, and `bun test`
-(171 tests). What remains before submitting is external.
+(173 tests). What remains before submitting is external.
 
 ## Must close
 
 - **Demo video.** Public, under three minutes, with audio. Show the real product
   and say why the interaction needs WebMCP specifically.
+- **Devpost entry.** Complete the submission form with the live app URL, public
+  repository, public YouTube URL, a WebMCP-focused description, implementation
+  notes, and concise judge testing instructions.
 - **Media rights.** Confirm every image in `demo-assets/` can be redistributed
   publicly. A linked source post is not redistribution permission; replace
   anything uncertain.
@@ -18,13 +21,10 @@ license.
 
 - Move Clerk to a production instance and key (the demo path does not need Clerk,
   but the member sign-in path logs the development-instance warning otherwise).
-- Reconcile the visual source of truth: the design docs specify a warm light
-  mode with dark deferred, but the shipped tokens are dark. Pick one and make it
-  authoritative.
 - Run the full showcase once from a clean browser: open the demo, grant Work and
   Inspiration with Personal left at none, retrieve, record an artifact, annotate,
-  review the taste proposal, revoke Inspiration, and show both the tool
-  disappearing and a stale call being refused.
+  have the agent inspect that feedback and call `propose_taste_signal`, review
+  the proposal, revoke Inspiration, and show the tool scope changing.
 - Check the Devpost copy against the real tool surface. Do not claim shipped
   human sharing, embeddings, PDF visual extraction, model forgetting after
   revocation, or arbitrary bytes travelling over WebMCP.

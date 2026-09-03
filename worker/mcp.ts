@@ -504,7 +504,7 @@ export async function handleToolCall(
           dimensions: s.dimensions,
           confidence: s.confidence,
           // A confirmed signal has passed human review — it is a directive, not
-          // untrusted input. A proposed one is still raw derived-from-annotation
+          // untrusted input. A proposed one is still unconfirmed agent-authored
           // text, so it stays spotlighted.
           statement: s.status === "proposed" ? spotlight(clip(s.statement, MAX_TEXT)) : clip(s.statement, MAX_TEXT),
           // Only confirmed signals carry grounding — a proposal isn't a directive yet.
@@ -732,12 +732,12 @@ export async function handleToolCall(
       };
     }
 
-    // Auto-derivation only learns from the human's own annotations (by design:
-    // an agent's opinion of its own work is not taste). This is the other
-    // route in: an agent that has read back several annotations pointing the
-    // same way can name the pattern explicitly, grounded in the annotations
-    // that support it. It still lands as "proposed" and still requires a
-    // human to confirm — proposing is not learning.
+    // An agent may propose Taste only from the human's own annotations (by
+    // design: an agent's opinion of its own work is not taste). After reading
+    // back several annotations pointing the same way, it can name the pattern
+    // explicitly and cite the annotations that support it. It still lands as
+    // "proposed" and still requires a human to confirm — proposing is not
+    // learning.
     case "propose_taste_signal": {
       const regionSlug = typeof input.region === "string" ? input.region : "";
       const authResult = authorize(
@@ -794,10 +794,9 @@ export async function handleToolCall(
         project_id: project?.id ?? null,
         status: "proposed",
         confidence: confidenceFrom(evidence.length, 0),
-        // "agent", not "system": an agent naming a pattern it noticed is a
-        // different act from the derivation loop finding one in the person's own
-        // annotations, and the Taste UI labels them differently. Both still land
-        // as `proposed` and still need a human.
+        // "agent", not "system": an agent is naming a pattern it noticed in the
+        // person's own annotations. It still lands as `proposed` and still needs
+        // a human.
         created_by: "agent",
         approved_by: null,
         supersedes: null,

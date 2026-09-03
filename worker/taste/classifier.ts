@@ -143,9 +143,9 @@ export function keywordFallbackDimensions(title: string, comment: string): Taste
   if (scored.length > 0) return scored.slice(0, MAX_DIMENSIONS).map((entry) => entry.dimension);
 
   // No keyword matched, but a genuine note (real comment text, not just a bare
-  // sentiment click) must still land somewhere reviewable — derive.ts groups
-  // annotations strictly by dimension, so [] here means the note joins no
-  // group and silently vanishes from taste derivation forever. structure_clarity
+  // sentiment click) still needs a reviewable dimension. Evidence reconciliation
+  // is dimension-aware, so [] here would make the note less useful to an agent
+  // looking for a pattern. structure_clarity
   // is the most defensible catch-all: unlike every other dimension it already
   // means "a general reaction to how the thing reads overall" rather than one
   // specific visual axis (color, type, motion, ...), so an unclassifiable note

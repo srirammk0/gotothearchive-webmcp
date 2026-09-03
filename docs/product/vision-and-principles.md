@@ -27,7 +27,7 @@ the work lands in the Workbench with its influences shown
         ↓
 annotate, approve, reject, or request changes
         ↓
-the system proposes evidence-linked taste signals
+the agent proposes evidence-linked taste signals
         ↓
 accept, edit, scope, or reject them
         ↓
@@ -66,7 +66,7 @@ future agents retrieve better context
 7. **The same state governs interface and capability.** Human-visible permission state and agent-visible authority cannot drift apart.
 8. **Complexity is progressively disclosed.** The human experience stays calm even though the underlying system is sophisticated.
 9. **Artifacts are the collaboration unit.** Agent work should be inspectable and reviewable, not trapped in a transcript.
-10. **No silent taste rewrite.** Every derived signal is visible, editable, scoped, and reversible.
+10. **No silent taste rewrite.** Every proposed signal is visible, editable, scoped, and reversible.
 
 ## Positioning
 
