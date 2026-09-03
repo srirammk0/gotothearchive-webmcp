@@ -64,13 +64,23 @@ function SignInScreen() {
   );
 }
 
+const demoView = hasDemoSession ? <App demo /> : <DemoEntry />;
+
+// Clerk is optional. With no key the deployment is demo-only: skip the provider
+// entirely so nothing on the page waits on a Clerk that will never load (a
+// keyless build for a pure-demo host like webmcp.ora.ai). With a key, a member
+// session renders the full app and signed-out falls through to the demo.
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <ClerkProvider publishableKey={CLERK_KEY} afterSignOutUrl="/">
-      <Show when="signed-in">
-        <App />
-      </Show>
-      <Show when="signed-out">{hasDemoSession ? <App demo /> : <DemoEntry />}</Show>
-    </ClerkProvider>
+    {CLERK_KEY ? (
+      <ClerkProvider publishableKey={CLERK_KEY} afterSignOutUrl="/">
+        <Show when="signed-in">
+          <App />
+        </Show>
+        <Show when="signed-out">{demoView}</Show>
+      </ClerkProvider>
+    ) : (
+      demoView
+    )}
   </StrictMode>,
 );

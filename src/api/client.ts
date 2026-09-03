@@ -46,12 +46,17 @@ export function errorMessage(err: unknown, fallback: string): string {
 }
 
 /**
- * The signed-in visitor's Clerk session token. Read globally rather than
- * threaded through hooks, so every call site carries identity without knowing
- * about Clerk. The UI only renders signed in, so a missing token here is an
- * expired session — the request 401s and Clerk moves the visitor to sign-in.
+ * The signed-in member's Clerk session token, when there is one. Read globally
+ * rather than threaded through hooks, so every call site carries identity
+ * without knowing about Clerk.
+ *
+ * With no Clerk key the app is demo-only: skip `getToken()` entirely, since it
+ * would otherwise race a 10s timeout on every request waiting for a Clerk that
+ * never loads. A demo visitor is identified by the `demo_session` cookie, which
+ * rides along on `credentials: "same-origin"`.
  */
 export async function authHeader(): Promise<Record<string, string>> {
+  if (!import.meta.env.VITE_CLERK_PUBLISHABLE_KEY) return {};
   const token = await getToken().catch(() => null);
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
