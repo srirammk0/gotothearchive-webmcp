@@ -26,8 +26,10 @@ test("static artifacts keep the fully inert preview sandbox", () => {
 test("component artifacts get an opaque script sandbox with a restrictive CSP", () => {
   const html = markComponentPreview("<div id=\"root\"></div><script>/* preview */</script>");
   expect(isComponentPreview(html)).toBe(true);
-  expect(previewSandbox(html)).toBe("allow-scripts");
+  expect(previewSandbox(html)).toBe("allow-scripts allow-forms allow-modals allow-pointer-lock");
   expect(previewSrcDoc(html)).toContain("connect-src 'none'");
+  expect(previewSrcDoc(html)).toContain("https://unpkg.com");
+  expect(previewSrcDoc(html)).toContain("font-src data: https://fonts.gstatic.com");
   expect(previewSrcDoc(html)).toContain("<body>");
   expect(previewSrcDoc(html)).toContain(html);
 });

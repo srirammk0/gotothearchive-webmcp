@@ -187,17 +187,17 @@ export function compile(input: CapabilityInput): ToolSpec[] {
       type: "object",
       properties: {
         region: { type: "string", enum: slugs, description: "One of your accessible regions." },
-        title: { type: "string" },
+        title: { type: "string", description: "A short name for this artifact version." },
         content_html: {
           type: "string",
           description:
-            "The full preview document. A retrieved reference's `design` profile carries its measured palette (each entry has a hex, a coverage percent, and a role: ground / primary / secondary / text), its typography classification, layout and texture. An image's embed_url from get_context_for_task or inspect_context_item can be used directly as an <img src>. component builds load React/ReactDOM (UMD) and the Tailwind Play CDN and may use @babel/standalone JSX; static_html runs no JavaScript but allows web fonts, full CSS and inline SVG filters. The preview has no access to the host app, storage, navigation, forms, or any network beyond those CDNs.",
+            "The full preview document. An image's embed_url from get_context_for_task or inspect_context_item works directly as an <img src>. A component build may load scripts from unpkg.com, cdn.jsdelivr.net, cdnjs.cloudflare.com, esm.sh, cdn.tailwindcss.com and code.jquery.com, and fonts/styles from fonts.googleapis.com / fonts.gstatic.com; connect/fetch is blocked, so it works from the data it is given. static_html runs no JavaScript.",
         },
         renderer: {
           type: "string",
           enum: ["static_html", "component"],
           description:
-            "component: a self-contained React/Tailwind UI preview, for a UI component or interactive control. static_html: a pure visual document with real fonts, full CSS and SVG filters and no JavaScript, for posters and editorial layouts. Both render in an isolated iframe with no host, storage, navigation, form, or network access beyond the approved CDNs.",
+            "component: a self-contained React/Tailwind UI preview, for a UI component or interactive control — it runs in the Workbench. static_html: a pure visual document with real fonts, full CSS and SVG filters and no JavaScript, for posters and editorial layouts. Both render in an isolated opaque-origin iframe.",
         },
         used_item_ids: {
           type: "array",
@@ -211,8 +211,8 @@ export function compile(input: CapabilityInput): ToolSpec[] {
           description:
             "The shape the artifact is meant to be seen at, so the Workbench frames it without clipping. poster = 3:4, portrait = 2:3, square, wide = 16:9, page = A4.",
         },
-        artifact_id: { type: "string" },
-        parent_version_id: { type: "string" },
+        artifact_id: { type: "string", description: "Set when revising an existing artifact in this task." },
+        parent_version_id: { type: "string", description: "The version this one revises, from trace_artifact_influences." },
       },
       required: ["region", "title", "content_html"],
     },

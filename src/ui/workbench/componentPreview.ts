@@ -23,7 +23,16 @@ function componentCsp(): string {
   // AI binding, etc. all quietly omit the feature instead of erroring).
   const origin = typeof window !== "undefined" ? window.location.origin : null;
   const imgSrc = origin ? `data: blob: ${origin}` : "data: blob:";
-  return `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval' https://unpkg.com https://cdn.tailwindcss.com; style-src 'unsafe-inline'; img-src ${imgSrc}; font-src data:; connect-src 'none'; worker-src blob:; frame-src 'none'; form-action 'none'; base-uri 'none'">`;
+  // Script + style CDNs a component build actually reaches for: React/ReactDOM
+  // and Babel-standalone UMD, Tailwind's play CDN, and the common package
+  // mirrors. connect-src stays 'none' — a component builds from the data it was
+  // given, it does not call out. The iframe is still opaque-origin (no
+  // allow-same-origin), so a widened script-src cannot touch this app.
+  const scriptSrc =
+    "'unsafe-inline' 'unsafe-eval' https://unpkg.com https://cdn.jsdelivr.net " +
+    "https://cdnjs.cloudflare.com https://esm.sh https://cdn.tailwindcss.com https://code.jquery.com";
+  const styleSrc = "'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net https://cdnjs.cloudflare.com";
+  return `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src ${scriptSrc}; style-src ${styleSrc}; img-src ${imgSrc}; font-src data: https://fonts.gstatic.com; connect-src 'none'; worker-src blob:; frame-src 'none'; form-action 'none'; base-uri 'none'">`;
 }
 
 export function markComponentPreview(html: string): string {
@@ -43,7 +52,10 @@ export function previewSrcDoc(html: string): string {
 }
 
 export function previewSandbox(html: string): string {
-  return isComponentPreview(html) ? "allow-scripts" : "";
+  // No allow-same-origin: the document stays opaque-origin and cannot reach this
+  // app. allow-forms / allow-modals / allow-pointer-lock let an actual
+  // interactive component work (inputs, alert/confirm, canvas games).
+  return isComponentPreview(html) ? "allow-scripts allow-forms allow-modals allow-pointer-lock" : "";
 }
 
 const ASPECT_MARKER_RE = /<meta\s+name=["']gotothearchive-aspect["']\s+content=["']([^"']+)["']\s*\/?>/i;

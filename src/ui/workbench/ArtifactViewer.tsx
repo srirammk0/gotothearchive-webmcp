@@ -186,7 +186,7 @@ export function ArtifactViewer({ version, annotations = [], onAddRegion, onAddCo
           {regionAnnotations.length > 0
             ? `${regionAnnotations.length} region comment(s)`
             : componentPreview
-              ? "Interactive component preview · isolated"
+              ? "Interactive preview · use it here, or open full screen"
               : "Preview"}
         </p>
         {onAddRegion || onAddComment ? (
@@ -269,27 +269,27 @@ export function ArtifactViewer({ version, annotations = [], onAddRegion, onAddCo
           className="w-full rounded-[var(--radius-md)] border border-line bg-white"
         />
 
-        {/* Review layer. Always captures pointer/wheel input (never
-            pointer-events-none) — a wheel event that reaches the iframe
-            underneath doesn't bubble back out to scroll the page once it's
-            inside that nested browsing context (a real cross-document quirk,
-            not specific to this app), so this layer has to catch it first,
-            in the parent document, where normal scroll bubbling still
-            applies. Trade-off: a live "component" artifact's own buttons
-            aren't directly clickable at this compact size anymore, only via
-            "view full screen" below (no overlay there) — this is a review
-            surface for marking regions, not a way to use the artifact. */}
+        {/* Review layer. It captures pointer input while the reviewer is
+            marking a region or writing a comment; the rest of the time it lets
+            input through so a live "component" artifact is actually usable
+            inline. A static artifact has nothing to interact with, so the
+            layer stays passive there too and full-screen or the mark button
+            bring it back. */}
         <div
           ref={layerRef}
           onPointerDown={onPointerDown}
           onPointerMove={onPointerMove}
           onPointerUp={onPointerUp}
-          className={`absolute inset-0 ${marking ? "cursor-crosshair" : ""}`}
+          className={`absolute inset-0 ${marking ? "cursor-crosshair" : ""} ${
+            marking || commenting || draft ? "" : "pointer-events-none"
+          }`}
         >
           {regionAnnotations.map((a, i) => (
             <div
               key={a.id}
-              className="group/mark absolute rounded-[2px] border-2 border-accent/70"
+              className={`group/mark absolute rounded-[2px] border-2 border-accent/70 ${
+                componentPreview && !marking ? "pointer-events-none" : ""
+              }`}
               style={{
                 left: `${a.target.x * 100}%`,
                 top: `${a.target.y * 100}%`,
