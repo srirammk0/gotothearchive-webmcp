@@ -32,7 +32,8 @@ The compiler decides:
 - Which regions and operations appear in schemas.
 - Whether mutation tools are absent, proposal-only, or writable.
 - Which project- or artifact-specific operations appear.
-- Whether pending proposals expose approval and rejection operations.
+- Whether pending proposals change the context the agent is told about. Human
+  approval never becomes an agent capability.
 - What the Agent Lens reports.
 
 ## Dynamic registration
@@ -78,21 +79,24 @@ Cached schemas and previously valid calls do not bypass the current check. Revoc
 
 ## Semantic tool surface
 
-Illustrative tools:
+Current tools:
 
 - `get_current_context_scope`
 - `get_context_for_task`
 - `get_taste_for_task`
 - `inspect_context_item`
-- `inspect_relationships`
 - `trace_artifact_influences` — on an open artifact, returns the current
   immutable version, human annotations (including normalized marked regions),
   and permitted influences so an agent can make a grounded revision.
 - `record_artifact`
-- `record_feedback`
-- `propose_context_change`
-- `approve_proposed_changes`
-- `reject_proposed_changes`
+- `propose_taste_signal`
+- `withdraw_artifact`
+- `add_context_item`
+- `remove_context_item`
+
+`identify_agent` is always present for attribution only. The compiler never
+exposes `approve_proposed_changes` or `reject_proposed_changes`: accepting a
+proposal makes it canonical human context, so approval remains a human action.
 
 The exact surface may evolve. Prefer tools that express product meaning over UI mechanics.
 
@@ -172,7 +176,8 @@ Examples:
 - Opening a Workbench artifact exposes the review-context form of
   `trace_artifact_influences`; agents receive actionable annotations only for
   that active task artifact, not a broad feed of private review data.
-- Pending proposals may expose approval and rejection operations.
+- Pending proposals change the scope tool's description so the agent knows work
+  is awaiting human review; they do not expose approval or rejection operations.
 - Completing a task removes task-only retrieval or write operations.
 
 State-dependent tools must not make authority mysterious. Agent Access explains why a capability appeared or disappeared.
@@ -229,5 +234,5 @@ At minimum, test:
 - Human role reduction constrains an existing agent grant.
 - Switching projects removes project-specific tools.
 - Private related nodes remain invisible during traversal.
-- Proposal-state tools appear and disappear with proposal lifecycle.
+- Proposal state changes the scope description without changing the tool names.
 - Cancellation leaves no unintended canonical mutation.

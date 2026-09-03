@@ -5,7 +5,7 @@ archive, one flow to walk, and the one moment that is the point of the project.
 
 ## What you're looking at
 
-Your demo link drops you straight into the demo Archive — no account, no
+Opening the site drops you straight into the demo Archive — no account, no
 sign-in. It is a single `kind: 'guest'` Space that **every judge shares**, seeded
 with a copy of a real design-reference folder:
 
@@ -73,5 +73,5 @@ what it already saw — and nothing in the UI says otherwise.
 
 ## If something is off
 
-The demo link is time-limited. If it has expired, or the Archive won't load,
-ask us for a fresh one — it is a one-command regenerate on our side.
+The demo session lasts 24 hours. If it expires, reload the site for a fresh
+one. A reload also re-seeds the shared Archive if another visitor has emptied it.

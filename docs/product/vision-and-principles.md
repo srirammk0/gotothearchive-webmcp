@@ -17,19 +17,19 @@ The platform must remain approachable to someone who does not know what MCP, emb
 ## Core loop
 
 ```text
-I curate what represents my work and taste
+curate the material that represents the work and the taste
         ↓
-I choose what this agent may use for this task
+choose what this agent may use for this task
         ↓
 the agent creates using the granted context
         ↓
-the work appears in the Workbench with its influences
+the work lands in the Workbench with its influences shown
         ↓
-I annotate, approve, reject, or request changes
+annotate, approve, reject, or request changes
         ↓
 the system proposes evidence-linked taste signals
         ↓
-I accept, edit, scope, or reject them
+accept, edit, scope, or reject them
         ↓
 future agents retrieve better context
 ```
@@ -76,11 +76,11 @@ GoToTheArchive is a human-owned context and taste platform where people curate w
 
 ### Hackathon framing
 
-This is everything an AI could know about me—and I decide exactly what this agent gets. WebMCP turns those decisions into live capabilities, while the Workbench shows what context shaped the agent's work and turns my corrections into inspectable taste.
+This is everything an AI could know about a person, and the person decides exactly what this agent gets. WebMCP turns those decisions into live capabilities; the Workbench shows what context shaped the agent's work and turns corrections into inspectable taste.
 
 ### Useful phrases
 
-- Your context. On your terms.
+- Your context, on your terms.
 - The context firewall between you and your agents.
 - Agent work you can see, review, and teach from.
 

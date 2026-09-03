@@ -4,6 +4,31 @@ This is the persistent record for final WebMCP qualification, evaluation,
 red-team, and showcase runs. It records observed production behavior, not
 intended behavior. No product code is changed as part of a test run.
 
+## Current status — 2026-09-02
+
+The failed September 1 runs below are retained as historical regression records,
+not the current verdict. Their Taste pipeline, stale-tool mapping, Workbench
+attribution, dynamic-schema, and quota findings were all fixed in later commits.
+
+Current verification after release-candidate deployment
+`87776319-2c05-4ea2-9e71-6ed2826bc865`:
+
+- production build and lint pass;
+- the full unscoped suite passes: **171 tests, 0 failures**;
+- the deployed page registers the current nine-tool WebMCP surface with live
+  region enums and page-state behavior;
+- the deployed judge entry mints a signed 24-hour session and redirects into the
+  shared demo Archive;
+- a signed-out HTTP rehearsal receives only `demo_session` and `demo_hint`, then
+  POSTs `/api/bootstrap` successfully into `kind: "guest"` / `Demo Archive`
+  with exactly Work, Inspiration, and Personal;
+- live server checks recorded in `evals/README.md` prove permitted retrieval,
+  denied Personal access, human-only approval, and agent-authorship constraints.
+
+The probabilistic model run and its remaining limitations are recorded in
+[`evals/README.md`](evals/README.md). A final clean-browser showcase rehearsal is
+still required after the release candidate is deployed.
+
 ## Run 001 — Production baseline
 
 **Date:** 2026-09-01 (America/Los_Angeles)  
@@ -177,5 +202,4 @@ Landed on `main` before run 001's commit. Supermemory is candidate list D in
 permission set synchronously and re-filters every Supermemory hit through it, so
 revocation stays immediate and FTS is the floor on any timeout/failure. Verified
 against the live API: `/v4/search` echoes `documents[].metadata.item_id` (the
-bridge the integration needs) and text ingest is ~3-6s async. Full write-up:
-`docs/technical/webmcp-audit-2026-09.md`.
+bridge the integration needs) and text ingest is ~3-6s async.

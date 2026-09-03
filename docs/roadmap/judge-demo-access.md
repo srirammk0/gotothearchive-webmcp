@@ -55,17 +55,22 @@ personal space.
   `demo_session=<value>; Path=/; Max-Age=86400; HttpOnly; Secure; SameSite=Lax`,
   then `302`s to `/`. TTL 24h — the cookie *is* the session now, not a one-shot
   handoff. It also sets a readable `demo_hint=1` companion (no authority; only
-  tells the signed-out React shell to render the app instead of the sign-in
-  form).
+  tells the signed-out React shell to render the app).
 - **`resolveHuman()`** (`worker/auth.ts`) falls back to `demo_session` when there
   is no valid Clerk token, returning `{ human_id: "demo-<nonce>" }`. It verifies
   the HMAC + expiry with `verifyDemoToken()` and fails closed on anything missing,
   malformed, expired, or wrongly signed.
+- **The demo is the default unauthenticated view.** `src/main.tsx`: a signed-out
+  visitor with no `demo_hint` is sent through `/api/demo-entry` once (a `fetch`
+  that follows the redirect and picks up the cookies), then the reload renders
+  `<App demo />`. A `sessionStorage` guard falls back to a plain Clerk sign-in
+  screen if `/api/demo-entry` is unavailable. Members otherwise sign in from the
+  rail.
 - Pre-minted links: `scripts/demo-link.ts` emits
   `${origin}/api/demo-entry?token=<exp>.<sig>` (signed with `signDemoLink`, keyed
   on `"demo"`, default 14-day TTL). `/api/demo-entry` verifies the token before
-  minting a session; an expired token → `403`. The bare `/api/demo-entry` (no
-  token), linked under the sign-in form, also works — it is the open door.
+  minting a session; an expired token → `403`. The bare `/api/demo-entry` also
+  works — it is the open door, and now the default path in.
 - **The old client path is gone.** `src/main.tsx` no longer stashes a token in
   `sessionStorage`; `src/api/client.ts` no longer replays `demoBootstrapQuery`
   on bootstrap. The cookie (sent automatically with `credentials: same-origin`)
@@ -105,11 +110,10 @@ Recovery is automatic instead: if the shared space is emptied, the next
 
 ## Known ceilings
 
-- `/api/demo-entry` is an open door (it is linked publicly under the sign-in
-  form, by design). Anyone can mint a demo session; the edge rate-limiter
-  (`env.API_RL`, per IP) is the only throttle. Acceptable for a few-day
-  hackathon window; the signed `?token=` links exist for when the open door
-  should be closed.
+- `/api/demo-entry` is an open door — it is the default way in. Anyone can mint
+  a demo session; the edge rate-limiter (`env.API_RL`, per IP) is the only
+  throttle. Acceptable for a few-day hackathon window; the signed `?token=`
+  links exist for when the open door should be closed.
 - `Secure` cookies need HTTPS. The demo flow therefore only works on the
   deployed origin, not plain-http localhost (where real members use Clerk
   sign-in anyway).

@@ -1,5 +1,9 @@
 # Core experiences
 
+Shared and Inbox below describe the intended wider platform. They are deferred
+from the WebMCP Challenge build; Archive, Workbench, Taste, Agent Access, Agent
+Lens, and the underlying human-access boundary ship in the current pass.
+
 ## Archive
 
 ### Purpose
@@ -127,7 +131,10 @@ Changes are applied to actual capability state. The panel confirms success and m
 
 ### Agent Lens
 
-Agent Lens is an optional technical inspection layer within Agent Access, not a separate application or persona switch. It is deferred until core upload, Archive, sharing, Workbench, taste, and Inbox flows are stable.
+Agent Lens is an optional technical inspection layer within Agent Access, not a
+separate application or persona switch. It ships in the challenge build so a
+person can verify that WebMCP capabilities change with the same visible grants
+that govern the product.
 
 It may reveal:
 

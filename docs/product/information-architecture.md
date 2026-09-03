@@ -8,6 +8,17 @@ Archive · Workbench · Shared · Taste · Inbox
 
 Agent Access appears as a persistent contextual panel. Search and capture are global actions.
 
+This is the intended platform navigation. The WebMCP Challenge build ships the
+coherent central loop as:
+
+```text
+Archive · Workbench · Taste · Stats
+```
+
+Stats is an operational usage view, not a new primary product concept. Shared
+and Inbox remain specified here for the wider platform but are deferred to v2;
+the current build still enforces the human-access boundary they depend on.
+
 ## Core vocabulary
 
 Use a small human-facing vocabulary even when the underlying model is richer.

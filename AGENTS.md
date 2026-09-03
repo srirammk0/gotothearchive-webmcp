@@ -57,7 +57,8 @@ Start at [`docs/README.md`](docs/README.md).
 ### Delivery
 
 - [`docs/hackathon/strategy.md`](docs/hackathon/strategy.md) — WebMCP demonstration and submission framing.
-- [`docs/roadmap/deferred-and-future.md`](docs/roadmap/deferred-and-future.md) — intentional cuts and extension points.
+- [`docs/roadmap/judge-demo-access.md`](docs/roadmap/judge-demo-access.md) — how the shared no-account demo works.
+- [`docs/submission.md`](docs/submission.md) — external gates before submitting.
 
 ## Source-of-truth order
 
@@ -170,6 +171,6 @@ When changing:
 - WebMCP behavior → update `docs/technical/webmcp-capability-layer.md`.
 - Storage or services → update `docs/technical/architecture.md`.
 - Delivery framing → update `docs/hackathon/strategy.md`.
-- Deferred scope → update `docs/roadmap/deferred-and-future.md`.
+- Deferred scope → update `docs/product/platform-scope.md`.
 
 Add new focused documents only when a concern has enough independent behavior to deserve its own source of truth.
