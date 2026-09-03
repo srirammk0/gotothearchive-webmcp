@@ -530,6 +530,46 @@ export class Queries {
     });
   }
 
+  /** Version marker for the demo seed, same ledger mechanism as graphBackfillVersion. */
+  demoSeedVersion(spaceId: string): number | null {
+    const space = this.getSpace(spaceId);
+    if (!space) return null;
+    const rows = this.sql
+      .exec<{ payload: string }>(
+        `SELECT payload FROM audit_events
+         WHERE actor_type = 'system' AND operation = 'demo_seed' AND human_id = ?
+         ORDER BY at DESC LIMIT 20`,
+        space.owner_id,
+      )
+      .toArray();
+    for (const row of rows) {
+      try {
+        const payload = JSON.parse(row.payload) as { space_id?: unknown; version?: unknown };
+        if (payload.space_id === spaceId && typeof payload.version === "number") return payload.version;
+      } catch {
+        // Ignore malformed historical marker rows.
+      }
+    }
+    return null;
+  }
+
+  recordDemoSeed(spaceId: string, version: number, at: number): void {
+    const space = this.getSpace(spaceId);
+    if (!space) return;
+    this.insertAuditEvent({
+      id: crypto.randomUUID(),
+      actor_type: "system",
+      actor_label: "Demo seed",
+      agent_session_id: null,
+      human_id: space.owner_id,
+      task_id: null,
+      tool_name: null,
+      operation: "demo_seed",
+      payload: { space_id: spaceId, version },
+      at,
+    });
+  }
+
   /**
    * DO-wide marker for the last items_fts rebuild. Unlike graph backfill this is
    * not per-space (the FTS index spans every space in the DO), so the newest

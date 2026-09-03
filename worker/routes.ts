@@ -46,8 +46,8 @@ import { classifyAnnotationDimensions } from "./taste/classifier";
 import { extractUrl, isPublicHttpUrl } from "./extract";
 import { extractDesignProfile, designSummary } from "./design";
 import { signDemoToken, verifyBlobSignature } from "./blob-sign";
-import { deriveEdgesForItem, rebuildSpaceEdges } from "./graph-build";
-import { applyDemoSeed, provisionGuestSpace, DEMO_SPACE_ID } from "./db/demo-seed";
+import { deriveEdgesForItem } from "./graph-build";
+import { provisionGuestSpace, reseedGuestSpace, DEMO_SEED_VERSION, DEMO_SPACE_ID } from "./db/demo-seed";
 
 /**
  * The Space a request operates on.
@@ -250,11 +250,12 @@ async function handleBootstrap(
     const existing = q.getSpace(spaceId);
     if (!existing) {
       provisionGuestSpace(q, humanId, spaceId, Date.now());
-    } else if (q.listItemsBySpace(spaceId).length === 0) {
-      const at = Date.now();
-      q.purgeSpace(spaceId); // keeps the space row; clears stale regions/edges
-      applyDemoSeed(q, spaceId, humanId, at);
-      rebuildSpaceEdges(q, spaceId, at);
+    } else if (
+      q.listItemsBySpace(spaceId).length === 0 ||
+      (q.demoSeedVersion(spaceId) ?? 0) < DEMO_SEED_VERSION
+    ) {
+      // Empty (a judge cleared it) or the seed content shipped a new version.
+      reseedGuestSpace(q, humanId, spaceId, Date.now());
     }
     return json({ ok: true, space: q.getSpace(spaceId), regions: q.listRegions(spaceId) });
   }

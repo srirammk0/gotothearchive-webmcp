@@ -53,6 +53,9 @@ import { GRAPH_DERIVATION_VERSION, rebuildSpaceEdges } from "../graph-build";
  */
 export const DEMO_SPACE_ID = "space-demo";
 
+/** Bump when the seed content changes materially — the next bootstrap re-seeds the shared space. */
+export const DEMO_SEED_VERSION = 1;
+
 export interface DemoRegion {
   slug: string;
   name: string;
@@ -1319,4 +1322,18 @@ export function provisionGuestSpace(q: Queries, humanId: string, spaceId: string
   applyDemoSeed(q, spaceId, humanId, now);
   rebuildSpaceEdges(q, spaceId, now);
   q.recordGraphBackfill(spaceId, GRAPH_DERIVATION_VERSION, now);
+  q.recordDemoSeed(spaceId, DEMO_SEED_VERSION, now);
+}
+
+/**
+ * Re-seed an already-provisioned demo space: wipe it and rebuild from the
+ * current seed. Used when the space is found empty (a judge deleted everything)
+ * or when the stored DEMO_SEED_VERSION is behind the code.
+ */
+export function reseedGuestSpace(q: Queries, humanId: string, spaceId: string, now: number): void {
+  q.purgeSpace(spaceId);
+  applyDemoSeed(q, spaceId, humanId, now);
+  rebuildSpaceEdges(q, spaceId, now);
+  q.recordGraphBackfill(spaceId, GRAPH_DERIVATION_VERSION, now);
+  q.recordDemoSeed(spaceId, DEMO_SEED_VERSION, now);
 }
